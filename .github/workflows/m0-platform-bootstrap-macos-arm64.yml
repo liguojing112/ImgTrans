@@ -66,8 +66,21 @@ jobs:
       - name: Build macOS arm64 application
         run: python prototypes/platform_bootstrap/build.py --target macos-arm64
 
-      - name: Verify macOS arm64 artifact
-        run: python prototypes/platform_bootstrap/verify_artifact.py --target macos-arm64
+      - name: Inspect built artifact
+        run: |
+          echo "=== Bundle structure ==="
+          find prototypes/platform_bootstrap/dist/macos-arm64 -maxdepth 4 -type f | head -50
+          echo ""
+          echo "=== Main executable ==="
+          APP=prototypes/platform_bootstrap/dist/macos-arm64/PlatformBootstrap-macos-arm64.app
+          EXE="$APP/Contents/MacOS/PlatformBootstrap-macos-arm64"
+          ls -la "$EXE" 2>/dev/null || echo "executable not found"
+          echo ""
+          echo "=== Architecture (lipo) ==="
+          lipo -archs "$EXE" 2>&1 || echo "lipo failed"
+          echo ""
+          echo "=== Qt imageformat plugins ==="
+          find "$APP" -path "*/imageformats/*" -type f 2>/dev/null || echo "no imageformats found"
 
       - name: Verify ad-hoc code signature
         run: >-
@@ -80,13 +93,34 @@ jobs:
           prototypes/platform_bootstrap/dist/macos-arm64/PlatformBootstrap-macos-arm64.app
           prototypes/platform_bootstrap/dist/macos-arm64/PlatformBootstrap-macos-arm64.zip
 
+      - name: Verify macOS arm64 artifact
+        id: verify
+        continue-on-error: true
+        run: python prototypes/platform_bootstrap/verify_artifact.py --target macos-arm64
+
+      - name: Determine artifact name
+        if: always()
+        id: artifact-name
+        run: |
+          if [ "${{ steps.verify.outcome }}" = "success" ]; then
+            echo "name=platform-bootstrap-macos-arm64-run${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "name=platform-bootstrap-macos-arm64-diagnostics-run${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Upload application and verification evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: platform-bootstrap-macos-arm64-${{ github.run_number }}
-          if-no-files-found: error
+          name: ${{ steps.artifact-name.outputs.name }}
+          if-no-files-found: warn
           retention-days: 14
           path: |
             prototypes/platform_bootstrap/dist/macos-arm64/PlatformBootstrap-macos-arm64.zip
             prototypes/platform_bootstrap/results/macos-arm64*.json
+
+      - name: Fail if verification did not pass
+        if: always() && steps.verify.outcome != 'success'
+        run: |
+          echo "::error::Artifact verification failed (outcome=${{ steps.verify.outcome }}). See verify step output for details."
+          exit 1

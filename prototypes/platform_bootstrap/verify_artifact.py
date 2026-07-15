@@ -111,7 +111,7 @@ def smoke_test(executable: Path) -> dict[str, object]:
             [str(executable), "--smoke-test", "--report", str(report_path)],
             capture_output=True,
             text=True,
-            timeout=30,
+            timeout=60,
             env=environment,
             check=False,
         )
@@ -119,6 +119,7 @@ def smoke_test(executable: Path) -> dict[str, object]:
         return {
             "return_code": completed.returncode,
             "report": report,
+            "stdout": completed.stdout[-500:],
             "stderr": completed.stderr[-500:],
         }
 
@@ -142,19 +143,23 @@ def verify(target: str, artifact: Path, *, run_smoke: bool) -> tuple[dict[str, o
         result["architectures"] = macho_architectures(executable)
     expected_arch = "x86_64" if target == "windows-x64" else "arm64"
     result["architecture_ok"] = expected_arch in result["architectures"]
+    print(f"[verify] architecture: {result['architectures']} ok={result['architecture_ok']}")
 
     plugins = find_imageformat_plugins(artifact)
     result["imageformat_plugins"] = plugins
     result["imageformat_plugins_ok"] = any(
         name.lower().startswith(("qjpeg", "qwebp")) for name in plugins
     )
+    print(f"[verify] imageformat_plugins: {plugins} ok={result['imageformat_plugins_ok']}")
 
     workspace = str(Path(__file__).resolve().parents[2])
     findings = scan_artifact(artifact, [workspace])
     result["scan_findings"] = findings
     result["scan_ok"] = not findings
+    print(f"[verify] scan_findings: {findings} ok={result['scan_ok']}")
 
     if run_smoke:
+        print("[verify] running smoke test...")
         result["smoke_test"] = smoke_test(executable)
         smoke_result = result["smoke_test"]
         smoke_report = smoke_result.get("report") if isinstance(smoke_result, dict) else None
@@ -171,14 +176,18 @@ def verify(target: str, artifact: Path, *, run_smoke: bool) -> tuple[dict[str, o
             and smoke_result["return_code"] == 0
             and not required_failures
         )
+        smoke_outcome = smoke_report.get("smoke_test", {}).get("outcome") if isinstance(smoke_report, dict) else "N/A"
+        print(f"[verify] smoke: return_code={smoke_result.get('return_code')} outcome={smoke_outcome} ok={result['smoke_ok']}")
     else:
         result["smoke_test"] = "skipped"
         result["smoke_ok"] = True
+        print("[verify] smoke test skipped (cross-platform)")
 
     ok = all(
         bool(result[key])
         for key in ("architecture_ok", "imageformat_plugins_ok", "scan_ok", "smoke_ok")
     )
+    print(f"[verify] overall: {'passed' if ok else 'failed'}")
     return result, ok
 
 

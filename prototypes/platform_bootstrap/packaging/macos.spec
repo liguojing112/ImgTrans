@@ -43,7 +43,7 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
+    upx=False,
     console=False,
     target_arch=target_arch,
     codesign_identity=os.environ.get("PLATFORM_BOOTSTRAP_CODESIGN_IDENTITY"),
@@ -54,7 +54,7 @@ coll = COLLECT(
     a.binaries,
     a.datas,
     strip=False,
-    upx=True,
+    upx=False,
     upx_exclude=[],
     name=app_name,
 )
