@@ -23,6 +23,7 @@ Thumbs.db
 # Project
 output/
 uploads/
+artifacts/
 *.log
 .env
 

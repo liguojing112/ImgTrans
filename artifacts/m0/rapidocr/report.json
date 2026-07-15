@@ -8,7 +8,7 @@
       "matched_regions": 0,
       "character_total": 0,
       "character_errors": 0,
-      "peak_rss_bytes": 22241280,
+      "peak_rss_bytes": 22573056,
       "failed_samples": [],
       "language_code": "bn",
       "detection_recall": null,
@@ -22,12 +22,12 @@
       "matched_regions": 1,
       "character_total": 11,
       "character_errors": 0,
-      "peak_rss_bytes": 22241280,
+      "peak_rss_bytes": 22573056,
       "failed_samples": [],
       "language_code": "en",
       "detection_recall": 1.0,
       "character_accuracy": 1.0,
-      "average_elapsed_ms": 0.010399999155197293,
+      "average_elapsed_ms": 0.008700000762473792,
       "engineering_baseline": "passed"
     }
   ],
@@ -276,5 +276,6 @@
       "initialization_count": 1,
       "load_time_ms": 0.0
     }
-  ]
+  ],
+  "model_files": []
 }

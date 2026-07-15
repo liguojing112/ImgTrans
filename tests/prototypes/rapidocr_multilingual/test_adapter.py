@@ -48,3 +48,9 @@ def test_low_confidence_is_reported_explicitly(tmp_path: Path) -> None:
     route = ModelRouter(Path("prototypes/rapidocr_multilingual/model-config.json")).route("en")
     assert adapter.recognize(image, route)[0].status == "low_confidence"
 
+
+def test_installed_model_inventory_reports_file_sizes() -> None:
+    model_files = RapidOCRAdapter.model_files()
+    assert model_files
+    assert all(item["name"].endswith(".onnx") for item in model_files)
+    assert all(item["size_bytes"] > 0 for item in model_files)

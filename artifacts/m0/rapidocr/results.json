@@ -249,6 +249,7 @@
       "load_time_ms": 0.0
     }
   ],
+  "model_files": [],
   "samples": [
     {
       "sample_id": "fixture-en-001",
@@ -306,8 +307,8 @@
           "status": "ok"
         }
       ],
-      "elapsed_ms": 0.010399999155197293,
-      "peak_rss_bytes": 22241280,
+      "elapsed_ms": 0.008700000762473792,
+      "peak_rss_bytes": 22573056,
       "status": "completed",
       "error": null
     },
@@ -318,7 +319,7 @@
       "expected_regions": [],
       "regions": [],
       "elapsed_ms": null,
-      "peak_rss_bytes": 22241280,
+      "peak_rss_bytes": 22573056,
       "status": "unsupported_language",
       "error": "RapidOCR 3.9.1 official model list has no explicit Bengali recognition route; do not substitute the Devanagari model"
     }

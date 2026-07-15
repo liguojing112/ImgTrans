@@ -2,7 +2,7 @@
   "version": "2026-07-15.1",
   "detector": {
     "engine_type": "onnxruntime",
-    "lang_type": "multi",
+    "lang_type": "ch",
     "model_type": "small",
     "ocr_version": "PP-OCRv6"
   },
@@ -10,7 +10,7 @@
     "ppocrv6-multilingual-small": {
       "recognizer": {
         "engine_type": "onnxruntime",
-        "lang_type": "multi",
+        "lang_type": "ch",
         "model_type": "small",
         "ocr_version": "PP-OCRv6"
       }
@@ -88,4 +88,3 @@
     "sw": {"profile": "ppocrv6-multilingual-small", "scripts": ["Latin"]}
   }
 }
-

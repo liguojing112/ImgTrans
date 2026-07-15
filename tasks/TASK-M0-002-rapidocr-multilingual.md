@@ -1,7 +1,7 @@
 # TASK-M0-002：RapidOCR 25 种语言验证
 
 **里程碑**：M0 技术风险验证
-**状态**：待开始
+**状态**：进行中（验证框架和 Windows 路由加载已完成；25 语种标注集准确率与 macOS arm64 运行待验证）
 **优先级**：P0
 **类型**：独立技术原型
 **关联需求**：FR-OCR-001～007、FR-MODEL-001、NFR-006
@@ -55,8 +55,10 @@
 - `prototypes/rapidocr_multilingual/evaluate.py`
 - `prototypes/rapidocr_multilingual/visualize.py`
 - `prototypes/rapidocr_multilingual/model-config.json`
+- `prototypes/rapidocr_multilingual/requirements.lock`
 - `tests/prototypes/rapidocr_multilingual/test_contracts.py`
 - `tests/prototypes/rapidocr_multilingual/test_router.py`
+- `tests/prototypes/rapidocr_multilingual/test_adapter.py`
 - `tests/prototypes/rapidocr_multilingual/test_evaluate.py`
 - `tests/prototypes/rapidocr_multilingual/fixtures/manifest.json`
 
@@ -69,6 +71,18 @@ python -m pytest tests/prototypes/rapidocr_multilingual -q
 python prototypes/rapidocr_multilingual/run.py --manifest tests/prototypes/rapidocr_multilingual/fixtures/manifest.json --output artifacts/m0/rapidocr
 python prototypes/rapidocr_multilingual/evaluate.py --results artifacts/m0/rapidocr/results.json
 ```
+
+## 当前验证结果（2026-07-15）
+
+- 已实现与 UI 解耦的命令行验证框架、统一四点区域契约、模型路由、延迟/RSS/准确率评估、可视化和模型文件体积清单。
+- 25 个内部语言代码均有显式路由状态；24 种映射到六类本地识别配置，孟加拉语因 RapidOCR 3.9.1 官方模型表无明确识别路径而显式报告为未覆盖，不会错误使用天城文模型。
+- Windows x64 已验证 `PP-OCRv6 multilingual small`、`PP-OCRv5 cyrillic/korean/thai/arabic/devanagari mobile` 六类配置均能初始化并执行；每类模型在同一适配器实例中只初始化一次。
+- 官方中文样例识别得到 18 个区域，区域契约和低置信/脚本不匹配状态输出正常；该样例只属于运行时烟雾测试，不替代逐语言准确率验收。
+- RapidOCR 阿拉伯路径需要未被主包硬依赖覆盖的 `python-bidi`，已在原型锁文件中显式固定。
+- 为保留 macOS 13 arm64 安装能力，原型暂锁 `onnxruntime==1.23.2`；更新版本前必须重新检查 wheel 的最低 macOS 版本。
+- 已通过 pip 跨平台解析确认锁文件中的八个直接依赖均有兼容 macOS 13 arm64 的 wheel；OpenCV 固定为与 NumPy 1.26.4 兼容的 4.11.0.86，实际导入、推理和打包仍须由 macOS arm64 CI 验证。
+- 已新增 GitHub Actions `macos-14` arm64 工作流，自动运行测试、RapidOCR 自检和六类模型加载并上传运行证据；首次运行仍待代码推送。
+- 合同 fixture 仅验证工具链，不作为 OCR 准确率证据。正式完成仍需 25 语种各至少 20 个授权标注区域、三轮 RSS 测试和 macOS arm64 CI 结果。
 
 ## 交付物
 

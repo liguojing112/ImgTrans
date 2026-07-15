@@ -93,6 +93,7 @@ def run_manifest(manifest_path: Path, output_dir: Path, adapter_name: str = "aut
         "router_version": router.version,
         "coverage": router.coverage_matrix(),
         "models": models,
+        "model_files": adapter.model_files(),
         "samples": sample_results,
     }
     results_path = output_dir / "results.json"
@@ -124,4 +125,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

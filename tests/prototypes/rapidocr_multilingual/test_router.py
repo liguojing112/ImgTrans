@@ -43,3 +43,13 @@ def test_out_of_scope_language_is_rejected() -> None:
     with pytest.raises(RoutingError, match="outside"):
         ModelRouter(CONFIG).route("nl")
 
+
+def test_macos_arm64_workflow_runs_the_runtime_profiles() -> None:
+    workflow = Path(".github/workflows/m0-rapidocr-macos-arm64.yml").read_text(encoding="utf-8")
+    assert "runs-on: macos-14" in workflow
+    assert 'python-version: "3.11"' in workflow
+    assert "platform.machine().lower()" in workflow
+    assert "prototypes/rapidocr_multilingual/requirements.lock" in workflow
+    assert "python -m pytest tests/prototypes/rapidocr_multilingual -q" in workflow
+    assert '("zh-Hans", "ru", "ko", "th", "ar", "hi")' in workflow
+    assert "actions/upload-artifact@v4" in workflow

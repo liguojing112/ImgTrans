@@ -122,6 +122,7 @@ def evaluate_results(results: dict[str, Any], iou_threshold: float = 0.5) -> dic
         "language_metrics": language_metrics,
         "coverage": results.get("coverage", []),
         "models": results.get("models", []),
+        "model_files": results.get("model_files", []),
     }
 
 

@@ -1,0 +1,112 @@
+name: M0 RapidOCR macOS arm64
+
+on:
+  push:
+    paths:
+      - ".github/workflows/m0-rapidocr-macos-arm64.yml"
+      - "prototypes/rapidocr_multilingual/**"
+      - "tests/prototypes/rapidocr_multilingual/**"
+  pull_request:
+    paths:
+      - ".github/workflows/m0-rapidocr-macos-arm64.yml"
+      - "prototypes/rapidocr_multilingual/**"
+      - "tests/prototypes/rapidocr_multilingual/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: m0-rapidocr-macos-arm64-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-runtime:
+    runs-on: macos-14
+    timeout-minutes: 45
+    env:
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: prototypes/rapidocr_multilingual/requirements.lock
+
+      - name: Assert Apple Silicon runner
+        run: |
+          python - <<'PY'
+          import platform
+          machine = platform.machine().lower()
+          if machine not in {"arm64", "aarch64"}:
+              raise SystemExit(f"Expected arm64 runner, got {machine}")
+          print(platform.platform())
+          PY
+
+      - name: Install locked prototype dependencies
+        run: python -m pip install -r prototypes/rapidocr_multilingual/requirements.lock
+
+      - name: Run prototype tests
+        run: python -m pytest tests/prototypes/rapidocr_multilingual -q
+
+      - name: Run bundled-model self-check
+        run: rapidocr check
+
+      - name: Download Apache-licensed RapidOCR sample
+        run: |
+          mkdir -p artifacts/m0/rapidocr-macos-arm64
+          curl --fail --location --retry 3 \
+            --output artifacts/m0/rapidocr-macos-arm64/ch_en_num.jpg \
+            https://github.com/RapidAI/RapidOCR/releases/download/v1.1.0/ch_en_num.jpg
+
+      - name: Load every recognition profile
+        run: |
+          python - <<'PY'
+          import json
+          import platform
+          from pathlib import Path
+
+          from prototypes.rapidocr_multilingual.adapter import RapidOCRAdapter
+          from prototypes.rapidocr_multilingual.model_router import ModelRouter
+
+          output_dir = Path("artifacts/m0/rapidocr-macos-arm64")
+          image = output_dir / "ch_en_num.jpg"
+          router = ModelRouter(Path("prototypes/rapidocr_multilingual/model-config.json"))
+          adapter = RapidOCRAdapter()
+          probes = {}
+          for language in ("zh-Hans", "ru", "ko", "th", "ar", "hi"):
+              route = router.route(language)
+              regions = adapter.recognize(image, route)
+              probes[language] = {
+                  "model_id": route.model_id,
+                  "region_count": len(regions),
+                  "status": "loaded",
+              }
+          evidence = {
+              "platform": platform.platform(),
+              "machine": platform.machine(),
+              "probes": probes,
+              "initialization_counts": adapter.initialization_counts,
+              "load_times_ms": adapter.load_times_ms,
+              "model_files": adapter.model_files(),
+          }
+          if set(adapter.initialization_counts.values()) != {1}:
+              raise SystemExit("A recognition profile was initialized more than once")
+          (output_dir / "runtime-probe.json").write_text(
+              json.dumps(evidence, ensure_ascii=False, indent=2),
+              encoding="utf-8",
+          )
+          print(json.dumps(evidence, ensure_ascii=False))
+          PY
+
+      - name: Upload runtime evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: m0-rapidocr-macos-arm64
+          path: artifacts/m0/rapidocr-macos-arm64/runtime-probe.json
+          if-no-files-found: ignore
+          retention-days: 14
+

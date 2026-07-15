@@ -29,12 +29,26 @@ class RapidOCRAdapter:
     @staticmethod
     def _default_engine_factory(params: dict[str, str]) -> Any:
         try:
-            from rapidocr import RapidOCR
+            from rapidocr import EngineType, LangDet, LangRec, ModelType, OCRVersion, RapidOCR
         except ImportError as exc:
             raise OCRRuntimeError(
                 "RapidOCR runtime is not installed; install requirements.lock for this prototype"
             ) from exc
-        return RapidOCR(params=params)
+        enum_fields = {
+            "Det.engine_type": EngineType,
+            "Det.lang_type": LangDet,
+            "Det.model_type": ModelType,
+            "Det.ocr_version": OCRVersion,
+            "Rec.engine_type": EngineType,
+            "Rec.lang_type": LangRec,
+            "Rec.model_type": ModelType,
+            "Rec.ocr_version": OCRVersion,
+        }
+        resolved = {
+            key: enum_fields[key](value) if key in enum_fields else value
+            for key, value in params.items()
+        }
+        return RapidOCR(params=resolved)
 
     def _engine(self, route: ModelRoute) -> Any:
         if not route.supported or route.model_id is None:
@@ -85,6 +99,18 @@ class RapidOCRAdapter:
             )
         return tuple(regions)
 
+    @staticmethod
+    def model_files() -> list[dict[str, Any]]:
+        try:
+            import rapidocr
+        except ImportError:
+            return []
+        model_dir = Path(rapidocr.__file__).resolve().parent / "models"
+        return [
+            {"name": path.name, "size_bytes": path.stat().st_size}
+            for path in sorted(model_dir.glob("*.onnx"))
+        ]
+
 
 class FixtureAdapter:
     def __init__(self) -> None:
@@ -97,6 +123,10 @@ class FixtureAdapter:
         self.initialization_counts[route.model_id] = 1
         self.load_times_ms.setdefault(route.model_id, 0.0)
         return sample.fixture_regions
+
+    @staticmethod
+    def model_files() -> list[dict[str, Any]]:
+        return []
 
 
 def scripts_in_text(text: str) -> set[str]:
@@ -123,4 +153,3 @@ def scripts_in_text(text: str) -> set[str]:
         elif "LATIN" in name:
             scripts.add("Latin")
     return scripts
-
