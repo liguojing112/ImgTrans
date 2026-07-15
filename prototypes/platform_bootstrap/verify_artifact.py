@@ -70,6 +70,25 @@ def find_imageformat_plugins(artifact: Path) -> list[str]:
     return sorted(set(plugins))
 
 
+def _plugin_base_name(filename: str) -> str:
+    name = filename.lower()
+    if name.startswith("lib"):
+        name = name[3:]
+    for ext in (".dylib", ".dll", ".so"):
+        if name.endswith(ext):
+            name = name[: -len(ext)]
+            break
+    return name
+
+
+REQUIRED_IMAGEFORMAT_BASES = frozenset({"qjpeg", "qwebp"})
+
+
+def imageformat_plugins_ok(plugins: list[str]) -> bool:
+    bases = {_plugin_base_name(name) for name in plugins}
+    return bool(REQUIRED_IMAGEFORMAT_BASES & bases)
+
+
 def _needle_variants(value: str) -> Iterable[bytes]:
     variants = {value, value.replace("\\", "/")}
     for item in variants:
@@ -147,9 +166,7 @@ def verify(target: str, artifact: Path, *, run_smoke: bool) -> tuple[dict[str, o
 
     plugins = find_imageformat_plugins(artifact)
     result["imageformat_plugins"] = plugins
-    result["imageformat_plugins_ok"] = any(
-        name.lower().startswith(("qjpeg", "qwebp")) for name in plugins
-    )
+    result["imageformat_plugins_ok"] = imageformat_plugins_ok(plugins)
     print(f"[verify] imageformat_plugins: {plugins} ok={result['imageformat_plugins_ok']}")
 
     workspace = str(Path(__file__).resolve().parents[2])

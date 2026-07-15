@@ -14,7 +14,11 @@ from prototypes.platform_bootstrap.build import (
     detect_current_target,
     validate_native_target,
 )
-from prototypes.platform_bootstrap.verify_artifact import pe_machine
+from prototypes.platform_bootstrap.verify_artifact import (
+    _plugin_base_name,
+    imageformat_plugins_ok,
+    pe_machine,
+)
 from prototypes.platform_bootstrap.window import BootstrapWindow
 
 
@@ -108,3 +112,55 @@ def test_macos_arm64_workflow_has_required_build_gates() -> None:
 @pytest.mark.skipif(sys.platform != "win32", reason="PE validation only runs on Windows")
 def test_pe_parser_identifies_current_python_as_x64() -> None:
     assert pe_machine(Path(sys.executable)) == "x86_64"
+
+
+class TestPluginBaseName:
+    def test_windows_dll(self) -> None:
+        assert _plugin_base_name("qjpeg.dll") == "qjpeg"
+
+    def test_macos_dylib(self) -> None:
+        assert _plugin_base_name("libqjpeg.dylib") == "qjpeg"
+
+    def test_macos_webp(self) -> None:
+        assert _plugin_base_name("libqwebp.dylib") == "qwebp"
+
+    def test_linux_so(self) -> None:
+        assert _plugin_base_name("libqjpeg.so") == "qjpeg"
+
+    def test_no_extension(self) -> None:
+        assert _plugin_base_name("qjpeg") == "qjpeg"
+
+    def test_case_insensitive(self) -> None:
+        assert _plugin_base_name("LibQJPEG.DYLIB") == "qjpeg"
+
+
+class TestImageformatPluginsOk:
+    def test_windows_plugins_pass(self) -> None:
+        assert imageformat_plugins_ok(["qjpeg.dll", "qwebp.dll"])
+
+    def test_macos_plugins_pass(self) -> None:
+        assert imageformat_plugins_ok(["libqjpeg.dylib", "libqwebp.dylib"])
+
+    def test_mixed_platform_plugins_pass(self) -> None:
+        assert imageformat_plugins_ok(["libqjpeg.dylib", "qwebp.dll"])
+
+    def test_only_jpeg_suffices(self) -> None:
+        assert imageformat_plugins_ok(["libqjpeg.dylib"])
+
+    def test_only_webp_suffices(self) -> None:
+        assert imageformat_plugins_ok(["qwebp.dll"])
+
+    def test_empty_plugins_fail(self) -> None:
+        assert not imageformat_plugins_ok([])
+
+    def test_unrelated_plugins_fail(self) -> None:
+        assert not imageformat_plugins_ok(["qgif.dll", "qsvg.dll"])
+
+    def test_macos_full_set_from_ci(self) -> None:
+        macos_plugins = [
+            "libqgif.dylib", "libqicns.dylib", "libqico.dylib",
+            "libqjpeg.dylib", "libqmacHeif.dylib", "libqmacjp2.dylib",
+            "libqpdf.dylib", "libqsvg.dylib", "libqtga.dylib",
+            "libqtiff.dylib", "libqwbmp.dylib", "libqwebp.dylib",
+        ]
+        assert imageformat_plugins_ok(macos_plugins)
