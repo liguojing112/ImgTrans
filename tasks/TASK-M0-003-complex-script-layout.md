@@ -1,7 +1,7 @@
 # TASK-M0-003：复杂脚本与 RTL 排版验证
 
 **里程碑**：M0 技术风险验证
-**状态**：待开始
+**状态**：实施中（Windows x64 已通过；macOS arm64 CI 与母语视觉审阅待完成）
 **优先级**：P0
 **类型**：独立技术原型
 **关联需求**：FR-LAYOUT-002、FR-LAYOUT-006、FR-LAYOUT-007
@@ -52,6 +52,11 @@
 - `prototypes/complex_script_layout/qt_backend.py`
 - `prototypes/complex_script_layout/line_breaker.py`
 - `prototypes/complex_script_layout/compare.py`
+- `prototypes/complex_script_layout/prepare_fonts.py`
+- `prototypes/complex_script_layout/verify_runtime_evidence.py`
+- `prototypes/complex_script_layout/font-sources.json`
+- `prototypes/complex_script_layout/requirements.lock`
+- `.github/workflows/m0-complex-layout-macos-arm64.yml`
 - `tests/prototypes/complex_script_layout/test_bidi.py`
 - `tests/prototypes/complex_script_layout/test_shaping.py`
 - `tests/prototypes/complex_script_layout/test_line_breaking.py`
@@ -72,6 +77,17 @@ python prototypes/complex_script_layout/compare.py --results artifacts/m0/comple
 - 六种重点语言的视觉基准和结构化测试结果。
 - 首选/替代 shaping 后端及 Windows x64/macOS arm64 打包风险结论。
 - 正式布局接口建议。
+
+## 当前验证证据（2026-07-15）
+
+- 固定 Noto Fonts 提交 `ffebf8c1ee449e544955a7e813c54f9b73848eac`，5 个字体文件均记录 OFL-1.1 许可来源与 SHA-256。
+- Windows x64 已执行六种语言各 20 例，共 120 例；Qt 与 HarfBuzz 两个后端均完成 120/120，失败为 0。
+- 两后端的行数与基础方向比较均为 120/120 一致；缺字、字素边界断行和横向越界结构检查违规为 0。
+- Windows 结构签名为 `2fff0ecb950920b98600e0a076c4106db17a5c9e2d2db1edbb74d6000bf5ba87`；证据位于忽略提交的 `artifacts/m0/complex-layout/run-003/`。
+- 首选后端为通过 UI 无关接口封装的 Qt `QTextLayout`；替代后端为 HarfBuzz + python-bidi + 字素安全贪心断行。
+- 已验证 PySide6 6.11.1 和 uharfbuzz 0.55.0 均存在可由 macOS 13 arm64 Python 使用的官方 wheel。第三方依赖采用同时含 arm64 切片的 wheel 不改变本项目仅生成 arm64 应用产物的范围。
+- macOS arm64 必须通过新增 GitHub Actions 工作流生成运行证据，并与 Windows 结构签名比较后，才能关闭跨平台验收项。
+- 阿拉伯语、乌尔都语、波斯语、印地语、孟加拉语和泰语调试图仍需母语审阅；自动结构检查不替代语言正确性审核。
 
 ## 审查边界
 
