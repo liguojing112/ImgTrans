@@ -1,0 +1,205 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-07-15T07:50:44.542331+00:00",
+  "target": "windows-x64",
+  "artifact_name": "PlatformBootstrap-windows-x64",
+  "artifact_exists": true,
+  "executable_exists": true,
+  "architectures": [
+    "x86_64"
+  ],
+  "architecture_ok": true,
+  "imageformat_plugins": [
+    "qgif.dll",
+    "qicns.dll",
+    "qico.dll",
+    "qjpeg.dll",
+    "qpdf.dll",
+    "qsvg.dll",
+    "qtga.dll",
+    "qtiff.dll",
+    "qwbmp.dll",
+    "qwebp.dll"
+  ],
+  "imageformat_plugins_ok": true,
+  "scan_findings": [],
+  "scan_ok": true,
+  "smoke_test": {
+    "return_code": 0,
+    "report": {
+      "schema_version": 1,
+      "generated_at": "2026-07-15T07:50:45.936029+00:00",
+      "platform": {
+        "system": "Windows",
+        "release": "10",
+        "machine": "AMD64",
+        "architecture": "64bit"
+      },
+      "python": {
+        "version": "3.11.9",
+        "implementation": "CPython",
+        "executable_name": "PlatformBootstrap-windows-x64.exe"
+      },
+      "environment": {
+        "frozen": true,
+        "qt_platform": "offscreen"
+      },
+      "dependencies": [
+        {
+          "key": "pyside6",
+          "module": "PySide6",
+          "distribution": "PySide6",
+          "required": true,
+          "category": "ui",
+          "alternative": null,
+          "version": null,
+          "installed": true,
+          "detail": {
+            "qt_version": "6.11.1",
+            "image_formats": [
+              "bmp",
+              "cur",
+              "gif",
+              "icns",
+              "ico",
+              "jfif",
+              "jpeg",
+              "jpg",
+              "pbm",
+              "pdf",
+              "pgm",
+              "png",
+              "ppm",
+              "svg",
+              "svgz",
+              "tga",
+              "tif",
+              "tiff",
+              "wbmp",
+              "webp",
+              "xbm",
+              "xpm"
+            ]
+          },
+          "status": "loaded",
+          "load_seconds": 0.0105
+        },
+        {
+          "key": "pillow",
+          "module": "PIL",
+          "distribution": "Pillow",
+          "required": true,
+          "category": "image",
+          "alternative": null,
+          "version": null,
+          "installed": true,
+          "detail": {
+            "pillow_version": "12.3.0"
+          },
+          "status": "loaded",
+          "load_seconds": 0.0004
+        },
+        {
+          "key": "opencv",
+          "module": "cv2",
+          "distribution": "opencv-python",
+          "required": true,
+          "category": "image",
+          "alternative": null,
+          "version": null,
+          "installed": true,
+          "detail": {
+            "opencv_version": "4.13.0"
+          },
+          "status": "loaded",
+          "load_seconds": 0.0803
+        },
+        {
+          "key": "rapidocr_onnxruntime",
+          "module": "rapidocr_onnxruntime",
+          "distribution": "rapidocr-onnxruntime",
+          "required": false,
+          "category": "ocr-candidate",
+          "alternative": "TASK-M0-002 will select a locally packaged RapidOCR backend.",
+          "version": null,
+          "installed": false,
+          "status": "missing"
+        },
+        {
+          "key": "rapidocr",
+          "module": "rapidocr",
+          "distribution": "rapidocr",
+          "required": false,
+          "category": "ocr-candidate",
+          "alternative": "TASK-M0-002 will select a locally packaged RapidOCR backend.",
+          "version": null,
+          "installed": false,
+          "status": "missing"
+        },
+        {
+          "key": "onnxruntime",
+          "module": "onnxruntime",
+          "distribution": "onnxruntime",
+          "required": false,
+          "category": "inference-candidate",
+          "alternative": "Use the platform-compatible inference backend selected by TASK-M0-002.",
+          "version": null,
+          "installed": false,
+          "status": "missing"
+        },
+        {
+          "key": "torch",
+          "module": "torch",
+          "distribution": "torch",
+          "required": false,
+          "category": "inpainting-candidate",
+          "alternative": "TASK-M0-004 may select a lighter local runtime behind InpaintingAdapter.",
+          "version": null,
+          "installed": false,
+          "status": "missing"
+        },
+        {
+          "key": "pyinstaller",
+          "module": "PyInstaller",
+          "distribution": "pyinstaller",
+          "required": false,
+          "category": "packaging-tool",
+          "alternative": "Build-time only; it is intentionally absent from the packaged application.",
+          "version": null,
+          "installed": false,
+          "status": "missing"
+        },
+        {
+          "key": "pytest",
+          "module": "pytest",
+          "distribution": "pytest",
+          "required": false,
+          "category": "test-tool",
+          "alternative": "Test-time only; it is intentionally absent from the packaged application.",
+          "version": null,
+          "installed": false,
+          "status": "missing"
+        },
+        {
+          "key": "pytest_qt",
+          "module": "pytestqt",
+          "distribution": "pytest-qt",
+          "required": false,
+          "category": "test-tool",
+          "alternative": "Test-time only; it is intentionally absent from the packaged application.",
+          "version": null,
+          "installed": false,
+          "status": "missing"
+        }
+      ],
+      "smoke_test": {
+        "outcome": "finished",
+        "window_created": true,
+        "worker_completed": true
+      }
+    },
+    "stderr": ""
+  },
+  "runtime_dependency_failures": [],
+  "smoke_ok": true
+}

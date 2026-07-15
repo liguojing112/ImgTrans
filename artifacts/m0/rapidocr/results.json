@@ -1,0 +1,326 @@
+{
+  "schema_version": 1,
+  "dataset_kind": "contract-fixture-not-ocr-evidence",
+  "adapter": "fixture",
+  "router_version": "2026-07-15.1",
+  "coverage": [
+    {
+      "language_code": "zh-Hans",
+      "supported": true,
+      "model_id": "ppocrv6-multilingual-small",
+      "scripts": [
+        "Han",
+        "Latin"
+      ],
+      "reason": null
+    },
+    {
+      "language_code": "zh-Hant",
+      "supported": true,
+      "model_id": "ppocrv6-multilingual-small",
+      "scripts": [
+        "Han",
+        "Latin"
+      ],
+      "reason": null
+    },
+    {
+      "language_code": "ru",
+      "supported": true,
+      "model_id": "ppocrv5-cyrillic-mobile",
+      "scripts": [
+        "Cyrillic",
+        "Latin"
+      ],
+      "reason": null
+    },
+    {
+      "language_code": "ja",
+      "supported": true,
+      "model_id": "ppocrv6-multilingual-small",
+      "scripts": [
+        "Han",
+        "Japanese",
+        "Latin"
+      ],
+      "reason": null
+    },
+    {
+      "language_code": "ko",
+      "supported": true,
+      "model_id": "ppocrv5-korean-mobile",
+      "scripts": [
+        "Hangul",
+        "Han",
+        "Latin"
+      ],
+      "reason": null
+    },
+    {
+      "language_code": "en",
+      "supported": true,
+      "model_id": "ppocrv6-multilingual-small",
+      "scripts": [
+        "Latin"
+      ],
+      "reason": null
+    },
+    {
+      "language_code": "th",
+      "supported": true,
+      "model_id": "ppocrv5-thai-mobile",
+      "scripts": [
+        "Thai",
+        "Latin"
+      ],
+      "reason": null
+    },
+    {
+      "language_code": "ar",
+      "supported": true,
+      "model_id": "ppocrv5-arabic-mobile",
+      "scripts": [
+        "Arabic",
+        "Latin"
+      ],
+      "reason": null
+    },
+    {
+      "language_code": "vi",
+      "supported": true,
+      "model_id": "ppocrv6-multilingual-small",
+      "scripts": [
+        "Latin"
+      ],
+      "reason": null
+    },
+    {
+      "language_code": "it",
+      "supported": true,
+      "model_id": "ppocrv6-multilingual-small",
+      "scripts": [
+        "Latin"
+      ],
+      "reason": null
+    },
+    {
+      "language_code": "de",
+      "supported": true,
+      "model_id": "ppocrv6-multilingual-small",
+      "scripts": [
+        "Latin"
+      ],
+      "reason": null
+    },
+    {
+      "language_code": "id",
+      "supported": true,
+      "model_id": "ppocrv6-multilingual-small",
+      "scripts": [
+        "Latin"
+      ],
+      "reason": null
+    },
+    {
+      "language_code": "pt-PT",
+      "supported": true,
+      "model_id": "ppocrv6-multilingual-small",
+      "scripts": [
+        "Latin"
+      ],
+      "reason": null
+    },
+    {
+      "language_code": "fil",
+      "supported": true,
+      "model_id": "ppocrv6-multilingual-small",
+      "scripts": [
+        "Latin"
+      ],
+      "reason": null
+    },
+    {
+      "language_code": "pt-BR",
+      "supported": true,
+      "model_id": "ppocrv6-multilingual-small",
+      "scripts": [
+        "Latin"
+      ],
+      "reason": null
+    },
+    {
+      "language_code": "pl",
+      "supported": true,
+      "model_id": "ppocrv6-multilingual-small",
+      "scripts": [
+        "Latin"
+      ],
+      "reason": null
+    },
+    {
+      "language_code": "ms",
+      "supported": true,
+      "model_id": "ppocrv6-multilingual-small",
+      "scripts": [
+        "Latin"
+      ],
+      "reason": null
+    },
+    {
+      "language_code": "hi",
+      "supported": true,
+      "model_id": "ppocrv5-devanagari-mobile",
+      "scripts": [
+        "Devanagari",
+        "Latin"
+      ],
+      "reason": null
+    },
+    {
+      "language_code": "es",
+      "supported": true,
+      "model_id": "ppocrv6-multilingual-small",
+      "scripts": [
+        "Latin"
+      ],
+      "reason": null
+    },
+    {
+      "language_code": "fr",
+      "supported": true,
+      "model_id": "ppocrv6-multilingual-small",
+      "scripts": [
+        "Latin"
+      ],
+      "reason": null
+    },
+    {
+      "language_code": "bn",
+      "supported": false,
+      "model_id": null,
+      "scripts": [
+        "Bengali"
+      ],
+      "reason": "RapidOCR 3.9.1 official model list has no explicit Bengali recognition route; do not substitute the Devanagari model"
+    },
+    {
+      "language_code": "ur",
+      "supported": true,
+      "model_id": "ppocrv5-arabic-mobile",
+      "scripts": [
+        "Arabic",
+        "Latin"
+      ],
+      "reason": null
+    },
+    {
+      "language_code": "tr",
+      "supported": true,
+      "model_id": "ppocrv6-multilingual-small",
+      "scripts": [
+        "Latin"
+      ],
+      "reason": null
+    },
+    {
+      "language_code": "fa",
+      "supported": true,
+      "model_id": "ppocrv5-arabic-mobile",
+      "scripts": [
+        "Arabic",
+        "Latin"
+      ],
+      "reason": null
+    },
+    {
+      "language_code": "sw",
+      "supported": true,
+      "model_id": "ppocrv6-multilingual-small",
+      "scripts": [
+        "Latin"
+      ],
+      "reason": null
+    }
+  ],
+  "models": [
+    {
+      "model_id": "ppocrv6-multilingual-small",
+      "initialization_count": 1,
+      "load_time_ms": 0.0
+    }
+  ],
+  "samples": [
+    {
+      "sample_id": "fixture-en-001",
+      "language_code": "en",
+      "model_id": "ppocrv6-multilingual-small",
+      "expected_regions": [
+        {
+          "polygon": [
+            [
+              10.0,
+              10.0
+            ],
+            [
+              110.0,
+              10.0
+            ],
+            [
+              110.0,
+              40.0
+            ],
+            [
+              10.0,
+              40.0
+            ]
+          ],
+          "text": "Summer sale",
+          "difficulty": "clear_print"
+        }
+      ],
+      "regions": [
+        {
+          "polygon": [
+            [
+              10.0,
+              10.0
+            ],
+            [
+              110.0,
+              10.0
+            ],
+            [
+              110.0,
+              40.0
+            ],
+            [
+              10.0,
+              40.0
+            ]
+          ],
+          "text": "Summer sale",
+          "confidence": 0.99,
+          "language_code": "en",
+          "language_confidence": 1.0,
+          "model_id": "ppocrv6-multilingual-small",
+          "status": "ok"
+        }
+      ],
+      "elapsed_ms": 0.010399999155197293,
+      "peak_rss_bytes": 22241280,
+      "status": "completed",
+      "error": null
+    },
+    {
+      "sample_id": "fixture-bn-unsupported",
+      "language_code": "bn",
+      "model_id": null,
+      "expected_regions": [],
+      "regions": [],
+      "elapsed_ms": null,
+      "peak_rss_bytes": 22241280,
+      "status": "unsupported_language",
+      "error": "RapidOCR 3.9.1 official model list has no explicit Bengali recognition route; do not substitute the Devanagari model"
+    }
+  ]
+}

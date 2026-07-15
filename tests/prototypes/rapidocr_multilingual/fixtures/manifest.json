@@ -1,0 +1,40 @@
+{
+  "dataset_kind": "contract-fixture-not-ocr-evidence",
+  "adapter": "fixture",
+  "samples": [
+    {
+      "id": "fixture-en-001",
+      "image": null,
+      "language_code": "en",
+      "script": "Latin",
+      "license": "synthetic metadata fixture",
+      "expected_regions": [
+        {
+          "polygon": [[10, 10], [110, 10], [110, 40], [10, 40]],
+          "text": "Summer sale",
+          "difficulty": "clear_print"
+        }
+      ],
+      "fixture_regions": [
+        {
+          "polygon": [[10, 10], [110, 10], [110, 40], [10, 40]],
+          "text": "Summer sale",
+          "confidence": 0.99,
+          "language_code": "en",
+          "language_confidence": 1.0,
+          "model_id": "ppocrv6-multilingual-small",
+          "status": "ok"
+        }
+      ]
+    },
+    {
+      "id": "fixture-bn-unsupported",
+      "image": null,
+      "language_code": "bn",
+      "script": "Bengali",
+      "license": "synthetic metadata fixture",
+      "expected_regions": [],
+      "fixture_regions": []
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-07-15T06:51:08.437733+00:00",
+  "target": "windows-x64",
+  "profile": "ui",
+  "host_target": "windows-x64",
+  "python": "3.11.9",
+  "status": "succeeded",
+  "return_code": 0
+}

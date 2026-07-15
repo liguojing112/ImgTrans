@@ -1,0 +1,91 @@
+{
+  "version": "2026-07-15.1",
+  "detector": {
+    "engine_type": "onnxruntime",
+    "lang_type": "multi",
+    "model_type": "small",
+    "ocr_version": "PP-OCRv6"
+  },
+  "profiles": {
+    "ppocrv6-multilingual-small": {
+      "recognizer": {
+        "engine_type": "onnxruntime",
+        "lang_type": "multi",
+        "model_type": "small",
+        "ocr_version": "PP-OCRv6"
+      }
+    },
+    "ppocrv5-cyrillic-mobile": {
+      "recognizer": {
+        "engine_type": "onnxruntime",
+        "lang_type": "cyrillic",
+        "model_type": "mobile",
+        "ocr_version": "PP-OCRv5"
+      }
+    },
+    "ppocrv5-korean-mobile": {
+      "recognizer": {
+        "engine_type": "onnxruntime",
+        "lang_type": "korean",
+        "model_type": "mobile",
+        "ocr_version": "PP-OCRv5"
+      }
+    },
+    "ppocrv5-thai-mobile": {
+      "recognizer": {
+        "engine_type": "onnxruntime",
+        "lang_type": "th",
+        "model_type": "mobile",
+        "ocr_version": "PP-OCRv5"
+      }
+    },
+    "ppocrv5-arabic-mobile": {
+      "recognizer": {
+        "engine_type": "onnxruntime",
+        "lang_type": "arabic",
+        "model_type": "mobile",
+        "ocr_version": "PP-OCRv5"
+      }
+    },
+    "ppocrv5-devanagari-mobile": {
+      "recognizer": {
+        "engine_type": "onnxruntime",
+        "lang_type": "devanagari",
+        "model_type": "mobile",
+        "ocr_version": "PP-OCRv5"
+      }
+    }
+  },
+  "languages": {
+    "zh-Hans": {"profile": "ppocrv6-multilingual-small", "scripts": ["Han", "Latin"]},
+    "zh-Hant": {"profile": "ppocrv6-multilingual-small", "scripts": ["Han", "Latin"]},
+    "ru": {"profile": "ppocrv5-cyrillic-mobile", "scripts": ["Cyrillic", "Latin"]},
+    "ja": {"profile": "ppocrv6-multilingual-small", "scripts": ["Han", "Japanese", "Latin"]},
+    "ko": {"profile": "ppocrv5-korean-mobile", "scripts": ["Hangul", "Han", "Latin"]},
+    "en": {"profile": "ppocrv6-multilingual-small", "scripts": ["Latin"]},
+    "th": {"profile": "ppocrv5-thai-mobile", "scripts": ["Thai", "Latin"]},
+    "ar": {"profile": "ppocrv5-arabic-mobile", "scripts": ["Arabic", "Latin"]},
+    "vi": {"profile": "ppocrv6-multilingual-small", "scripts": ["Latin"]},
+    "it": {"profile": "ppocrv6-multilingual-small", "scripts": ["Latin"]},
+    "de": {"profile": "ppocrv6-multilingual-small", "scripts": ["Latin"]},
+    "id": {"profile": "ppocrv6-multilingual-small", "scripts": ["Latin"]},
+    "pt-PT": {"profile": "ppocrv6-multilingual-small", "scripts": ["Latin"]},
+    "fil": {"profile": "ppocrv6-multilingual-small", "scripts": ["Latin"]},
+    "pt-BR": {"profile": "ppocrv6-multilingual-small", "scripts": ["Latin"]},
+    "pl": {"profile": "ppocrv6-multilingual-small", "scripts": ["Latin"]},
+    "ms": {"profile": "ppocrv6-multilingual-small", "scripts": ["Latin"]},
+    "hi": {"profile": "ppocrv5-devanagari-mobile", "scripts": ["Devanagari", "Latin"]},
+    "es": {"profile": "ppocrv6-multilingual-small", "scripts": ["Latin"]},
+    "fr": {"profile": "ppocrv6-multilingual-small", "scripts": ["Latin"]},
+    "bn": {
+      "profile": null,
+      "scripts": ["Bengali"],
+      "reason": "RapidOCR 3.9.1 official model list has no explicit Bengali recognition route; do not substitute the Devanagari model"
+    },
+    "ur": {"profile": "ppocrv5-arabic-mobile", "scripts": ["Arabic", "Latin"]},
+    "tr": {"profile": "ppocrv6-multilingual-small", "scripts": ["Latin"]},
+    "fa": {"profile": "ppocrv5-arabic-mobile", "scripts": ["Arabic", "Latin"]},
+    "sw": {"profile": "ppocrv6-multilingual-small", "scripts": ["Latin"]}
+  }
+}
+

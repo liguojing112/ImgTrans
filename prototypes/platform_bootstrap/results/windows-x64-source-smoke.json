@@ -1,0 +1,185 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-07-15T06:44:43.178224+00:00",
+  "platform": {
+    "system": "Windows",
+    "release": "10",
+    "machine": "AMD64",
+    "architecture": "64bit"
+  },
+  "python": {
+    "version": "3.11.9",
+    "implementation": "CPython",
+    "executable_name": "python.exe"
+  },
+  "environment": {
+    "frozen": false,
+    "qt_platform": "offscreen"
+  },
+  "dependencies": [
+    {
+      "key": "pyside6",
+      "module": "PySide6",
+      "distribution": "PySide6",
+      "required": true,
+      "category": "ui",
+      "alternative": null,
+      "version": "6.11.1",
+      "installed": true,
+      "detail": {
+        "qt_version": "6.11.1",
+        "image_formats": [
+          "bmp",
+          "cur",
+          "gif",
+          "icns",
+          "ico",
+          "jfif",
+          "jpeg",
+          "jpg",
+          "pbm",
+          "pdf",
+          "pgm",
+          "png",
+          "ppm",
+          "svg",
+          "svgz",
+          "tga",
+          "tif",
+          "tiff",
+          "wbmp",
+          "webp",
+          "xbm",
+          "xpm"
+        ]
+      },
+      "status": "loaded",
+      "load_seconds": 0.0087
+    },
+    {
+      "key": "pillow",
+      "module": "PIL",
+      "distribution": "Pillow",
+      "required": true,
+      "category": "image",
+      "alternative": null,
+      "version": "12.3.0",
+      "installed": true,
+      "detail": {
+        "pillow_version": "12.3.0"
+      },
+      "status": "loaded",
+      "load_seconds": 0.002
+    },
+    {
+      "key": "opencv",
+      "module": "cv2",
+      "distribution": "opencv-python",
+      "required": true,
+      "category": "image",
+      "alternative": null,
+      "version": "4.13.0.92",
+      "installed": true,
+      "detail": {
+        "opencv_version": "4.13.0"
+      },
+      "status": "loaded",
+      "load_seconds": 0.1476
+    },
+    {
+      "key": "rapidocr_onnxruntime",
+      "module": "rapidocr_onnxruntime",
+      "distribution": "rapidocr-onnxruntime",
+      "required": false,
+      "category": "ocr-candidate",
+      "alternative": "TASK-M0-002 will select a locally packaged RapidOCR backend.",
+      "version": null,
+      "installed": false,
+      "status": "missing"
+    },
+    {
+      "key": "rapidocr",
+      "module": "rapidocr",
+      "distribution": "rapidocr",
+      "required": false,
+      "category": "ocr-candidate",
+      "alternative": "TASK-M0-002 will select a locally packaged RapidOCR backend.",
+      "version": null,
+      "installed": false,
+      "status": "missing"
+    },
+    {
+      "key": "onnxruntime",
+      "module": "onnxruntime",
+      "distribution": "onnxruntime",
+      "required": false,
+      "category": "inference-candidate",
+      "alternative": "Use the platform-compatible inference backend selected by TASK-M0-002.",
+      "version": null,
+      "installed": false,
+      "status": "missing"
+    },
+    {
+      "key": "torch",
+      "module": "torch",
+      "distribution": "torch",
+      "required": false,
+      "category": "inpainting-candidate",
+      "alternative": "TASK-M0-004 may select a lighter local runtime behind InpaintingAdapter.",
+      "version": "2.6.0",
+      "installed": true,
+      "detail": {
+        "torch_version": "2.6.0+cpu",
+        "tensor_device": "cpu",
+        "mps_available": false,
+        "cuda_available": false
+      },
+      "status": "loaded",
+      "load_seconds": 1.3187
+    },
+    {
+      "key": "pyinstaller",
+      "module": "PyInstaller",
+      "distribution": "pyinstaller",
+      "required": true,
+      "category": "packaging",
+      "alternative": null,
+      "version": "6.19.0",
+      "installed": true,
+      "detail": {},
+      "status": "loaded",
+      "load_seconds": 0.0529
+    },
+    {
+      "key": "pytest",
+      "module": "pytest",
+      "distribution": "pytest",
+      "required": true,
+      "category": "test",
+      "alternative": null,
+      "version": "8.3.5",
+      "installed": true,
+      "detail": {},
+      "status": "loaded",
+      "load_seconds": 0.0701
+    },
+    {
+      "key": "pytest_qt",
+      "module": "pytestqt",
+      "distribution": "pytest-qt",
+      "required": true,
+      "category": "test",
+      "alternative": null,
+      "version": "4.5.0",
+      "installed": true,
+      "detail": {},
+      "status": "loaded",
+      "load_seconds": 0.001
+    }
+  ],
+  "smoke_test": {
+    "outcome": "finished",
+    "window_created": true,
+    "worker_completed": true
+  }
+}

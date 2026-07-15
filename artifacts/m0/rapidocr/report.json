@@ -1,0 +1,280 @@
+{
+  "schema_version": 1,
+  "dataset_kind": "contract-fixture-not-ocr-evidence",
+  "language_metrics": [
+    {
+      "samples": 1,
+      "expected_regions": 0,
+      "matched_regions": 0,
+      "character_total": 0,
+      "character_errors": 0,
+      "peak_rss_bytes": 22241280,
+      "failed_samples": [],
+      "language_code": "bn",
+      "detection_recall": null,
+      "character_accuracy": null,
+      "average_elapsed_ms": null,
+      "engineering_baseline": "not_evaluated"
+    },
+    {
+      "samples": 1,
+      "expected_regions": 1,
+      "matched_regions": 1,
+      "character_total": 11,
+      "character_errors": 0,
+      "peak_rss_bytes": 22241280,
+      "failed_samples": [],
+      "language_code": "en",
+      "detection_recall": 1.0,
+      "character_accuracy": 1.0,
+      "average_elapsed_ms": 0.010399999155197293,
+      "engineering_baseline": "passed"
+    }
+  ],
+  "coverage": [
+    {
+      "language_code": "zh-Hans",
+      "supported": true,
+      "model_id": "ppocrv6-multilingual-small",
+      "scripts": [
+        "Han",
+        "Latin"
+      ],
+      "reason": null
+    },
+    {
+      "language_code": "zh-Hant",
+      "supported": true,
+      "model_id": "ppocrv6-multilingual-small",
+      "scripts": [
+        "Han",
+        "Latin"
+      ],
+      "reason": null
+    },
+    {
+      "language_code": "ru",
+      "supported": true,
+      "model_id": "ppocrv5-cyrillic-mobile",
+      "scripts": [
+        "Cyrillic",
+        "Latin"
+      ],
+      "reason": null
+    },
+    {
+      "language_code": "ja",
+      "supported": true,
+      "model_id": "ppocrv6-multilingual-small",
+      "scripts": [
+        "Han",
+        "Japanese",
+        "Latin"
+      ],
+      "reason": null
+    },
+    {
+      "language_code": "ko",
+      "supported": true,
+      "model_id": "ppocrv5-korean-mobile",
+      "scripts": [
+        "Hangul",
+        "Han",
+        "Latin"
+      ],
+      "reason": null
+    },
+    {
+      "language_code": "en",
+      "supported": true,
+      "model_id": "ppocrv6-multilingual-small",
+      "scripts": [
+        "Latin"
+      ],
+      "reason": null
+    },
+    {
+      "language_code": "th",
+      "supported": true,
+      "model_id": "ppocrv5-thai-mobile",
+      "scripts": [
+        "Thai",
+        "Latin"
+      ],
+      "reason": null
+    },
+    {
+      "language_code": "ar",
+      "supported": true,
+      "model_id": "ppocrv5-arabic-mobile",
+      "scripts": [
+        "Arabic",
+        "Latin"
+      ],
+      "reason": null
+    },
+    {
+      "language_code": "vi",
+      "supported": true,
+      "model_id": "ppocrv6-multilingual-small",
+      "scripts": [
+        "Latin"
+      ],
+      "reason": null
+    },
+    {
+      "language_code": "it",
+      "supported": true,
+      "model_id": "ppocrv6-multilingual-small",
+      "scripts": [
+        "Latin"
+      ],
+      "reason": null
+    },
+    {
+      "language_code": "de",
+      "supported": true,
+      "model_id": "ppocrv6-multilingual-small",
+      "scripts": [
+        "Latin"
+      ],
+      "reason": null
+    },
+    {
+      "language_code": "id",
+      "supported": true,
+      "model_id": "ppocrv6-multilingual-small",
+      "scripts": [
+        "Latin"
+      ],
+      "reason": null
+    },
+    {
+      "language_code": "pt-PT",
+      "supported": true,
+      "model_id": "ppocrv6-multilingual-small",
+      "scripts": [
+        "Latin"
+      ],
+      "reason": null
+    },
+    {
+      "language_code": "fil",
+      "supported": true,
+      "model_id": "ppocrv6-multilingual-small",
+      "scripts": [
+        "Latin"
+      ],
+      "reason": null
+    },
+    {
+      "language_code": "pt-BR",
+      "supported": true,
+      "model_id": "ppocrv6-multilingual-small",
+      "scripts": [
+        "Latin"
+      ],
+      "reason": null
+    },
+    {
+      "language_code": "pl",
+      "supported": true,
+      "model_id": "ppocrv6-multilingual-small",
+      "scripts": [
+        "Latin"
+      ],
+      "reason": null
+    },
+    {
+      "language_code": "ms",
+      "supported": true,
+      "model_id": "ppocrv6-multilingual-small",
+      "scripts": [
+        "Latin"
+      ],
+      "reason": null
+    },
+    {
+      "language_code": "hi",
+      "supported": true,
+      "model_id": "ppocrv5-devanagari-mobile",
+      "scripts": [
+        "Devanagari",
+        "Latin"
+      ],
+      "reason": null
+    },
+    {
+      "language_code": "es",
+      "supported": true,
+      "model_id": "ppocrv6-multilingual-small",
+      "scripts": [
+        "Latin"
+      ],
+      "reason": null
+    },
+    {
+      "language_code": "fr",
+      "supported": true,
+      "model_id": "ppocrv6-multilingual-small",
+      "scripts": [
+        "Latin"
+      ],
+      "reason": null
+    },
+    {
+      "language_code": "bn",
+      "supported": false,
+      "model_id": null,
+      "scripts": [
+        "Bengali"
+      ],
+      "reason": "RapidOCR 3.9.1 official model list has no explicit Bengali recognition route; do not substitute the Devanagari model"
+    },
+    {
+      "language_code": "ur",
+      "supported": true,
+      "model_id": "ppocrv5-arabic-mobile",
+      "scripts": [
+        "Arabic",
+        "Latin"
+      ],
+      "reason": null
+    },
+    {
+      "language_code": "tr",
+      "supported": true,
+      "model_id": "ppocrv6-multilingual-small",
+      "scripts": [
+        "Latin"
+      ],
+      "reason": null
+    },
+    {
+      "language_code": "fa",
+      "supported": true,
+      "model_id": "ppocrv5-arabic-mobile",
+      "scripts": [
+        "Arabic",
+        "Latin"
+      ],
+      "reason": null
+    },
+    {
+      "language_code": "sw",
+      "supported": true,
+      "model_id": "ppocrv6-multilingual-small",
+      "scripts": [
+        "Latin"
+      ],
+      "reason": null
+    }
+  ],
+  "models": [
+    {
+      "model_id": "ppocrv6-multilingual-small",
+      "initialization_count": 1,
+      "load_time_ms": 0.0
+    }
+  ]
+}

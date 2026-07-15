@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "generated_in_tests": [
+    {"name": "rgb.png", "size": [64, 64], "mode": "RGB"},
+    {"name": "中文透明图.png", "size": [64, 64], "mode": "RGBA"}
+  ],
+  "worker_duration_ms": 3000
+}
