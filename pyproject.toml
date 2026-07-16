@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "imgtrans"
+version = "0.1.0"
+description = "Cross-platform desktop image translator"
+requires-python = ">=3.11,<3.12"
+dependencies = [
+  "PySide6==6.11.1",
+  "Pillow==12.3.0",
+  "numpy==1.26.4",
+  "onnxruntime==1.23.2",
+  "opencv-python==4.11.0.86",
+  "rapidocr==3.9.1",
+]
+
+[project.optional-dependencies]
+test = [
+  "pytest==8.3.5",
+  "pytest-qt==4.5.0",
+]
+release = [
+  "PyInstaller==6.19.0",
+]
+server = [
+  "fastapi>=0.104,<1",
+  "uvicorn>=0.24,<1",
+  "SQLAlchemy>=2.0,<3",
+  "alembic>=1.13,<2",
+  "psycopg[binary]>=3.1,<4",
+  "Jinja2>=3.1,<4",
+  "boto3>=1.34,<2",
+]
+
+[project.scripts]
+imgtrans = "src.main:main"
+imgtrans-server = "server.main:main"
+
+[tool.setuptools.packages.find]
+include = ["src*", "server*"]
+
+[tool.setuptools.package-data]
+"server.admin" = ["templates/*.html", "static/*.css"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

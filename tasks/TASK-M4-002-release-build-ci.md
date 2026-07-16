@@ -1,0 +1,35 @@
+# TASK-M4-002：Windows x64/macOS arm64 正式构建与 CI
+
+**状态**：实现完成，待 GitHub Actions 首次真实构建验证（2026-07-16）  
+**依赖**：TASK-M4-001
+
+## 目标
+
+建立正式应用而非原型的可重复 Windows 10/11 x64 与 macOS 13+ arm64 构建、测试和安装产物检查。
+
+## 范围与验收
+
+- 固定正式入口、资源、Qt 插件和 OCR/ONNX 原生依赖收集规则。
+- GitHub Actions 分别执行 Windows x64 与 macOS arm64 测试、构建、架构和烟雾检查。
+- 不包含 Intel Mac、x86_64 macOS 或 Universal 2。
+- 产物缺少 Qt 图片插件、架构错误或无法启动时构建失败。
+
+## 预计修改文件
+
+- `pyproject.toml`、正式构建配置、`.github/workflows/`、`scripts/`、`tests/release/`
+
+## 测试命令
+
+```powershell
+python -m pytest tests/release -q
+python -m src --smoke-test
+```
+
+## 实际实现
+
+- 新增正式 `packaging/imgtrans.spec`，只允许 Windows x64 和 macOS arm64 原生构建，入口固定为 `src/__main__.py`。
+- RapidOCR 代码/配置、ONNX Runtime、OpenCV 与 Qt 运行时显式收集；所有 `.onnx` 权重排除在安装产物之外，继续经对象存储清单独立安装。
+- 正式 RapidOCR 适配器从活动模型仓库解析检测、方向分类和六类识别模型，不依赖依赖包自带权重或第三方直连下载。
+- 产物验证覆盖全部 PE/Mach-O 原生文件架构，明确拒绝 macOS Universal/非 arm64 文件；同时检查 JPEG、WebP、GIF、TIFF Qt 插件、OCR/ONNX/OpenCV 运行时、模型权重隔离、工作区路径和敏感模式。
+- GitHub Actions 包含 `windows-2022` x64 与已验证为 Apple Silicon 的 `macos-14` 两个原生 job；先跑完整测试，再构建、运行打包后烟雾测试并只上传应用 ZIP。
+- 本地未生成安装包；发布契约测试和完整回归为 `269 passed`。任务最终完成状态以工作流两个 job 首次真实通过为准。
