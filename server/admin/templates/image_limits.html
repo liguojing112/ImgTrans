@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>图片限制</h1>
+<section class="card">
+  <h2>新建草稿</h2>
+  <form method="post" action="/admin/image-limits/drafts" class="form-grid">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    {% for name in ["min_width", "min_height", "max_width", "max_height", "max_bytes"] %}
+    <label>{{ name }}<input name="{{ name }}" type="number" min="1" required></label>
+    {% endfor %}
+    <button type="submit">创建草稿</button>
+  </form>
+</section>
+<section class="card"><h2>版本记录</h2>
+<table><tr><th>版本</th><th>状态</th><th>宽度</th><th>高度</th><th>文件上限</th><th>操作</th></tr>
+{% for item in versions %}<tr><td>{{ item.version }}</td><td>{{ item.status.value }}</td><td>{{ item.values.min_width }}～{{ item.values.max_width }}</td><td>{{ item.values.min_height }}～{{ item.values.max_height }}</td><td>{{ item.values.max_bytes }}</td><td>
+{% if item.status.value == "draft" %}<form method="post" action="/admin/image-limits/{{ item.version }}/publish"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button>发布</button></form>{% else %}<form method="post" action="/admin/image-limits/{{ item.version }}/rollback"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button>回滚为新版本</button></form>{% endif %}
+</td></tr>{% endfor %}</table></section>
+{% endblock %}

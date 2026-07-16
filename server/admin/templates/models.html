@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>模型发布</h1>
+<section class="card"><h2>新建模型草稿</h2>
+<form method="post" action="/admin/models/releases" class="form-grid">
+<input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+{% for name in ["model_id", "version", "filename", "object_key", "object_version", "size_bytes", "sha256"] %}<label>{{ name }}<input name="{{ name }}" {% if name == "size_bytes" %}type="number" min="1"{% endif %} required></label>{% endfor %}
+<label>platform<select name="platform"><option value="windows">windows</option><option value="macos">macos</option></select></label>
+<label>architecture<select name="architecture"><option value="x86_64">x86_64</option><option value="arm64">arm64</option></select></label>
+<button type="submit">创建草稿</button></form></section>
+<section class="card"><h2>发布记录</h2><table><tr><th>ID</th><th>模型</th><th>版本</th><th>目标</th><th>状态</th><th>操作</th></tr>
+{% for item in releases %}<tr><td>{{ item.release_id }}</td><td>{{ item.spec.model_id }}</td><td>{{ item.spec.version }}</td><td>{{ item.spec.platform }}/{{ item.spec.architecture }}</td><td>{{ item.status.value }}</td><td>
+{% if item.status.value == "draft" %}<form method="post" action="/admin/models/releases/{{ item.release_id }}/publish"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button>发布</button></form>{% elif item.status.value == "published" %}<form method="post" action="/admin/models/releases/{{ item.release_id }}/withdraw"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button>撤回</button></form>{% endif %}
+</td></tr>{% endfor %}</table></section>
+{% endblock %}

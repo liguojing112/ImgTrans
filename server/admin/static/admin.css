@@ -1,0 +1,21 @@
+:root { color-scheme: light; font-family: system-ui, sans-serif; background: #f4f6f8; color: #17202a; }
+body { margin: 0; }
+.topbar { display: flex; justify-content: space-between; padding: 1rem 2rem; background: #14213d; color: white; }
+.brand { color: white; font-weight: 700; text-decoration: none; }
+nav { display: flex; align-items: center; gap: 1rem; padding: .75rem 2rem; background: white; border-bottom: 1px solid #dfe4ea; }
+nav a { color: #1d4ed8; text-decoration: none; }
+nav form { margin-left: auto; }
+main { max-width: 1180px; margin: 2rem auto; padding: 0 1rem; }
+.card { background: white; border: 1px solid #dfe4ea; border-radius: .6rem; padding: 1rem; margin-bottom: 1rem; overflow-x: auto; }
+.narrow { max-width: 420px; margin: 5rem auto; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; }
+.form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: .75rem; align-items: end; }
+label { display: grid; gap: .35rem; }
+input, select, button { font: inherit; padding: .55rem; border: 1px solid #aab2bd; border-radius: .35rem; }
+button { cursor: pointer; background: #1d4ed8; color: white; border-color: #1d4ed8; }
+table { width: 100%; border-collapse: collapse; }
+th, td { padding: .65rem; border-bottom: 1px solid #e5e7eb; text-align: left; vertical-align: top; }
+td form { display: inline; }
+.error { color: #b42318; }
+.warning { border-color: #f59e0b; background: #fffbeb; }
+.muted { color: #667085; }

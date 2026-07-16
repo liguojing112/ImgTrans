@@ -1,6 +1,6 @@
 # TASK-M4-002：Windows x64/macOS arm64 正式构建与 CI
 
-**状态**：实现完成，待 GitHub Actions 首次真实构建验证（2026-07-16）  
+**状态**：首次 CI 已运行，修复漏提交后端源码问题后待复跑（2026-07-17）
 **依赖**：TASK-M4-001
 
 ## 目标
@@ -33,3 +33,12 @@ python -m src --smoke-test
 - 产物验证覆盖全部 PE/Mach-O 原生文件架构，明确拒绝 macOS Universal/非 arm64 文件；同时检查 JPEG、WebP、GIF、TIFF Qt 插件、OCR/ONNX/OpenCV 运行时、模型权重隔离、工作区路径和敏感模式。
 - GitHub Actions 包含 `windows-2022` x64 与已验证为 Apple Silicon 的 `macos-14` 两个原生 job；先跑完整测试，再构建、运行打包后烟雾测试并只上传应用 ZIP。
 - 本地未生成安装包；发布契约测试和完整回归为 `269 passed`。任务最终完成状态以工作流两个 job 首次真实通过为准。
+
+## 首次 CI 运行结论
+
+- 2026-07-17 检查运行 `29513386371`：Windows x64 与 macOS arm64 均在完整测试阶段失败，尚未进入打包步骤。
+- 对应提交包含 11 个 `tests/server/` 测试文件，但未包含任何 `server/` 正式源码；本地测试通过是因为工作区中仍存在未跟踪的 `server/` 目录。
+- 修复要求是将现有 `server/` 正式源码纳入提交，不能通过跳过服务端测试规避；工作流增加必要源码树预检，后续漏提交会在依赖安装前给出明确错误。
+- 工作流路径过滤器纳入 `server/**`，后端源码单独变更时也会执行完整发布门禁。
+- `actions/checkout` 与 `actions/setup-python` 升级到 Node.js 24 运行时版本，消除首次运行中报告的 Node.js 20 弃用警告。
+- 在 Windows x64 与 macOS arm64 两个 job 完成测试、构建、产物校验和上传之前，本任务仍不标记为完成。

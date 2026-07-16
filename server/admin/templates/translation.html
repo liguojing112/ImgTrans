@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>翻译服务</h1>
+<section class="card"><dl>
+<dt>Microsoft Translator</dt><dd>{{ "已配置" if translator_configured else "未配置" }}</dd>
+<dt>区域配置</dt><dd>{{ "已配置" if translator_region_configured else "未配置或不需要" }}</dd>
+<dt>客户端鉴权</dt><dd>{{ "已配置" if client_auth_configured else "未配置" }}</dd>
+</dl><p class="muted">本页面不会显示密钥、设备令牌或供应商认证头。</p>
+{% if connectivity_result %}<p><strong>{{ connectivity_result }}</strong></p>{% endif %}
+{% if translator_configured %}<form method="post" action="/admin/translation/test"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button>执行最小连通测试</button></form><p class="muted">该操作会发送固定测试短句，可能产生极少量供应商计费。</p>{% endif %}
+</section>
+{% endblock %}

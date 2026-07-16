@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>管理概览</h1>
+<div class="grid">
+  {% for key, value in settings.items() %}
+  <section class="card"><strong>{{ key }}</strong><p>{{ value }}</p></section>
+  {% endfor %}
+</div>
+{% endblock %}

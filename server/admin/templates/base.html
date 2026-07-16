@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ title }} · ImgTrans</title>
+  <link rel="stylesheet" href="/admin/static/admin.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/admin">ImgTrans 管理后台</a>
+    {% if username %}<span>{{ username }}</span>{% endif %}
+  </header>
+  {% if username %}
+  <nav>
+    <a href="/admin/image-limits">图片限制</a>
+    <a href="/admin/models">模型</a>
+    <a href="/admin/translation">翻译服务</a>
+    <a href="/admin/activation">激活</a>
+    <a href="/admin/audit">审计</a>
+    <form method="post" action="/admin/logout">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button type="submit">退出</button>
+    </form>
+  </nav>
+  {% endif %}
+  <main>{% block content %}{% endblock %}</main>
+</body>
+</html>

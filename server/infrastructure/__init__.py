@@ -1,0 +1,1 @@
+"""Backend infrastructure adapters."""
