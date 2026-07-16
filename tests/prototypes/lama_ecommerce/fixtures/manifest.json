@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "dataset_kind": "deterministic-synthetic-with-reference",
+  "width": 512,
+  "height": 512,
+  "samples_per_category": 5,
+  "categories": [
+    "solid",
+    "gradient",
+    "fabric",
+    "wood",
+    "grid",
+    "package_pattern",
+    "product_edge"
+  ],
+  "seed": 20260716,
+  "license": "CC0-1.0 generated fixture"
+}

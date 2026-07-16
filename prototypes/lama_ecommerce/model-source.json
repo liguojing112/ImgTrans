@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "file": "inpainting_lama_2025jan.onnx",
+  "size": 92591623,
+  "sha256": "7df918ac3921d3daf0aae1d219776cf0dc4e4935f035af81841b40adcf74fdf2",
+  "repository": "https://huggingface.co/opencv/inpainting_lama",
+  "revision": "c47be270660574005b6c951b5904f51a1af28f6d",
+  "url": "https://huggingface.co/opencv/inpainting_lama/resolve/c47be270660574005b6c951b5904f51a1af28f6d/inpainting_lama_2025jan.onnx?download=true",
+  "fallback_url": "https://hf-mirror.com/opencv/inpainting_lama/resolve/c47be270660574005b6c951b5904f51a1af28f6d/inpainting_lama_2025jan.onnx?download=true",
+  "license": "Apache-2.0",
+  "license_url": "https://huggingface.co/opencv/inpainting_lama/blob/c47be270660574005b6c951b5904f51a1af28f6d/LICENSE",
+  "original_project": "https://github.com/advimman/lama"
+}
+

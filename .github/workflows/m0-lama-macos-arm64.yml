@@ -1,0 +1,85 @@
+name: M0 LaMa macOS arm64
+
+on:
+  push:
+    paths:
+      - ".github/workflows/m0-lama-macos-arm64.yml"
+      - "prototypes/lama_ecommerce/**"
+      - "tests/prototypes/lama_ecommerce/**"
+  pull_request:
+    paths:
+      - ".github/workflows/m0-lama-macos-arm64.yml"
+      - "prototypes/lama_ecommerce/**"
+      - "tests/prototypes/lama_ecommerce/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: m0-lama-macos-arm64-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  benchmark:
+    runs-on: macos-14
+    timeout-minutes: 45
+    env:
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: prototypes/lama_ecommerce/requirements.lock
+
+      - name: Assert Apple Silicon runner
+        run: |
+          python - <<'PY'
+          import platform
+          if platform.machine().lower() not in {"arm64", "aarch64"}:
+              raise SystemExit(f"Expected arm64 runner, got {platform.machine()}")
+          print(platform.platform())
+          PY
+
+      - name: Install locked dependencies
+        run: python -m pip install -r prototypes/lama_ecommerce/requirements.lock
+
+      - name: Download and verify Apache-2.0 LaMa ONNX model
+        run: |
+          python prototypes/lama_ecommerce/prepare_model.py \
+            --output artifacts/m0/lama-models
+
+      - name: Run unit tests
+        run: python -m pytest tests/prototypes/lama_ecommerce -q
+
+      - name: Run 35-sample benchmark
+        run: |
+          python prototypes/lama_ecommerce/run.py \
+            --manifest tests/prototypes/lama_ecommerce/fixtures/manifest.json \
+            --output artifacts/m0/lama-macos-arm64 \
+            --model artifacts/m0/lama-models/inpainting_lama_2025jan.onnx \
+            --memory-rounds 3
+
+      - name: Aggregate quality evidence
+        run: |
+          python prototypes/lama_ecommerce/evaluate.py \
+            --results artifacts/m0/lama-macos-arm64/results.json
+
+      - name: Verify runtime evidence
+        run: |
+          python prototypes/lama_ecommerce/verify_runtime_evidence.py \
+            --results artifacts/m0/lama-macos-arm64/results.json \
+            --expected-machine arm64 \
+            --output artifacts/m0/lama-macos-arm64/runtime-evidence.json
+
+      - name: Upload benchmark evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: m0-lama-macos-arm64
+          path: artifacts/m0/lama-macos-arm64
+          if-no-files-found: error
+          retention-days: 14
