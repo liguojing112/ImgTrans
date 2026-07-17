@@ -5,7 +5,12 @@ import numpy as np
 import pytest
 
 from src.domain.image import ImageAsset, ImageDocument, ImageFileFormat
-from src.domain.inpainting import EraseMask, InpaintingError, InpaintingRequest
+from src.domain.inpainting import (
+    EraseMask,
+    InpaintingError,
+    InpaintingRequest,
+    InpaintingResult,
+)
 from src.infrastructure.fallback_inpaint_adapter import FallbackInpaintAdapter
 from src.infrastructure.inpainting_process import ProcessLamaAdapter
 from src.infrastructure.lama_onnx_adapter import LamaOnnxAdapter
@@ -88,6 +93,28 @@ class _UnavailableAdapter:
         raise RuntimeError("model missing")
 
 
+class _ResultAdapter:
+    adapter_id = "fixture-result"
+
+    def __init__(self, color: tuple[int, int, int]) -> None:
+        self.color = color
+
+    def inpaint(self, request: InpaintingRequest) -> InpaintingResult:
+        height, width = request.document.asset.height, request.document.asset.width
+        pixels = np.frombuffer(request.document.pixels, dtype=np.uint8).reshape(
+            height, width, 3
+        ).copy()
+        mask = np.frombuffer(request.erase_mask.pixels, dtype=np.uint8).reshape(
+            height, width
+        ) > 0
+        pixels[mask] = self.color
+        return InpaintingResult(
+            ImageDocument(request.document.asset, "RGB", pixels.tobytes()),
+            self.adapter_id,
+            1,
+        )
+
+
 def test_fallback_reports_visible_warning() -> None:
     result = FallbackInpaintAdapter(
         _UnavailableAdapter(), OpenCvInpaintAdapter()
@@ -95,6 +122,25 @@ def test_fallback_reports_visible_warning() -> None:
     assert result.backend_id == "opencv-telea"
     assert result.warning is not None
     assert "LaMa 不可用" in result.warning
+
+
+def test_fallback_rejects_visible_color_shift_on_smooth_background() -> None:
+    result = FallbackInpaintAdapter(
+        _ResultAdapter((220, 220, 220)),
+        _ResultAdapter((30, 80, 130)),
+    ).inpaint(_request("RGB"))
+    assert result.backend_id == "fixture-result"
+    assert result.warning is not None
+    assert "平滑背景边界不一致" in result.warning
+
+
+def test_fallback_keeps_primary_when_smooth_background_matches_boundary() -> None:
+    result = FallbackInpaintAdapter(
+        _ResultAdapter((30, 80, 130)),
+        _UnavailableAdapter(),
+    ).inpaint(_request("RGB"))
+    assert result.backend_id == "fixture-result"
+    assert result.warning is None
 
 
 def test_process_adapter_returns_structured_model_error(tmp_path: Path) -> None:
