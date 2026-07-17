@@ -1168,7 +1168,14 @@ class MainWindow(QMainWindow):
         self.inpainting_panel.show_mask.setChecked(False)
         self.image_canvas.set_mask_visible(False)
         overflow_count = sum(layer.overflow for layer in value.layout.layers)
-        self.pipeline_panel.set_completed(value.repair.result.warning, overflow_count)
+        font_fallback_count = sum(
+            layer.style.font_degraded for layer in value.layout.layers
+        )
+        self.pipeline_panel.set_completed(
+            value.repair.result.warning,
+            overflow_count,
+            font_fallback_count,
+        )
         self.side_tabs.setCurrentWidget(self.pipeline_panel)
         self.last_error = None
         self._active_operation = None

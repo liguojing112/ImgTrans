@@ -30,3 +30,25 @@ def test_fully_protected_and_placeholder_damage_are_detected() -> None:
     assert value.fully_protected
     with pytest.raises(ProtectionError, match="占位符"):
         value.restore("占位符已丢失")
+
+
+def test_complete_ocr_region_fragment_of_configured_brand_is_protected() -> None:
+    engine = ProtectionEngine()
+    chinese = engine.protect("轴心", ("杰克森轴心",))
+    english = engine.protect("AXIS", ("JACKSON AXIS",))
+    mixed_script = engine.protect("EKSEN", ("杰克森EKSEN",))
+    assert [(span.kind, span.text) for span in chinese.spans] == [
+        (ProtectionKind.BRAND, "轴心")
+    ]
+    assert [(span.kind, span.text) for span in english.spans] == [
+        (ProtectionKind.BRAND, "AXIS")
+    ]
+    assert [(span.kind, span.text) for span in mixed_script.spans] == [
+        (ProtectionKind.BRAND, "EKSEN")
+    ]
+
+
+def test_short_or_embedded_brand_fragment_is_not_guessed() -> None:
+    engine = ProtectionEngine()
+    assert not engine.protect("森", ("杰克森轴心",)).spans
+    assert not engine.protect("new AXIS product", ("JACKSON AXIS",)).spans

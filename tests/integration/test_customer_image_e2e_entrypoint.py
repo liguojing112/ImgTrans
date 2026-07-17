@@ -4,7 +4,12 @@ from pathlib import Path
 
 import pytest
 
-from scripts.run_customer_image_e2e import _public_error_code, discover_images, main
+from scripts.run_customer_image_e2e import (
+    _public_error_code,
+    discover_images,
+    main,
+    validate_language_pair,
+)
 
 
 def test_customer_image_discovery_is_deterministic_filtered_and_limited(
@@ -36,6 +41,10 @@ def test_customer_e2e_fails_before_reading_images_without_backend_configuration(
             str(tmp_path / "missing"),
             "--output-dir",
             str(tmp_path / "output"),
+            "--ocr-language",
+            "zh-Hans",
+            "--target-language",
+            "en",
         ]
     ) == 2
     captured = capsys.readouterr()
@@ -49,3 +58,8 @@ def test_customer_item_error_output_uses_only_stable_code() -> None:
 
     assert _public_error_code(_CodedError("secret customer text")) == "backend_unavailable"
     assert _public_error_code(OSError(r"C:\private\customer.png")) == "OSError"
+
+
+def test_customer_e2e_rejects_same_ocr_and_target_language() -> None:
+    with pytest.raises(ValueError, match="不能相同"):
+        validate_language_pair("zh-Hans", "zh-Hans")

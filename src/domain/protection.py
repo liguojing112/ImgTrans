@@ -78,6 +78,8 @@ class ProtectionEngine:
                 else re.compile(escaped, re.IGNORECASE)
             )
             candidates.extend(self._matches(pattern, text, ProtectionKind.BRAND))
+            if self._is_complete_brand_fragment(text, term):
+                candidates.append(_Candidate(0, len(text), ProtectionKind.BRAND))
         selected: list[_Candidate] = []
         for candidate in sorted(candidates, key=lambda item: (item.start, -(item.end - item.start))):
             if any(candidate.start < item.end and candidate.end > item.start for item in selected):
@@ -107,3 +109,12 @@ class ProtectionEngine:
     @staticmethod
     def _matches(pattern: re.Pattern[str], text: str, kind: ProtectionKind) -> list[_Candidate]:
         return [_Candidate(match.start(), match.end(), kind) for match in pattern.finditer(text)]
+
+    @staticmethod
+    def _is_complete_brand_fragment(text: str, term: str) -> bool:
+        text_key = "".join(character.casefold() for character in text if character.isalnum())
+        term_key = "".join(character.casefold() for character in term if character.isalnum())
+        if not text_key or text_key == term_key or len(text_key) >= len(term_key):
+            return False
+        minimum = 3 if text_key.isascii() else 2
+        return len(text_key) >= minimum and text_key in term_key

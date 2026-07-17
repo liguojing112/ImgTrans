@@ -5,9 +5,10 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import numpy as np
 from PySide6.QtWidgets import QApplication
+from PySide6.QtCore import Qt
 
 from src.domain.image import ImageAsset, ImageDocument, ImageFileFormat
-from src.domain.layout import fit_font_size
+from src.domain.layout import TextStyle, fit_font_size
 from src.domain.ocr import OcrResult, TextRegion, order_quad
 from src.domain.translation import (
     TranslationMode,
@@ -16,7 +17,11 @@ from src.domain.translation import (
     TranslationStatus,
     TranslationUnit,
 )
-from src.infrastructure.text_renderer import QtBasicTextLayoutAdapter, QtTextRenderer
+from src.infrastructure.text_renderer import (
+    QtBasicTextLayoutAdapter,
+    QtTextRenderer,
+    _text_flags,
+)
 
 
 def _document() -> ImageDocument:
@@ -73,7 +78,7 @@ def test_qt_layout_preserves_region_geometry_and_estimates_foreground() -> None:
     assert layer.box.center_y == 36
     assert layer.box.width == 130
     assert layer.style.font_size >= 6
-    assert max(layer.style.fill_rgb) < 80
+    assert min(layer.style.fill_rgb) > 240
     repaired = ImageDocument(
         document.asset,
         document.mode,
@@ -101,3 +106,17 @@ def test_long_translation_is_marked_as_overflow_in_tiny_box() -> None:
         _translation("tiny", "这是一段无法放入极小文字框的长译文"),
     )
     assert layout.layers[0].overflow
+
+
+def test_latin_text_wraps_only_at_word_boundaries() -> None:
+    style = TextStyle("Arial", 12, (0, 0, 0))
+    flags = _text_flags(style, "Water purifiers")
+    assert flags & Qt.TextFlag.TextWordWrap
+    assert not flags & Qt.TextFlag.TextWrapAnywhere
+
+
+def test_unspaced_cjk_text_can_wrap_between_characters() -> None:
+    style = TextStyle("Arial", 12, (0, 0, 0))
+    flags = _text_flags(style, "复杂中文排版")
+    assert flags & Qt.TextFlag.TextWordWrap
+    assert flags & Qt.TextFlag.TextWrapAnywhere

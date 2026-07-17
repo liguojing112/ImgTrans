@@ -128,7 +128,7 @@ def test_artifact_scan_detects_workspace_path_and_forbidden_secret_pattern(
     (artifact / "secret.bin").write_bytes(b"Ocp-Apim-Subscription-Key")
     findings = scan_artifact(artifact, (r"C:\Workspace\ImgTrans",))
     assert any(item.startswith("workspace-path:") for item in findings)
-    assert any(item.startswith("secret-pattern:") for item in findings)
+    assert any(item.startswith("server-translation-implementation:") for item in findings)
 
 
 def test_formal_spec_and_workflow_have_release_gates() -> None:
@@ -149,6 +149,9 @@ def test_formal_spec_and_workflow_have_release_gates() -> None:
     assert "python -m scripts.build_desktop --target windows-x64" in workflow
     assert "python -m scripts.build_desktop --target macos-arm64" in workflow
     assert workflow.count("python -m scripts.verify_desktop_artifact") == 2
+    assert workflow.count("python -m scripts.release_hardening check-source") == 2
+    assert workflow.count("python -m scripts.release_hardening create-manifest") == 2
+    assert workflow.count(".manifest.json") >= 4
     assert "codesign --verify --deep --strict" in workflow
     assert "actions/upload-artifact@v4" in workflow
     assert "prototypes/" not in workflow

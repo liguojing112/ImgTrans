@@ -128,6 +128,8 @@ class TextStyle:
     shadow_offset_x: float = 2
     shadow_offset_y: float = 2
     effect_preset: ArtisticPreset = ArtisticPreset.CUSTOM
+    font_degraded: bool = False
+    font_fallback_reason: str | None = None
 
     def __post_init__(self) -> None:
         if not self.font_family or self.font_size <= 0:
@@ -139,6 +141,8 @@ class TextStyle:
             raise ValueError("Text stroke width cannot be negative")
         if not 0 <= self.shadow_opacity <= 1:
             raise ValueError("Shadow opacity must be between zero and one")
+        if self.font_fallback_reason is not None and not self.font_degraded:
+            raise ValueError("Font fallback reason requires a degraded font")
 
 
 @dataclass(frozen=True, slots=True)

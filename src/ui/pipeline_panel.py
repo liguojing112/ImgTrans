@@ -71,7 +71,12 @@ class PipelinePanel(QFrame):
             self.stages.item(index).setText(f"{marker}  {_STAGE_LABELS[stage]}")
         self.status_label.setText(f"正在执行：{_STAGE_LABELS[active]}")
 
-    def set_completed(self, warning: str | None, overflow_count: int) -> None:
+    def set_completed(
+        self,
+        warning: str | None,
+        overflow_count: int,
+        font_fallback_count: int = 0,
+    ) -> None:
         for index, stage in enumerate(ImageStage):
             self.stages.item(index).setText(f"✓  {_STAGE_LABELS[stage]}")
         details = []
@@ -79,6 +84,8 @@ class PipelinePanel(QFrame):
             details.append("背景修复使用了降级方案")
         if overflow_count:
             details.append(f"{overflow_count} 个长译文已使用最小字号，请在 M2 编辑器中调整")
+        if font_fallback_count:
+            details.append(f"{font_fallback_count} 个区域使用了回退字体，请检查缺字和样式")
         self.status_label.setText("单图翻译完成" + ("；" + "；".join(details) if details else ""))
 
     def set_cancelled(self) -> None:

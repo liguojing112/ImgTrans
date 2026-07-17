@@ -65,12 +65,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--ocr-language",
         choices=SUPPORTED_LANGUAGE_CODES,
-        default="en",
+        required=True,
     )
     parser.add_argument(
         "--target-language",
         choices=SUPPORTED_LANGUAGE_CODES,
-        default="zh-Hans",
+        required=True,
     )
     parser.add_argument("--brand-term", action="append", default=[])
     parser.add_argument("--limit", type=int, default=10)
@@ -83,6 +83,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     backend_url = os.environ.get("IMGTRANS_API_BASE_URL", "").strip()
     api_token = os.environ.get("IMGTRANS_API_TOKEN", "").strip()
     try:
+        validate_language_pair(arguments.ocr_language, arguments.target_language)
         if not backend_url:
             raise ValueError("IMGTRANS_API_BASE_URL 未配置")
         if len(api_token) < 16:
@@ -170,6 +171,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         f"total={len(images)} succeeded={succeeded} failed={failed}"
     )
     return 0 if failed == 0 else 1
+
+
+def validate_language_pair(ocr_language: str, target_language: str) -> None:
+    if ocr_language == target_language:
+        raise ValueError("OCR 语言与目标语言不能相同")
 
 
 def _public_error_code(error: Exception) -> str:

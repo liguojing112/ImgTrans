@@ -28,7 +28,7 @@ from src.domain.layout import (
 )
 from src.domain.ocr import OcrResult, TextRegion
 from src.domain.translation import TranslationResult
-from src.platform.fonts import resolve_system_font
+from src.platform.fonts import resolve_system_font, resolve_system_font_details
 
 
 _RTL_LANGUAGES = {"ar", "fa", "ur"}
@@ -58,7 +58,12 @@ class QtBasicTextLayoutAdapter:
                 if unit.target_language in _RTL_LANGUAGES
                 else TextAlignment.CENTER
             )
-            font_family = self._font_family or resolve_system_font(unit.target_language)
+            resolution = (
+                None
+                if self._font_family is not None
+                else resolve_system_font_details(unit.target_language)
+            )
+            font_family = self._font_family or resolution.family
             layers.append(
                 self.reflow(
                     TextLayer(
@@ -70,6 +75,8 @@ class QtBasicTextLayoutAdapter:
                             6,
                             _estimate_foreground_color(source, region),
                             alignment,
+                            font_degraded=resolution.degraded if resolution else False,
+                            font_fallback_reason=resolution.reason if resolution else None,
                         ),
                     ),
                     unit.translated_text,
@@ -78,22 +85,27 @@ class QtBasicTextLayoutAdapter:
         return TextLayout(tuple(layers))
 
     def create_layer(self, region_id: str, text: str, box: TextBox) -> TextLayer:
+        resolution = (
+            None if self._font_family is not None else resolve_system_font_details("zh-Hans")
+        )
         return self.reflow(
             TextLayer(
                 region_id,
                 text,
                 box,
                 TextStyle(
-                    self._font_family or resolve_system_font("zh-Hans"),
+                    self._font_family or resolution.family,
                     6,
                     (24, 32, 51),
+                    font_degraded=resolution.degraded if resolution else False,
+                    font_fallback_reason=resolution.reason if resolution else None,
                 ),
             ),
             text,
         )
 
     def reflow(self, layer: TextLayer, text: str) -> TextLayer:
-        flags = _text_flags(layer.style)
+        flags = _text_flags(layer.style, text)
 
         def fits(size: float) -> bool:
             font = QFont(layer.style.font_family)
@@ -154,7 +166,7 @@ class QtTextRenderer:
                 layer.box.width,
                 layer.box.height,
             )
-            flags = _text_flags(layer.style)
+            flags = _text_flags(layer.style, layer.text)
             if layer.style.shadow_opacity > 0:
                 painter.save()
                 painter.translate(
@@ -221,7 +233,7 @@ def _text_box(region: TextRegion) -> TextBox:
     )
 
 
-def _text_flags(style: TextStyle) -> int:
+def _text_flags(style: TextStyle, text: str) -> int:
     horizontal = {
         TextAlignment.LEFT: Qt.AlignmentFlag.AlignLeft,
         TextAlignment.CENTER: Qt.AlignmentFlag.AlignHCenter,
@@ -234,10 +246,22 @@ def _text_flags(style: TextStyle) -> int:
     }[style.vertical_alignment]
     flags = horizontal | vertical
     if style.wrap:
-        flags |= Qt.TextFlag.TextWordWrap | Qt.TextFlag.TextWrapAnywhere
+        flags |= Qt.TextFlag.TextWordWrap
+        if _requires_character_wrap(text):
+            flags |= Qt.TextFlag.TextWrapAnywhere
     else:
         flags |= Qt.TextFlag.TextSingleLine
     return int(flags)
+
+
+def _requires_character_wrap(text: str) -> bool:
+    return not any(character.isspace() for character in text) and any(
+        "\u3400" <= character <= "\u9fff"
+        or "\uf900" <= character <= "\ufaff"
+        or "\u3040" <= character <= "\u30ff"
+        or "\uac00" <= character <= "\ud7af"
+        for character in text
+    )
 
 
 def _render_arc_layer(painter: QPainter, layer: TextLayer, font: QFont) -> None:
@@ -392,4 +416,27 @@ def _estimate_foreground_color(
     high = float(np.percentile(luminance, 85))
     selected = luminance <= low if middle - low >= high - middle else luminance >= high
     color = np.median(samples[selected] if np.any(selected) else samples, axis=0)
+    background = np.median(samples, axis=0)
+    if _contrast_ratio(color, background) < 3.0:
+        black = np.zeros(3)
+        white = np.full(3, 255)
+        color = (
+            black
+            if _contrast_ratio(black, background) >= _contrast_ratio(white, background)
+            else white
+        )
     return tuple(int(value) for value in color)  # type: ignore[return-value]
+
+
+def _contrast_ratio(first: np.ndarray, second: np.ndarray) -> float:
+    def luminance(color: np.ndarray) -> float:
+        values = color.astype(np.float64) / 255.0
+        linear = np.where(
+            values <= 0.04045,
+            values / 12.92,
+            ((values + 0.055) / 1.055) ** 2.4,
+        )
+        return float(linear @ np.array((0.2126, 0.7152, 0.0722)))
+
+    lighter, darker = sorted((luminance(first), luminance(second)), reverse=True)
+    return (lighter + 0.05) / (darker + 0.05)

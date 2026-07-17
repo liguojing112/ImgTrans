@@ -8,6 +8,7 @@ import struct
 import subprocess
 
 from scripts.build_desktop import TARGETS, detect_current_target
+from scripts.release_hardening import scan_secret_payload
 
 
 REQUIRED_IMAGE_PLUGINS = frozenset({"qgif", "qjpeg", "qtiff", "qwebp"})
@@ -138,10 +139,10 @@ def scan_artifact(artifact: Path, forbidden_paths: Iterable[str]) -> tuple[str, 
         for encoding in ("utf-8", "utf-16-le")
         if value
     )
-    secret_needles = (
+    forbidden_client_needles = (
         b"ocp-apim-subscription-key",
         b"cognitive.microsofttranslator.com",
-        b"test-activation-secret",
+        b"imgtrans_translator_key",
     )
     findings: list[str] = []
     for path in artifact.rglob("*"):
@@ -156,8 +157,11 @@ def scan_artifact(artifact: Path, forbidden_paths: Iterable[str]) -> tuple[str, 
         lowered = data.lower()
         if any(needle in data for needle in path_needles):
             findings.append(f"workspace-path:{relative}")
-        if any(needle in lowered for needle in secret_needles):
-            findings.append(f"secret-pattern:{relative}")
+        if any(needle in lowered for needle in forbidden_client_needles):
+            findings.append(f"server-translation-implementation:{relative}")
+        findings.extend(
+            f"{label}:{relative}" for label in scan_secret_payload(data)
+        )
     return tuple(findings)
 
 
