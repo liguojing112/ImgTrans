@@ -63,6 +63,23 @@ def test_secret_payload_labels_findings_without_returning_secret_text() -> None:
     assert all("fixture-password" not in finding for finding in findings)
 
 
+def test_binary_library_strings_do_not_trigger_private_key_or_aws_false_positive() -> None:
+    binary = (
+        b"\x00\x01-----BEGIN PRIVATE KEY-----\x00diagnostic"
+        + b"\x00AKIAABCDEFGHIJKLMNOP\xff"
+    )
+    assert scan_secret_payload(binary) == ()
+
+
+def test_complete_pem_private_key_structure_is_detected() -> None:
+    pem = (
+        b"-----BEGIN PRIVATE KEY-----\n"
+        + b"A" * 80
+        + b"\n-----END PRIVATE KEY-----"
+    )
+    assert scan_secret_payload(pem) == ("private-key",)
+
+
 @pytest.mark.parametrize("target", ("windows-x64", "macos-arm64"))
 def test_release_manifest_binds_archive_compatibility_and_rollback(
     tmp_path: Path,

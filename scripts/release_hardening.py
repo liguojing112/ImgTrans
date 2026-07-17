@@ -44,6 +44,11 @@ _DATABASE_CREDENTIAL = re.compile(
 )
 _BEARER_LITERAL = re.compile(rb"(?i)bearer\s+[a-z0-9._~+/=-]{20,}")
 _AWS_ACCESS_KEY = re.compile(rb"AKIA[A-Z0-9]{16}")
+_PEM_PRIVATE_KEY = re.compile(
+    rb"(?i)-----BEGIN (?:RSA |EC |ENCRYPTED )?PRIVATE KEY-----\r?\n"
+    rb"[A-Z0-9+/=\r\n]{64,}"
+    rb"-----END (?:RSA |EC |ENCRYPTED )?PRIVATE KEY-----"
+)
 
 
 def version_sources(root: Path) -> dict[str, str]:
@@ -63,13 +68,10 @@ def version_sources(root: Path) -> dict[str, str]:
 
 
 def scan_secret_payload(data: bytes) -> tuple[str, ...]:
-    lowered = data.lower()
     findings = []
-    private_key_marker = b"-----begin " + b"private key-----"
-    rsa_key_marker = b"-----begin rsa " + b"private key-----"
-    if private_key_marker in lowered or rsa_key_marker in lowered:
+    if _PEM_PRIVATE_KEY.search(data):
         findings.append("private-key")
-    if _AWS_ACCESS_KEY.search(data):
+    if _looks_textual(data) and _AWS_ACCESS_KEY.search(data):
         findings.append("aws-access-key")
     if _DATABASE_CREDENTIAL.search(data):
         findings.append("database-credential")
@@ -78,6 +80,19 @@ def scan_secret_payload(data: bytes) -> tuple[str, ...]:
     if _SECRET_ASSIGNMENT.search(data):
         findings.append("hardcoded-secret-assignment")
     return tuple(findings)
+
+
+def _looks_textual(data: bytes) -> bool:
+    sample = data[: 64 * 1024]
+    if not sample:
+        return True
+    if b"\x00" in sample:
+        return False
+    printable = sum(
+        byte in {9, 10, 13} or 32 <= byte <= 126
+        for byte in sample
+    )
+    return printable / len(sample) >= 0.85
 
 
 def scan_source_tree(root: Path) -> tuple[str, ...]:

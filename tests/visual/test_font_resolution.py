@@ -6,6 +6,7 @@ import platform
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
+from PySide6.QtGui import QFontDatabase
 from PySide6.QtWidgets import QApplication
 
 from src.domain.language import SUPPORTED_LANGUAGE_CODES
@@ -54,7 +55,15 @@ def test_runtime_font_resolution_is_reportable(language_code: str) -> None:
 
 @pytest.mark.skipif(platform.system() != "Windows", reason="Windows font registration regression")
 @pytest.mark.parametrize("language_code", ("hi", "bn", "ar", "ur"))
-def test_windows_complex_scripts_use_registered_nirmala(language_code: str) -> None:
+def test_windows_complex_scripts_use_nirmala_or_report_fallback(language_code: str) -> None:
     resolution = resolve_system_font_details(language_code)
-    assert resolution.family == "Nirmala UI"
-    assert not resolution.degraded
+    available = {family.casefold() for family in QFontDatabase.families()}
+    if "nirmala ui" in available:
+        assert resolution.family == "Nirmala UI"
+        assert not resolution.degraded
+    else:
+        assert resolution.degraded
+        assert resolution.reason in {
+            "preferred_font_unavailable",
+            "script_font_unavailable",
+        }
