@@ -43,4 +43,5 @@ python -m src --smoke-test
 - `actions/checkout` 与 `actions/setup-python` 升级到 Node.js 24 运行时版本，消除首次运行中报告的 Node.js 20 弃用警告。
 - 第二次 CI 已确认源码预检与依赖安装通过，但完整测试在收集阶段失败；全新环境复现出测试依赖未完整声明，补充服务端契约测试所需的 `httpx`，以及既有复杂文字、LaMa 原型回归所需的 `python-bidi`、`regex`、`psutil`、`uharfbuzz` 和 `fonttools`。这些库只属于 `test` 可选依赖，不进入正式产品运行时依赖。
 - 使用 CI 解析到的最新兼容 FastAPI/Starlette 版本继续回归后，服务端烟雾测试暴露其路由集合包含无 `path` 属性的内部对象；路由契约检查改用稳定的 OpenAPI `paths`，兼容新旧 FastAPI 路由实现。
+- 第三次 CI 的 Windows Job 已完整通过测试、PyInstaller 构建、产物校验、压缩和 Artifact 上传；macOS 收集测试时发现凭据模块顶层导入 Windows 专属 `ctypes.get_last_error`。该符号改为仅在 Windows 凭据后端实际执行时通过 `ctypes` 访问，macOS 导入模块和选择 Keychain 适配器不再依赖 Windows API。
 - 在 Windows x64 与 macOS arm64 两个 job 完成测试、构建、产物校验和上传之前，本任务仍不标记为完成。

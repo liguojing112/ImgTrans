@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from ctypes import POINTER, Structure, byref, cast, create_string_buffer, c_char_p
-from ctypes import c_uint32, c_void_p, c_wchar_p, get_last_error, string_at
+from ctypes import c_uint32, c_void_p, c_wchar_p, string_at
 from ctypes import wintypes
 import ctypes
 import platform
@@ -121,7 +121,7 @@ class _WindowsCredentialBackend:
     def read(self, key: str) -> str | None:
         pointer = POINTER(_CredentialW)()
         if not self._advapi.CredReadW(key, 1, 0, byref(pointer)):
-            if get_last_error() == _WINDOWS_NOT_FOUND:
+            if ctypes.get_last_error() == _WINDOWS_NOT_FOUND:
                 return None
             raise CredentialStoreError("Windows Credential Manager read failed")
         try:
@@ -149,7 +149,7 @@ class _WindowsCredentialBackend:
     def delete(self, key: str) -> None:
         if self._advapi.CredDeleteW(key, 1, 0):
             return
-        if get_last_error() != _WINDOWS_NOT_FOUND:
+        if ctypes.get_last_error() != _WINDOWS_NOT_FOUND:
             raise CredentialStoreError("Windows Credential Manager delete failed")
 
 
