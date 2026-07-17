@@ -68,10 +68,12 @@ def version_sources(root: Path) -> dict[str, str]:
 
 
 def scan_secret_payload(data: bytes) -> tuple[str, ...]:
+    if not _looks_textual(data):
+        return ()
     findings = []
     if _PEM_PRIVATE_KEY.search(data):
         findings.append("private-key")
-    if _looks_textual(data) and _AWS_ACCESS_KEY.search(data):
+    if _AWS_ACCESS_KEY.search(data):
         findings.append("aws-access-key")
     if _DATABASE_CREDENTIAL.search(data):
         findings.append("database-credential")

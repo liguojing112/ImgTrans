@@ -65,7 +65,9 @@ def test_secret_payload_labels_findings_without_returning_secret_text() -> None:
 
 def test_binary_library_strings_do_not_trigger_private_key_or_aws_false_positive() -> None:
     binary = (
-        b"\x00\x01-----BEGIN PRIVATE KEY-----\x00diagnostic"
+        b"\xcf\xfa\xed\xfe\x00\x01-----BEGIN PRIVATE KEY-----\n"
+        + b"A" * 80
+        + b"\n-----END PRIVATE KEY-----\x00diagnostic"
         + b"\x00AKIAABCDEFGHIJKLMNOP\xff"
     )
     assert scan_secret_payload(binary) == ()
