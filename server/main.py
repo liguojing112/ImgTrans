@@ -49,7 +49,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             if not app.state.database.probe():
                 print("database_unavailable")
                 return 1
-            route_paths = {route.path for route in app.routes}
+            route_paths = set(app.openapi().get("paths", {}))
             required = {
                 "/health/live",
                 "/health/ready",

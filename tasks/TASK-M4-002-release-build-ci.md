@@ -41,4 +41,6 @@ python -m src --smoke-test
 - 修复要求是将现有 `server/` 正式源码纳入提交，不能通过跳过服务端测试规避；工作流增加必要源码树预检，后续漏提交会在依赖安装前给出明确错误。
 - 工作流路径过滤器纳入 `server/**`，后端源码单独变更时也会执行完整发布门禁。
 - `actions/checkout` 与 `actions/setup-python` 升级到 Node.js 24 运行时版本，消除首次运行中报告的 Node.js 20 弃用警告。
+- 第二次 CI 已确认源码预检与依赖安装通过，但完整测试在收集阶段失败；全新环境复现出测试依赖未完整声明，补充服务端契约测试所需的 `httpx`，以及既有复杂文字、LaMa 原型回归所需的 `python-bidi`、`regex`、`psutil`、`uharfbuzz` 和 `fonttools`。这些库只属于 `test` 可选依赖，不进入正式产品运行时依赖。
+- 使用 CI 解析到的最新兼容 FastAPI/Starlette 版本继续回归后，服务端烟雾测试暴露其路由集合包含无 `path` 属性的内部对象；路由契约检查改用稳定的 OpenAPI `paths`，兼容新旧 FastAPI 路由实现。
 - 在 Windows x64 与 macOS arm64 两个 job 完成测试、构建、产物校验和上传之前，本任务仍不标记为完成。
