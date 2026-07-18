@@ -164,6 +164,57 @@ def test_long_translation_is_marked_as_overflow_in_tiny_box() -> None:
     assert layout.layers[0].overflow
 
 
+def test_long_latin_translation_uses_limited_condensing_for_readability() -> None:
+    QApplication.instance() or QApplication(["layout-condensed-test"])
+    pixels = np.full((80, 500, 3), (30, 70, 150), dtype=np.uint8)
+    asset = ImageAsset(
+        Path("paragraph.png"),
+        500,
+        80,
+        1,
+        ImageFileFormat.PNG,
+        False,
+        False,
+    )
+    document = ImageDocument(asset, "RGB", pixels.tobytes())
+    region = TextRegion(
+        "paragraph",
+        order_quad(((30, 20), (447, 20), (447, 44), (30, 44))),
+        "构建全新的家居装饰供应链",
+        1.0,
+        "zh-Hans",
+        "fixture",
+    )
+    translated = (
+        "Building a brand-new home decoration supply chain, committed to "
+        "bringing the boundaries of decoration into the home."
+    )
+    result = TranslationResult(
+        (
+            TranslationUnit(
+                "paragraph",
+                region.text,
+                "zh-Hans",
+                "en",
+                translated,
+                TranslationStatus.TRANSLATED,
+            ),
+        ),
+        TranslationSelection(TranslationMode.ALL, "en"),
+        "fixture",
+        1,
+    )
+
+    layer = QtBasicTextLayoutAdapter().layout(
+        document,
+        OcrResult((region,), "zh-Hans", "fixture", 1),
+        result,
+    ).layers[0]
+
+    assert 67 <= layer.style.font_stretch < 100
+    assert layer.style.font_size > 6
+
+
 def test_latin_text_wraps_only_at_word_boundaries() -> None:
     style = TextStyle("Arial", 12, (0, 0, 0))
     flags = _text_flags(style, "Water purifiers")

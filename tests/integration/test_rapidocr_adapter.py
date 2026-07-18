@@ -117,3 +117,73 @@ def test_adapter_passes_installed_model_paths_to_rapidocr(
     assert captured["params"]["Det.model_path"] == str(model_paths[0])
     assert captured["params"]["Cls.model_path"] == str(model_paths[1])
     assert captured["params"]["Rec.model_path"] == str(model_paths[2])
+
+
+def test_short_cjk_region_can_recover_missing_edge_character() -> None:
+    class _RefiningEngine:
+        def __init__(self) -> None:
+            self.calls = []
+
+        def __call__(self, image, **options):
+            self.calls.append((image.shape, options))
+            if options["use_det"]:
+                return SimpleNamespace(
+                    boxes=np.array(
+                        [[[84, 40], [177, 40], [177, 74], [84, 74]]],
+                        dtype=float,
+                    ),
+                    txts=["家直销"],
+                    scores=[0.9998],
+                )
+            return SimpleNamespace(
+                boxes=None,
+                txts=["厂家直销"],
+                scores=[0.9999],
+            )
+
+    engine = _RefiningEngine()
+    result = RapidOcrAdapter(engine_factory=lambda _profile: engine).recognize(
+        _document(),
+        "zh-Hans",
+    )
+
+    assert result.regions[0].text == "厂家直销"
+    assert min(point.x for point in result.regions[0].polygon) < 60
+    assert engine.calls[1][1] == {
+        "use_det": False,
+        "use_cls": True,
+        "use_rec": True,
+    }
+
+
+def test_refinement_does_not_borrow_characters_from_adjacent_region() -> None:
+    class _AdjacentEngine:
+        def __init__(self) -> None:
+            self.recognition_call = 0
+
+        def __call__(self, image, **options):
+            del image
+            if options["use_det"]:
+                return SimpleNamespace(
+                    boxes=np.array(
+                        [
+                            [[0, 20], [80, 20], [80, 50], [0, 50]],
+                            [[90, 20], [170, 20], [170, 50], [90, 50]],
+                        ],
+                        dtype=float,
+                    ),
+                    txts=["枪灰款", "1个装"],
+                    scores=[0.9998, 0.9998],
+                )
+            self.recognition_call += 1
+            return SimpleNamespace(
+                boxes=None,
+                txts=["枪灰款" if self.recognition_call == 1 else "款1个装"],
+                scores=[0.9999],
+            )
+
+    result = RapidOcrAdapter(
+        engine_factory=lambda _profile: _AdjacentEngine()
+    ).recognize(_document(), "zh-Hans")
+
+    assert [region.text for region in result.regions] == ["枪灰款", "1个装"]

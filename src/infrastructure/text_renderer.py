@@ -32,6 +32,7 @@ from src.platform.fonts import resolve_system_font, resolve_system_font_details
 
 
 _RTL_LANGUAGES = {"ar", "fa", "ur"}
+_AUTO_FONT_STRETCHES = (100, 87, 75, 67)
 
 
 class QtBasicTextLayoutAdapter:
@@ -107,9 +108,10 @@ class QtBasicTextLayoutAdapter:
     def reflow(self, layer: TextLayer, text: str) -> TextLayer:
         flags = _text_flags(layer.style, text)
 
-        def fits(size: float) -> bool:
+        def fits(size: float, stretch: int) -> bool:
             font = QFont(layer.style.font_family)
             font.setPixelSize(max(1, round(size)))
+            font.setStretch(stretch)
             metrics = QFontMetricsF(font)
             if layer.path is not None:
                 return (
@@ -127,18 +129,36 @@ class QtBasicTextLayoutAdapter:
             )
 
         if layer.style.auto_fit:
-            size, overflow = fit_font_size(
-                6,
-                max(6, min(160, layer.box.height * 0.9)),
-                fits,
+            candidates = tuple(
+                (
+                    *fit_font_size(
+                        6,
+                        max(6, min(160, layer.box.height * 0.9)),
+                        lambda size, stretch=stretch: fits(size, stretch),
+                    ),
+                    stretch,
+                )
+                for stretch in _AUTO_FONT_STRETCHES
             )
+            base_size, base_overflow, _ = candidates[0]
+            size, overflow, stretch = max(
+                candidates,
+                key=lambda candidate: (candidate[0], candidate[2]),
+            )
+            if size < base_size + max(1.0, base_size * 0.12):
+                size, overflow, stretch = base_size, base_overflow, 100
         else:
             size = layer.style.font_size
-            overflow = not fits(size)
+            stretch = layer.style.font_stretch
+            overflow = not fits(size, stretch)
         return replace(
             layer,
             text=text,
-            style=replace(layer.style, font_size=size),
+            style=replace(
+                layer.style,
+                font_size=size,
+                font_stretch=stretch,
+            ),
             overflow=overflow,
         )
 
@@ -153,6 +173,7 @@ class QtTextRenderer:
         for layer in layout.layers:
             font = QFont(layer.style.font_family)
             font.setPixelSize(max(1, round(layer.style.font_size)))
+            font.setStretch(layer.style.font_stretch)
             if layer.path is not None:
                 _render_arc_layer(painter, layer, font)
                 continue

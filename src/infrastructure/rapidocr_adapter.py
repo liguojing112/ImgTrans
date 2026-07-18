@@ -66,7 +66,7 @@ class RapidOcrAdapter:
                 output = engine(image, use_det=True, use_cls=True, use_rec=True)
             except Exception as error:
                 raise OcrError("runtime_failed", f"RapidOCR 识别失败：{error}") from error
-            elapsed_ms = (perf_counter() - started) * 1000
+        elapsed_ms = (perf_counter() - started) * 1000
         boxes = getattr(output, "boxes", None)
         texts = getattr(output, "txts", None)
         scores = getattr(output, "scores", None)
@@ -74,14 +74,28 @@ class RapidOcrAdapter:
             return OcrResult((), language_code, profile.profile_id, elapsed_ms)
         if texts is None or scores is None or not (len(boxes) == len(texts) == len(scores)):
             raise OcrError("invalid_runtime_result", "RapidOCR 返回的文字框、文本和分数数量不一致")
+        polygons = tuple(order_quad(box) for box in boxes)
         regions = []
-        for index, (box, raw_text, raw_score) in enumerate(
-            zip(boxes, texts, scores, strict=True), start=1
+        for index, (polygon, raw_text, raw_score) in enumerate(
+            zip(polygons, texts, scores, strict=True), start=1
         ):
             text = normalize_ocr_text(str(raw_text))
             if not text:
                 continue
             confidence = min(1.0, max(0.0, float(raw_score)))
+            if _should_refine_region(text):
+                try:
+                    with self._lock:
+                        text, confidence, polygon = _refine_region(
+                            engine,
+                            image,
+                            text,
+                            confidence,
+                            polygon,
+                            polygons[: index - 1] + polygons[index:],
+                        )
+                except Exception:
+                    pass
             status = (
                 TextRegionStatus.OK
                 if confidence >= self._confidence_threshold
@@ -90,7 +104,7 @@ class RapidOcrAdapter:
             regions.append(
                 TextRegion(
                     region_id=f"region-{index:04d}",
-                    polygon=order_quad(box),
+                    polygon=polygon,
                     text=text,
                     confidence=confidence,
                     language_code=language_code,
@@ -98,6 +112,7 @@ class RapidOcrAdapter:
                     status=status,
                 )
             )
+        elapsed_ms = (perf_counter() - started) * 1000
         return OcrResult(tuple(regions), language_code, profile.profile_id, elapsed_ms)
 
     def _get_engine(self, profile: OcrProfile) -> Any:
@@ -149,3 +164,110 @@ class RapidOcrAdapter:
                 }
             )
         return RapidOCR(params=params)
+
+
+def _should_refine_region(text: str) -> bool:
+    return len(text) <= 12 and any(
+        "\u3400" <= character <= "\u9fff"
+        or "\uf900" <= character <= "\ufaff"
+        for character in text
+    )
+
+
+def _refine_region(
+    engine: Any,
+    image: np.ndarray,
+    text: str,
+    confidence: float,
+    polygon,
+    occupied_polygons=(),
+):
+    xs = tuple(point.x for point in polygon)
+    ys = tuple(point.y for point in polygon)
+    height = max(1.0, max(ys) - min(ys))
+    horizontal_padding = max(4, round(height * 0.8))
+    vertical_padding = max(2, round(height * 0.2))
+    image_height, image_width = image.shape[:2]
+    x0 = max(0, int(min(xs)) - horizontal_padding)
+    x1 = min(image_width, int(max(xs)) + horizontal_padding + 1)
+    y0 = max(0, int(min(ys)) - vertical_padding)
+    y1 = min(image_height, int(max(ys)) + vertical_padding + 1)
+    crop = np.ascontiguousarray(image[y0:y1, x0:x1])
+    output = engine(crop, use_det=False, use_cls=True, use_rec=True)
+    texts = getattr(output, "txts", None)
+    scores = getattr(output, "scores", None)
+    if texts is None or scores is None or len(texts) != 1 or len(scores) != 1:
+        return text, confidence, polygon
+    candidate = normalize_ocr_text(str(texts[0]))
+    candidate_confidence = min(1.0, max(0.0, float(scores[0])))
+    position = candidate.find(text)
+    extra = len(candidate) - len(text)
+    if (
+        not candidate
+        or position < 0
+        or not 1 <= extra <= 2
+        or candidate_confidence + 0.005 < confidence
+    ):
+        return text, confidence, polygon
+    prefix = position
+    suffix = extra - prefix
+    expanded_polygon = _extend_polygon(
+        polygon,
+        prefix,
+        suffix,
+        max(1, len(text)),
+        image_width,
+        image_height,
+    )
+    if any(
+        _overlap_area(expanded_polygon, occupied)
+        > _overlap_area(polygon, occupied) + 1
+        for occupied in occupied_polygons
+    ):
+        return text, confidence, polygon
+    return candidate, candidate_confidence, expanded_polygon
+
+
+def _extend_polygon(
+    polygon,
+    prefix_characters: int,
+    suffix_characters: int,
+    original_characters: int,
+    image_width: int,
+    image_height: int,
+):
+    p0, p1, p2, p3 = polygon
+    width = max(1.0, ((p1.x - p0.x) ** 2 + (p1.y - p0.y) ** 2) ** 0.5)
+    unit_x = (p1.x - p0.x) / width
+    unit_y = (p1.y - p0.y) / width
+    character_width = width / original_characters
+    left = character_width * prefix_characters * 1.1
+    right = character_width * suffix_characters * 1.1
+
+    def clamp(value: float, maximum: int) -> float:
+        return min(float(maximum - 1), max(0.0, value))
+
+    return order_quad(
+        (
+            (clamp(p0.x - unit_x * left, image_width), clamp(p0.y - unit_y * left, image_height)),
+            (clamp(p1.x + unit_x * right, image_width), clamp(p1.y + unit_y * right, image_height)),
+            (clamp(p2.x + unit_x * right, image_width), clamp(p2.y + unit_y * right, image_height)),
+            (clamp(p3.x - unit_x * left, image_width), clamp(p3.y - unit_y * left, image_height)),
+        )
+    )
+
+
+def _overlap_area(first, second) -> float:
+    first_x = tuple(point.x for point in first)
+    first_y = tuple(point.y for point in first)
+    second_x = tuple(point.x for point in second)
+    second_y = tuple(point.y for point in second)
+    width = max(
+        0.0,
+        min(max(first_x), max(second_x)) - max(min(first_x), min(second_x)),
+    )
+    height = max(
+        0.0,
+        min(max(first_y), max(second_y)) - max(min(first_y), min(second_y)),
+    )
+    return width * height

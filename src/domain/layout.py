@@ -130,6 +130,7 @@ class TextStyle:
     effect_preset: ArtisticPreset = ArtisticPreset.CUSTOM
     font_degraded: bool = False
     font_fallback_reason: str | None = None
+    font_stretch: int = 100
 
     def __post_init__(self) -> None:
         if not self.font_family or self.font_size <= 0:
@@ -143,6 +144,8 @@ class TextStyle:
             raise ValueError("Shadow opacity must be between zero and one")
         if self.font_fallback_reason is not None and not self.font_degraded:
             raise ValueError("Font fallback reason requires a degraded font")
+        if not 50 <= self.font_stretch <= 200:
+            raise ValueError("Font stretch must be between 50 and 200")
 
 
 @dataclass(frozen=True, slots=True)
