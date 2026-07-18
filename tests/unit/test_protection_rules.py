@@ -32,6 +32,72 @@ def test_fully_protected_and_placeholder_damage_are_detected() -> None:
         value.restore("占位符已丢失")
 
 
+def test_restore_accepts_standard_placeholder() -> None:
+    value = ProtectionEngine().protect("堵头*2")
+    assert value.restore('Plug * <x id="0"/>') == "Plug * 2"
+
+
+def test_restore_accepts_spaces_around_equals() -> None:
+    value = ProtectionEngine().protect("堵头*2")
+    assert value.restore('Plug * <x id = "0"/>') == "Plug * 2"
+
+
+def test_restore_accepts_multiple_spaces_inside_tag() -> None:
+    value = ProtectionEngine().protect("堵头*2")
+    assert value.restore('Plug * <x  id = "0" />') == "Plug * 2"
+
+
+def test_restore_preserves_ordinary_sentence_spacing() -> None:
+    value = ProtectionEngine().protect("堵头*2")
+    translated = 'Use  plug <b>count</b>:  <x id= "0" />  today'
+    assert value.restore(translated) == "Use  plug <b>count</b>:  2  today"
+
+
+def test_restore_matches_multiple_placeholders_by_id() -> None:
+    value = ProtectionEngine().protect("X100 saves 25%")
+    translated = 'Save <x  id = "1" /> with <x id = "0"/>'
+    assert value.restore(translated) == "Save 25% with X100"
+
+
+def test_restore_rejects_missing_placeholder() -> None:
+    value = ProtectionEngine().protect("堵头*2")
+    with pytest.raises(ProtectionError, match="占位符"):
+        value.restore("Plug * 2")
+
+
+def test_restore_rejects_duplicate_placeholder_id() -> None:
+    value = ProtectionEngine().protect("堵头*2")
+    with pytest.raises(ProtectionError, match="占位符"):
+        value.restore('<x id="0"/> and <x id = "0"/>')
+
+
+def test_restore_rejects_unknown_placeholder_id() -> None:
+    value = ProtectionEngine().protect("堵头*2")
+    with pytest.raises(ProtectionError, match="占位符"):
+        value.restore('<x id="0"/> and <x id="9"/>')
+
+
+def test_restore_rejects_changed_placeholder_id() -> None:
+    value = ProtectionEngine().protect("堵头*2")
+    with pytest.raises(ProtectionError, match="占位符"):
+        value.restore('<x id="1"/>')
+
+
+@pytest.mark.parametrize(
+    "translated",
+    (
+        '<y id="0"/>',
+        '<x id="0">',
+        '<x id="0"/> and <x id="9">',
+        '<x id="0" extra="value"/>',
+    ),
+)
+def test_restore_rejects_non_x_or_damaged_placeholder_tags(translated: str) -> None:
+    value = ProtectionEngine().protect("堵头*2")
+    with pytest.raises(ProtectionError, match="占位符"):
+        value.restore(translated)
+
+
 def test_complete_ocr_region_fragment_of_configured_brand_is_protected() -> None:
     engine = ProtectionEngine()
     chinese = engine.protect("轴心", ("杰克森轴心",))

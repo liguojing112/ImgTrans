@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass
 from enum import Enum
 import re
@@ -7,6 +8,15 @@ import re
 
 class ProtectionError(ValueError):
     pass
+
+
+_PLACEHOLDER_TAG = re.compile(
+    r'<x\s+id\s*=\s*"(?P<id>\d+)"\s*/\s*>'
+)
+_X_TAG_FRAGMENT = re.compile(
+    r"<\s*/?\s*x(?=\s|/|>|$)",
+    re.IGNORECASE,
+)
 
 
 class ProtectionKind(str, Enum):
@@ -38,12 +48,27 @@ class ProtectedText:
         return not any(character.isalnum() for character in remainder)
 
     def restore(self, translated: str) -> str:
-        restored = translated
+        expected: dict[int, ProtectedSpan] = {}
         for span in self.spans:
-            if restored.count(span.placeholder) != 1:
+            match = _PLACEHOLDER_TAG.fullmatch(span.placeholder)
+            if match is None:
                 raise ProtectionError("翻译结果未完整保留保护词占位符")
-            restored = restored.replace(span.placeholder, span.text)
-        return restored
+            placeholder_id = int(match.group("id"))
+            if placeholder_id in expected:
+                raise ProtectionError("翻译结果未完整保留保护词占位符")
+            expected[placeholder_id] = span
+
+        matches = tuple(_PLACEHOLDER_TAG.finditer(translated))
+        actual_ids = Counter(int(match.group("id")) for match in matches)
+        if actual_ids != Counter(expected.keys()):
+            raise ProtectionError("翻译结果未完整保留保护词占位符")
+        without_placeholders = _PLACEHOLDER_TAG.sub("", translated)
+        if _X_TAG_FRAGMENT.search(without_placeholders):
+            raise ProtectionError("翻译结果未完整保留保护词占位符")
+        return _PLACEHOLDER_TAG.sub(
+            lambda match: expected[int(match.group("id"))].text,
+            translated,
+        )
 
 
 @dataclass(frozen=True, slots=True)
