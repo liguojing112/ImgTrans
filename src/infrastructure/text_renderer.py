@@ -27,7 +27,7 @@ from src.domain.layout import (
     fit_font_size,
 )
 from src.domain.ocr import OcrResult, TextRegion
-from src.domain.translation import TranslationResult
+from src.domain.translation import TranslationResult, TranslationUnit
 from src.platform.fonts import resolve_system_font, resolve_system_font_details
 
 
@@ -47,16 +47,22 @@ class QtBasicTextLayoutAdapter:
     ) -> TextLayout:
         regions = {region.region_id: region for region in ocr_result.regions}
         layers: list[TextLayer] = []
-        for unit in translation_result.units:
-            if not unit.should_erase_source:
-                continue
-            region = regions.get(unit.region_id)
-            if region is None:
-                continue
-            box = _text_box(region)
+        for group in _translated_groups(translation_result, regions):
+            units = tuple(item[0] for item in group)
+            grouped_regions = tuple(item[1] for item in group)
+            unit = units[0]
+            region = grouped_regions[0]
+            text = " ".join(item.translated_text for item in units)
+            box = (
+                _paragraph_text_box(grouped_regions)
+                if len(grouped_regions) > 1
+                else _text_box(region)
+            )
             alignment = (
                 TextAlignment.RIGHT
                 if unit.target_language in _RTL_LANGUAGES
+                else TextAlignment.LEFT
+                if len(grouped_regions) > 1
                 else TextAlignment.CENTER
             )
             resolution = (
@@ -69,7 +75,7 @@ class QtBasicTextLayoutAdapter:
                 self.reflow(
                     TextLayer(
                         region.region_id,
-                        unit.translated_text,
+                        text,
                         box,
                         TextStyle(
                             font_family,
@@ -80,7 +86,7 @@ class QtBasicTextLayoutAdapter:
                             font_fallback_reason=resolution.reason if resolution else None,
                         ),
                     ),
-                    unit.translated_text,
+                    text,
                 )
             )
         return TextLayout(tuple(layers))
@@ -251,6 +257,86 @@ def _text_box(region: TextRegion) -> TextBox:
         max(1, width),
         max(1, height),
         degrees(atan2(p1.y - p0.y, p1.x - p0.x)),
+    )
+
+
+def _translated_groups(
+    translation_result: TranslationResult,
+    regions: dict[str, TextRegion],
+) -> tuple[tuple[tuple[TranslationUnit, TextRegion], ...], ...]:
+    entries = tuple(
+        (unit, region)
+        for unit in translation_result.units
+        if unit.should_erase_source
+        for region in (regions.get(unit.region_id),)
+        if region is not None
+    )
+    groups: list[list[tuple[TranslationUnit, TextRegion]]] = []
+    for entry in entries:
+        if groups and _same_paragraph_line(groups[-1][-1], entry):
+            groups[-1].append(entry)
+        else:
+            groups.append([entry])
+    return tuple(tuple(group) for group in groups)
+
+
+def _same_paragraph_line(
+    first: tuple[TranslationUnit, TextRegion],
+    second: tuple[TranslationUnit, TextRegion],
+) -> bool:
+    first_unit, first_region = first
+    second_unit, second_region = second
+    if (
+        first_unit.target_language != second_unit.target_language
+        or len(first_region.text) < 10
+        or len(second_region.text) < 10
+        or not _contains_cjk(first_region.text)
+        or not _contains_cjk(second_region.text)
+    ):
+        return False
+    first_box = _text_box(first_region)
+    second_box = _text_box(second_region)
+    if (
+        abs(first_box.rotation_degrees) > 3
+        or abs(second_box.rotation_degrees) > 3
+        or max(first_box.height, second_box.height)
+        > min(first_box.height, second_box.height) * 1.35
+    ):
+        return False
+    first_left = first_box.center_x - first_box.width / 2
+    second_left = second_box.center_x - second_box.width / 2
+    first_bottom = first_box.center_y + first_box.height / 2
+    second_top = second_box.center_y - second_box.height / 2
+    gap = second_top - first_bottom
+    overlap = min(
+        first_box.center_x + first_box.width / 2,
+        second_box.center_x + second_box.width / 2,
+    ) - max(first_left, second_left)
+    return (
+        abs(first_left - second_left) <= max(first_box.height, second_box.height) * 0.25
+        and -min(first_box.height, second_box.height) * 0.2
+        <= gap
+        <= max(first_box.height, second_box.height) * 0.35
+        and overlap >= min(first_box.width, second_box.width) * 0.65
+    )
+
+
+def _paragraph_text_box(regions: tuple[TextRegion, ...]) -> TextBox:
+    xs = tuple(point.x for region in regions for point in region.polygon)
+    ys = tuple(point.y for region in regions for point in region.polygon)
+    return TextBox(
+        (min(xs) + max(xs)) / 2,
+        (min(ys) + max(ys)) / 2,
+        max(1.0, max(xs) - min(xs)),
+        max(1.0, max(ys) - min(ys)),
+    )
+
+
+def _contains_cjk(text: str) -> bool:
+    return any(
+        "\u3400" <= character <= "\u9fff"
+        or "\uf900" <= character <= "\ufaff"
+        for character in text
     )
 
 

@@ -8,7 +8,7 @@ from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import Qt
 
 from src.domain.image import ImageAsset, ImageDocument, ImageFileFormat
-from src.domain.layout import TextStyle, fit_font_size
+from src.domain.layout import TextAlignment, TextStyle, fit_font_size
 from src.domain.ocr import OcrResult, TextRegion, order_quad
 from src.domain.translation import (
     TranslationMode,
@@ -213,6 +213,78 @@ def test_long_latin_translation_uses_limited_condensing_for_readability() -> Non
 
     assert 67 <= layer.style.font_stretch < 100
     assert layer.style.font_size > 6
+
+
+def test_adjacent_long_cjk_lines_share_one_editable_paragraph_layer() -> None:
+    QApplication.instance() or QApplication(["layout-paragraph-test"])
+    pixels = np.full((100, 500, 3), (30, 70, 150), dtype=np.uint8)
+    asset = ImageAsset(
+        Path("paragraph-lines.png"),
+        500,
+        100,
+        1,
+        ImageFileFormat.PNG,
+        False,
+        False,
+    )
+    document = ImageDocument(asset, "RGB", pixels.tobytes())
+    regions = (
+        TextRegion(
+            "line-1",
+            order_quad(((30, 20), (447, 20), (447, 44), (30, 44))),
+            "构建全新的家居装饰供应链，致力于让装饰边界到家",
+            1.0,
+            "zh-Hans",
+            "fixture",
+        ),
+        TextRegion(
+            "line-2",
+            order_quad(((30, 44), (306, 44), (306, 66), (30, 66))),
+            "中国家居装饰五金一站式品牌概念",
+            1.0,
+            "zh-Hans",
+            "fixture",
+        ),
+    )
+    translations = (
+        TranslationUnit(
+            "line-1",
+            regions[0].text,
+            "zh-Hans",
+            "en",
+            "Building a new home decoration supply chain.",
+            TranslationStatus.TRANSLATED,
+        ),
+        TranslationUnit(
+            "line-2",
+            regions[1].text,
+            "zh-Hans",
+            "en",
+            "A one-stop brand concept for home decoration hardware.",
+            TranslationStatus.TRANSLATED,
+        ),
+    )
+    result = TranslationResult(
+        translations,
+        TranslationSelection(TranslationMode.ALL, "en"),
+        "fixture",
+        1,
+    )
+
+    layout = QtBasicTextLayoutAdapter().layout(
+        document,
+        OcrResult(regions, "zh-Hans", "fixture", 1),
+        result,
+    )
+
+    assert len(layout.layers) == 1
+    assert layout.layers[0].region_id == "line-1"
+    assert layout.layers[0].text == (
+        "Building a new home decoration supply chain. "
+        "A one-stop brand concept for home decoration hardware."
+    )
+    assert layout.layers[0].style.alignment is TextAlignment.LEFT
+    assert layout.layers[0].box.height == 46
 
 
 def test_latin_text_wraps_only_at_word_boundaries() -> None:

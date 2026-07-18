@@ -85,6 +85,12 @@ class TranslateRegions:
                     "invalid_adapter_result",
                     "翻译适配器返回了无效逐项结果",
                 )
+            if reports_source_language:
+                translated = self._retry_script_mismatches(
+                    prepared,
+                    translated,
+                    selection.target_language,
+                )
             for (index, region, protected), adapter_item in zip(
                 prepared, translated, strict=True
             ):
@@ -150,6 +156,47 @@ class TranslateRegions:
             (perf_counter() - started) * 1000,
         )
 
+    def _retry_script_mismatches(
+        self,
+        prepared: list[tuple[int, TextRegion, ProtectedText]],
+        translated: tuple[TranslationAdapterItem, ...],
+        target_language: str,
+    ) -> tuple[TranslationAdapterItem, ...]:
+        groups: dict[str, list[int]] = {}
+        for position, ((_, region, _), item) in enumerate(
+            zip(prepared, translated, strict=True)
+        ):
+            obvious_source = _obvious_script_language(
+                region.text,
+                region.language_code,
+            )
+            if (
+                item.error_code is None
+                and item.source_language == target_language
+                and obvious_source is not None
+                and obvious_source != target_language
+            ):
+                groups.setdefault(obvious_source, []).append(position)
+        if not groups:
+            return translated
+        values = list(translated)
+        for source_language, positions in groups.items():
+            retried = self._adapter.translate(
+                tuple(prepared[position][2].masked for position in positions),
+                source_language,
+                target_language,
+            )
+            if len(retried) != len(positions) or any(
+                not isinstance(item, TranslationAdapterItem) for item in retried
+            ):
+                raise TranslationError(
+                    "invalid_adapter_result",
+                    "翻译适配器返回了无效重试结果",
+                )
+            for position, item in zip(positions, retried, strict=True):
+                values[position] = item
+        return tuple(values)
+
     @staticmethod
     def _skipped_unit(
         region: TextRegion,
@@ -165,3 +212,25 @@ class TranslateRegions:
             region.text,
             status,
         )
+
+
+def _obvious_script_language(text: str, fallback: str) -> str | None:
+    if any("\uac00" <= character <= "\ud7af" for character in text):
+        return "ko"
+    if any("\u0e00" <= character <= "\u0e7f" for character in text):
+        return "th"
+    if any("\u0900" <= character <= "\u097f" for character in text):
+        return "hi"
+    if any("\u0980" <= character <= "\u09ff" for character in text):
+        return "bn"
+    if any("\u0400" <= character <= "\u052f" for character in text):
+        return "ru"
+    if any("\u0600" <= character <= "\u06ff" for character in text):
+        return fallback if fallback in {"ar", "fa", "ur"} else "ar"
+    if any(
+        "\u3400" <= character <= "\u9fff"
+        or "\uf900" <= character <= "\ufaff"
+        for character in text
+    ):
+        return fallback if fallback in {"zh-Hans", "zh-Hant", "ja"} else "zh-Hans"
+    return None

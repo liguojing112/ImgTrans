@@ -2,6 +2,7 @@ from src.application.translation import TranslateRegions
 from src.domain.ocr import OcrResult, TextRegion, order_quad
 from src.domain.protection import ProtectionEngine, ProtectionKind
 from src.domain.translation import (
+    TranslationAdapterItem,
     TranslationMode,
     TranslationSelection,
     TranslationStatus,
@@ -66,3 +67,44 @@ def test_all_language_mode_preserves_regions_already_in_target_language() -> Non
     assert result.units[0].status is TranslationStatus.TRANSLATED
     assert result.units[1].status is TranslationStatus.SKIPPED_LANGUAGE
     assert not result.units[1].should_erase_source
+
+
+def test_short_cjk_text_retries_when_auto_detection_claims_target_language() -> None:
+    class _DetectingAdapter:
+        adapter_id = "detecting-fixture"
+        reports_source_language = True
+
+        def __init__(self) -> None:
+            self.calls = []
+
+        def translate(self, texts, source_language, target_language):
+            self.calls.append((texts, source_language, target_language))
+            if source_language is None:
+                return (
+                    TranslationAdapterItem(
+                        translated_text=texts[0],
+                        source_language="en",
+                    ),
+                )
+            return (
+                TranslationAdapterItem(
+                    translated_text='Plug*<x id="0"/>',
+                    source_language="zh-Hans",
+                ),
+            )
+
+    adapter = _DetectingAdapter()
+    ocr = OcrResult(
+        (_region("r1", "堵头*2", "zh-Hans", 0),),
+        "zh-Hans",
+        "fixture-model",
+        1,
+    )
+    result = TranslateRegions(adapter, ProtectionEngine()).execute(
+        ocr,
+        TranslationSelection(TranslationMode.ALL, "en"),
+    )
+
+    assert result.units[0].status is TranslationStatus.TRANSLATED
+    assert result.units[0].translated_text == "Plug*2"
+    assert [call[1] for call in adapter.calls] == [None, "zh-Hans"]
