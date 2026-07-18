@@ -407,17 +407,29 @@ def _estimate_foreground_color(
     x1 = max(x0 + 1, min(document.asset.width, int(max(xs)) + 1))
     y0 = max(0, min(document.asset.height - 1, int(min(ys))))
     y1 = max(y0 + 1, min(document.asset.height, int(max(ys)) + 1))
-    samples = pixels[y0:y1, x0:x1].reshape(-1, 3)
+    patch = pixels[y0:y1, x0:x1]
+    samples = patch.reshape(-1, 3)
     if not len(samples):
         return (24, 32, 51)
     luminance = samples @ np.array((0.2126, 0.7152, 0.0722))
-    middle = float(np.median(luminance))
-    low = float(np.percentile(luminance, 15))
-    high = float(np.percentile(luminance, 85))
-    selected = luminance <= low if middle - low >= high - middle else luminance >= high
-    color = np.median(samples[selected] if np.any(selected) else samples, axis=0)
-    background = np.median(samples, axis=0)
-    if _contrast_ratio(color, background) < 3.0:
+    low = float(np.percentile(luminance, 7.5))
+    high = float(np.percentile(luminance, 92.5))
+    dark = np.median(samples[luminance <= low], axis=0)
+    bright = np.median(samples[luminance >= high], axis=0)
+    edge = max(1, min(patch.shape[:2]) // 8)
+    border = np.concatenate(
+        (
+            patch[:edge].reshape(-1, 3),
+            patch[-edge:].reshape(-1, 3),
+            patch[:, :edge].reshape(-1, 3),
+            patch[:, -edge:].reshape(-1, 3),
+        )
+    )
+    background = np.median(border, axis=0)
+    dark_distance = float(np.linalg.norm(dark - background))
+    bright_distance = float(np.linalg.norm(bright - background))
+    color = dark if dark_distance >= bright_distance else bright
+    if max(dark_distance, bright_distance) < 32:
         black = np.zeros(3)
         white = np.full(3, 255)
         color = (

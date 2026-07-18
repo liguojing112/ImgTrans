@@ -20,6 +20,7 @@ from src.domain.translation import (
 from src.infrastructure.text_renderer import (
     QtBasicTextLayoutAdapter,
     QtTextRenderer,
+    _estimate_foreground_color,
     _text_flags,
 )
 
@@ -87,6 +88,61 @@ def test_qt_layout_preserves_region_geometry_and_estimates_foreground() -> None:
     rendered = QtTextRenderer().render(repaired, layout)
     assert rendered.mode == "RGB"
     assert rendered.pixels != repaired.pixels
+
+
+def test_foreground_estimation_preserves_white_text_over_photo_badge() -> None:
+    pixels = np.full((48, 160, 3), (154, 154, 156), dtype=np.uint8)
+    pixels[:, 38:49] = (72, 74, 78)
+    pixels[:, 112:120] = (82, 84, 88)
+    pixels[12:17, 58:104] = (247, 247, 248)
+    pixels[23:28, 51:111] = (245, 246, 247)
+    pixels[34:39, 60:101] = (248, 248, 249)
+    asset = ImageAsset(
+        Path("badge.png"),
+        160,
+        48,
+        1,
+        ImageFileFormat.PNG,
+        False,
+        False,
+    )
+    document = ImageDocument(asset, "RGB", pixels.tobytes())
+    region = TextRegion(
+        "badge",
+        order_quad(((0, 0), (159, 0), (159, 47), (0, 47))),
+        "优质售后",
+        1.0,
+        "zh-Hans",
+        "fixture",
+    )
+
+    assert min(_estimate_foreground_color(document, region)) >= 240
+
+
+def test_foreground_estimation_keeps_dark_text_on_yellow_background() -> None:
+    pixels = np.full((40, 140, 3), (245, 205, 25), dtype=np.uint8)
+    pixels[10:15, 35:105] = (20, 22, 18)
+    pixels[23:28, 42:98] = (24, 25, 20)
+    asset = ImageAsset(
+        Path("packaging.png"),
+        140,
+        40,
+        1,
+        ImageFileFormat.PNG,
+        False,
+        False,
+    )
+    document = ImageDocument(asset, "RGB", pixels.tobytes())
+    region = TextRegion(
+        "packaging",
+        order_quad(((0, 0), (139, 0), (139, 39), (0, 39))),
+        "洗脸巾",
+        1.0,
+        "zh-Hans",
+        "fixture",
+    )
+
+    assert max(_estimate_foreground_color(document, region)) <= 30
 
 
 def test_long_translation_is_marked_as_overflow_in_tiny_box() -> None:
