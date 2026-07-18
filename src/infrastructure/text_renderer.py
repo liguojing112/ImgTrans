@@ -89,7 +89,7 @@ class QtBasicTextLayoutAdapter:
                     text,
                 )
             )
-        return TextLayout(tuple(layers))
+        return TextLayout(_normalize_visual_group_sizes(source, tuple(layers)))
 
     def create_layer(self, region_id: str, text: str, box: TextBox) -> TextLayer:
         resolution = (
@@ -112,27 +112,8 @@ class QtBasicTextLayoutAdapter:
         )
 
     def reflow(self, layer: TextLayer, text: str) -> TextLayer:
-        flags = _text_flags(layer.style, text)
-
         def fits(size: float, stretch: int) -> bool:
-            font = QFont(layer.style.font_family)
-            font.setPixelSize(max(1, round(size)))
-            font.setStretch(stretch)
-            metrics = QFontMetricsF(font)
-            if layer.path is not None:
-                return (
-                    metrics.horizontalAdvance(text) <= layer.path.approximate_length() + 0.5
-                    and metrics.height() <= layer.box.height + 0.5
-                )
-            bounds = QFontMetricsF(font).boundingRect(
-                QRectF(0, 0, layer.box.width, layer.box.height),
-                flags,
-                text,
-            )
-            return (
-                bounds.width() <= layer.box.width + 0.5
-                and bounds.height() <= layer.box.height + 0.5
-            )
+            return _text_fits(layer, text, size, stretch)
 
         if layer.style.auto_fit:
             candidates = tuple(
@@ -337,6 +318,200 @@ def _contains_cjk(text: str) -> bool:
         "\u3400" <= character <= "\u9fff"
         or "\uf900" <= character <= "\ufaff"
         for character in text
+    )
+
+
+def _normalize_visual_group_sizes(
+    document: ImageDocument,
+    layers: tuple[TextLayer, ...],
+) -> tuple[TextLayer, ...]:
+    if len(layers) < 2:
+        return layers
+    parents = list(range(len(layers)))
+
+    def find(index: int) -> int:
+        while parents[index] != index:
+            parents[index] = parents[parents[index]]
+            index = parents[index]
+        return index
+
+    def union(first: int, second: int) -> None:
+        first_root = find(first)
+        second_root = find(second)
+        if first_root != second_root:
+            parents[second_root] = first_root
+
+    signatures = tuple(_background_signature(document, layer.box) for layer in layers)
+    for first in range(len(layers)):
+        for second in range(first + 1, len(layers)):
+            if _same_visual_group(
+                layers[first],
+                signatures[first],
+                layers[second],
+                signatures[second],
+            ):
+                union(first, second)
+    groups: dict[int, list[int]] = {}
+    for index in range(len(layers)):
+        groups.setdefault(find(index), []).append(index)
+    normalized = list(layers)
+    for indexes in groups.values():
+        if len(indexes) < 2:
+            continue
+        group_boxes = {index: layers[index].box for index in indexes}
+        if len(indexes) >= 3:
+            common_width = min(
+                document.asset.width,
+                max(layers[index].box.width for index in indexes) * 1.25,
+            )
+            common_center_x = float(
+                np.median([layers[index].box.center_x for index in indexes])
+            )
+            common_center_x = min(
+                max(common_center_x, common_width / 2),
+                document.asset.width - common_width / 2,
+            )
+            group_boxes = {
+                index: replace(
+                    layers[index].box,
+                    center_x=common_center_x,
+                    width=common_width,
+                )
+                for index in indexes
+            }
+        common_stretch = min(
+            layers[index].style.font_stretch for index in indexes
+        )
+        common_size = min(
+            fit_font_size(
+                6,
+                max(6, min(160, layers[index].box.height * 0.9)),
+                lambda size, index=index: _text_fits(
+                    replace(layers[index], box=group_boxes[index]),
+                    layers[index].text,
+                    size,
+                    common_stretch,
+                ),
+            )[0]
+            for index in indexes
+        )
+        for index in indexes:
+            normalized[index] = replace(
+                layers[index],
+                box=group_boxes[index],
+                style=replace(
+                    layers[index].style,
+                    font_size=common_size,
+                    font_stretch=common_stretch,
+                ),
+            )
+    return tuple(normalized)
+
+
+def _same_visual_group(
+    first: TextLayer,
+    first_background: tuple[np.ndarray, float, float],
+    second: TextLayer,
+    second_background: tuple[np.ndarray, float, float],
+) -> bool:
+    if first.path is not None or second.path is not None:
+        return False
+    if first.style.font_family != second.style.font_family:
+        return False
+    first_height = first.box.height
+    second_height = second.box.height
+    if (
+        max(first_height, second_height) > min(first_height, second_height) * 1.3
+        or abs(first.box.rotation_degrees) > 3
+        or abs(second.box.rotation_degrees) > 3
+        or abs(first.box.rotation_degrees - second.box.rotation_degrees) > 3
+        or abs(first.box.center_x - second.box.center_x)
+        > max(first_height, second_height) * 0.65
+    ):
+        return False
+    upper, lower = sorted((first.box, second.box), key=lambda box: box.center_y)
+    gap = (
+        lower.center_y - lower.height / 2
+        - (upper.center_y + upper.height / 2)
+    )
+    if not -min(first_height, second_height) * 0.35 <= gap <= max(
+        first_height,
+        second_height,
+    ) * 1.25:
+        return False
+    if np.linalg.norm(
+        np.asarray(first.style.fill_rgb, dtype=float)
+        - np.asarray(second.style.fill_rgb, dtype=float)
+    ) > 25:
+        return False
+    first_median, first_chroma, first_texture = first_background
+    second_median, second_chroma, second_texture = second_background
+    background_distance = float(np.linalg.norm(first_median - second_median))
+    return (
+        abs(first_texture - second_texture) <= 35
+        and (
+            background_distance <= 35
+            or (
+                first_chroma <= 25
+                and second_chroma <= 25
+                and background_distance <= 60
+            )
+        )
+    )
+
+
+def _background_signature(
+    document: ImageDocument,
+    box: TextBox,
+) -> tuple[np.ndarray, float, float]:
+    channels = 4 if document.mode == "RGBA" else 3
+    pixels = np.frombuffer(document.pixels, dtype=np.uint8).reshape(
+        document.asset.height,
+        document.asset.width,
+        channels,
+    )[:, :, :3]
+    padding_x = max(4, round(box.width * 0.25))
+    padding_y = max(3, round(box.height * 0.25))
+    x0 = max(0, int(box.center_x - box.width / 2) - padding_x)
+    x1 = min(
+        document.asset.width,
+        int(box.center_x + box.width / 2) + padding_x + 1,
+    )
+    y0 = max(0, int(box.center_y - box.height / 2) - padding_y)
+    y1 = min(
+        document.asset.height,
+        int(box.center_y + box.height / 2) + padding_y + 1,
+    )
+    samples = pixels[y0:y1, x0:x1].reshape(-1, 3).astype(float)
+    median = np.median(samples, axis=0)
+    chroma = float(max(median) - min(median))
+    texture = float(np.mean(np.std(samples, axis=0)))
+    return median, chroma, texture
+
+
+def _text_fits(
+    layer: TextLayer,
+    text: str,
+    size: float,
+    stretch: int,
+) -> bool:
+    font = QFont(layer.style.font_family)
+    font.setPixelSize(max(1, round(size)))
+    font.setStretch(stretch)
+    metrics = QFontMetricsF(font)
+    if layer.path is not None:
+        return (
+            metrics.horizontalAdvance(text) <= layer.path.approximate_length() + 0.5
+            and metrics.height() <= layer.box.height + 0.5
+        )
+    bounds = metrics.boundingRect(
+        QRectF(0, 0, layer.box.width, layer.box.height),
+        _text_flags(layer.style, text),
+        text,
+    )
+    return (
+        bounds.width() <= layer.box.width + 0.5
+        and bounds.height() <= layer.box.height + 0.5
     )
 
 

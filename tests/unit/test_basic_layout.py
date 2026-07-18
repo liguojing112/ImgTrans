@@ -287,6 +287,74 @@ def test_adjacent_long_cjk_lines_share_one_editable_paragraph_layer() -> None:
     assert layout.layers[0].box.height == 46
 
 
+def test_similar_stacked_backgrounds_share_one_font_size() -> None:
+    QApplication.instance() or QApplication(["layout-visual-group-test"])
+    pixels = np.full((390, 260, 3), (25, 45, 80), dtype=np.uint8)
+    regions = []
+    source_texts = ("厂家直销", "优质售后", "专业团队", "良心企业", "全国销售")
+    translated_texts = (
+        "Factory direct sales",
+        "High-quality after-sales service",
+        "Professional team",
+        "A conscientious enterprise",
+        "Nationwide sales",
+    )
+    for index, (source_text, background) in enumerate(
+        zip(source_texts, (132, 138, 128, 142, 155), strict=True)
+    ):
+        top = 20 + index * 65
+        pixels[top - 8 : top + 43, 40:221] = background
+        regions.append(
+            TextRegion(
+                f"label-{index}",
+                order_quad(((70, top), (190, top), (190, top + 35), (70, top + 35))),
+                source_text,
+                1.0,
+                "zh-Hans",
+                "fixture",
+            )
+        )
+    asset = ImageAsset(
+        Path("stacked-labels.png"),
+        260,
+        390,
+        1,
+        ImageFileFormat.PNG,
+        False,
+        False,
+    )
+    document = ImageDocument(asset, "RGB", pixels.tobytes())
+    units = tuple(
+        TranslationUnit(
+            region.region_id,
+            region.text,
+            "zh-Hans",
+            "en",
+            translated_text,
+            TranslationStatus.TRANSLATED,
+        )
+        for region, translated_text in zip(regions, translated_texts, strict=True)
+    )
+    result = TranslationResult(
+        units,
+        TranslationSelection(TranslationMode.ALL, "en"),
+        "fixture",
+        1,
+    )
+
+    layout = QtBasicTextLayoutAdapter().layout(
+        document,
+        OcrResult(tuple(regions), "zh-Hans", "fixture", 1),
+        result,
+    )
+
+    assert len(layout.layers) == 5
+    assert len({round(layer.style.font_size, 3) for layer in layout.layers}) == 1
+    assert len({layer.style.font_stretch for layer in layout.layers}) == 1
+    assert len({round(layer.box.center_x, 3) for layer in layout.layers}) == 1
+    assert {round(layer.box.width, 3) for layer in layout.layers} == {150}
+
+
 def test_latin_text_wraps_only_at_word_boundaries() -> None:
     style = TextStyle("Arial", 12, (0, 0, 0))
     flags = _text_flags(style, "Water purifiers")
