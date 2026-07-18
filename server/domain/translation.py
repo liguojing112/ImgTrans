@@ -57,6 +57,7 @@ class TranslationProviderError(RuntimeError):
 @dataclass(frozen=True, slots=True)
 class TranslationProviderItem:
     translated_text: str | None = None
+    source_language: str | None = None
     error_code: str | None = None
     error_message: str | None = None
 
@@ -65,6 +66,8 @@ class TranslationProviderItem:
             raise ValueError("Provider item must contain text or an error")
         if self.translated_text is not None and not self.translated_text:
             raise ValueError("Provider translation cannot be empty")
+        if self.source_language is not None and not self.source_language:
+            raise ValueError("Provider source language cannot be empty")
         if self.error_code is not None and not self.error_message:
             raise ValueError("Provider error requires a public message")
 

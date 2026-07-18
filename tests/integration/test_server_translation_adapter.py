@@ -46,6 +46,7 @@ def test_adapter_sends_only_text_contract_and_preserves_partial_failures(monkeyp
                         "item_id": "item-0",
                         "status": "translated",
                         "translated_text": "促销",
+                        "source_language": "en",
                         "error_code": None,
                         "error_message": None,
                     },
@@ -77,6 +78,7 @@ def test_adapter_sends_only_text_contract_and_preserves_partial_failures(monkeyp
     headers = {key.lower(): value for key, value in request.header_items()}
     assert headers["authorization"] == "Bearer fixture-client-token-123456"
     assert result[0].translated_text == "促销"
+    assert result[0].source_language == "en"
     assert result[1].error_code == "provider_rate_limited"
 
 
@@ -154,3 +156,68 @@ def test_adapter_resolves_updated_device_token_for_each_request(monkeypatch) -> 
     token["value"] = "itd_live_device_token_123456"
     assert adapter.translate(("SALE",), "en", "zh-Hans")[0].translated_text == "促销"
     assert seen["authorization"] == "Bearer itd_live_device_token_123456"
+
+
+def test_server_detection_filters_mixed_language_regions_after_ocr(monkeypatch) -> None:
+    captured = {}
+
+    def open_request(request, timeout):
+        del timeout
+        captured["body"] = json.loads(request.data.decode("utf-8"))
+        return _Response(
+            {
+                "items": [
+                    {
+                        "item_id": "item-0",
+                        "status": "translated",
+                        "translated_text": "Face towels",
+                        "source_language": "zh-Hans",
+                    },
+                    {
+                        "item_id": "item-1",
+                        "status": "translated",
+                        "translated_text": "Existing English",
+                        "source_language": "en",
+                    },
+                ]
+            }
+        )
+
+    monkeypatch.setattr(module, "urlopen", open_request)
+    adapter = ServerTranslationAdapter(
+        "https://imgtrans.example.test",
+        "fixture-client-token-123456",
+    )
+    regions = (
+        TextRegion(
+            "r1",
+            order_quad(((0, 0), (100, 0), (100, 30), (0, 30))),
+            "洗脸巾",
+            1.0,
+            "zh-Hans",
+            "fixture",
+        ),
+        TextRegion(
+            "r2",
+            order_quad(((0, 40), (160, 40), (160, 70), (0, 70))),
+            "Existing English",
+            1.0,
+            "zh-Hans",
+            "fixture",
+        ),
+    )
+    result = TranslateRegions(adapter, ProtectionEngine()).execute(
+        OcrResult(regions, "zh-Hans", "fixture", 0),
+        TranslationSelection(
+            TranslationMode.SPECIFIC_LANGUAGE,
+            "en",
+            source_language="zh-Hans",
+        ),
+    )
+
+    assert captured["body"]["source_language"] is None
+    assert result.units[0].status is TranslationStatus.TRANSLATED
+    assert result.units[0].translated_text == "Face towels"
+    assert result.units[1].status is TranslationStatus.SKIPPED_LANGUAGE
+    assert result.units[1].translated_text == "Existing English"
+    assert not result.units[1].should_erase_source

@@ -37,7 +37,10 @@ class _Provider:
                 error_message="This item could not be translated",
             )
             if text == "FAIL"
-            else TranslationProviderItem(translated_text=f"translated:{text}")
+            else TranslationProviderItem(
+                translated_text=f"translated:{text}",
+                source_language=source_language,
+            )
             for text in texts
         )
 
@@ -98,6 +101,7 @@ def test_proxy_preserves_item_order_and_isolates_partial_failure(caplog) -> None
                     "item_id": "region-0",
                     "status": "translated",
                     "translated_text": "translated:SALE",
+                    "source_language": "en",
                     "error_code": None,
                     "error_message": None,
                 },
@@ -105,6 +109,7 @@ def test_proxy_preserves_item_order_and_isolates_partial_failure(caplog) -> None
                     "item_id": "region-1",
                     "status": "failed",
                     "translated_text": None,
+                    "source_language": None,
                     "error_code": "fixture_failure",
                     "error_message": "This item could not be translated",
                 },

@@ -53,7 +53,7 @@ def test_specific_language_filter_and_protection_statuses() -> None:
     assert not fully_protected.should_erase_source
 
 
-def test_all_language_mode_translates_every_non_protected_region() -> None:
+def test_all_language_mode_preserves_regions_already_in_target_language() -> None:
     ocr = OcrResult(
         (_region("r1", "SUMMER SALE", "en", 0), _region("r2", "商品", "zh-Hans", 40)),
         "en",
@@ -63,4 +63,6 @@ def test_all_language_mode_translates_every_non_protected_region() -> None:
     selection = TranslationSelection(TranslationMode.ALL, "zh-Hans")
     result = TranslateRegions(MockTranslationAdapter(), ProtectionEngine()).execute(ocr, selection)
     assert len(result.units) == 2
-    assert all(unit.status is TranslationStatus.TRANSLATED for unit in result.units)
+    assert result.units[0].status is TranslationStatus.TRANSLATED
+    assert result.units[1].status is TranslationStatus.SKIPPED_LANGUAGE
+    assert not result.units[1].should_erase_source

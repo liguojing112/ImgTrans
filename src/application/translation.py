@@ -38,9 +38,13 @@ class TranslateRegions:
         started = perf_counter()
         units: list[TranslationUnit | None] = [None] * len(ocr_result.regions)
         prepared: list[tuple[int, TextRegion, ProtectedText]] = []
+        reports_source_language = bool(
+            getattr(self._adapter, "reports_source_language", False)
+        )
         for index, region in enumerate(ocr_result.regions):
             if (
                 selection.source_language is not None
+                and not reports_source_language
                 and region.language_code != selection.source_language
             ):
                 units[index] = self._skipped_unit(
@@ -61,7 +65,9 @@ class TranslateRegions:
                 continue
             prepared.append((index, region, protected))
         if prepared:
-            source_language = selection.source_language
+            source_language = (
+                None if reports_source_language else selection.source_language
+            )
             try:
                 translated = self._adapter.translate(
                     tuple(item[2].masked for item in prepared),
@@ -82,11 +88,14 @@ class TranslateRegions:
             for (index, region, protected), adapter_item in zip(
                 prepared, translated, strict=True
             ):
+                detected_source = (
+                    adapter_item.source_language or region.language_code
+                )
                 if adapter_item.error_code is not None:
                     units[index] = TranslationUnit(
                         region.region_id,
                         region.text,
-                        region.language_code,
+                        detected_source,
                         selection.target_language,
                         region.text,
                         TranslationStatus.FAILED,
@@ -95,13 +104,27 @@ class TranslateRegions:
                         adapter_item.error_message,
                     )
                     continue
+                if (
+                    selection.source_language is not None
+                    and detected_source != selection.source_language
+                ) or (
+                    selection.source_language is None
+                    and detected_source == selection.target_language
+                ):
+                    units[index] = self._skipped_unit(
+                        region,
+                        selection.target_language,
+                        TranslationStatus.SKIPPED_LANGUAGE,
+                        detected_source,
+                    )
+                    continue
                 try:
                     restored = protected.restore(adapter_item.translated_text or "")
                 except ProtectionError as error:
                     units[index] = TranslationUnit(
                         region.region_id,
                         region.text,
-                        region.language_code,
+                        detected_source,
                         selection.target_language,
                         region.text,
                         TranslationStatus.FAILED,
@@ -113,7 +136,7 @@ class TranslateRegions:
                 units[index] = TranslationUnit(
                     region.region_id,
                     region.text,
-                    region.language_code,
+                    detected_source,
                     selection.target_language,
                     restored,
                     TranslationStatus.TRANSLATED,
@@ -129,12 +152,15 @@ class TranslateRegions:
 
     @staticmethod
     def _skipped_unit(
-        region: TextRegion, target_language: str, status: TranslationStatus
+        region: TextRegion,
+        target_language: str,
+        status: TranslationStatus,
+        source_language: str | None = None,
     ) -> TranslationUnit:
         return TranslationUnit(
             region.region_id,
             region.text,
-            region.language_code,
+            source_language or region.language_code,
             target_language,
             region.text,
             status,

@@ -75,7 +75,12 @@ class MicrosoftTranslatorAdapter:
                         "invalid_provider_response",
                         "Translation provider response is too large",
                     )
-                return _parse_response(payload, target, len(texts))
+                return _parse_response(
+                    payload,
+                    target,
+                    len(texts),
+                    source_language,
+                )
             except HTTPError as error:
                 mapped = _map_http_error(error)
                 if mapped.retryable and attempt + 1 < self._max_attempts:
@@ -123,6 +128,7 @@ def _parse_response(
     encoded: bytes,
     target_language: str,
     expected_count: int,
+    requested_source_language: str | None,
 ) -> tuple[TranslationProviderItem, ...]:
     try:
         payload = json.loads(encoded.decode("utf-8"))
@@ -138,13 +144,32 @@ def _parse_response(
             )
             if not isinstance(translated, str) or not translated:
                 raise ValueError
-            results.append(TranslationProviderItem(translated_text=translated))
+            source_language = requested_source_language
+            if source_language is None:
+                detected = item["detectedLanguage"]["language"]
+                if not isinstance(detected, str) or not detected:
+                    raise ValueError
+                source_language = _internal_language(detected)
+            results.append(
+                TranslationProviderItem(
+                    translated_text=translated,
+                    source_language=source_language,
+                )
+            )
         return tuple(results)
     except (UnicodeDecodeError, ValueError, TypeError, KeyError, StopIteration) as error:
         raise TranslationProviderError(
             "invalid_provider_response",
             "Translation provider returned an invalid response",
         ) from error
+
+
+def _internal_language(provider_code: str) -> str:
+    normalized = provider_code.casefold()
+    for internal_code, mapped_code in MICROSOFT_LANGUAGE_CODES.items():
+        if mapped_code.casefold() == normalized:
+            return internal_code
+    return provider_code
 
 
 def _map_http_error(error: HTTPError) -> TranslationProviderError:

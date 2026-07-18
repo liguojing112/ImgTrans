@@ -76,7 +76,14 @@ def test_retryable_rate_limit_retries_once_without_exposing_vendor_body(monkeypa
             headers = Message()
             headers["Retry-After"] = "0"
             raise HTTPError("https://provider", 429, "secret vendor detail", headers, None)
-        return _Response([{"translations": [{"text": "你好", "to": "zh-Hans"}]}])
+        return _Response(
+            [
+                {
+                    "detectedLanguage": {"language": "en", "score": 1.0},
+                    "translations": [{"text": "你好", "to": "zh-Hans"}],
+                }
+            ]
+        )
 
     monkeypatch.setattr(module, "urlopen", open_request)
     adapter = MicrosoftTranslatorAdapter(
@@ -87,6 +94,7 @@ def test_retryable_rate_limit_retries_once_without_exposing_vendor_body(monkeypa
     )
     result = adapter.translate(("hello",), None, "zh-Hans", "trace")
     assert result[0].translated_text == "你好"
+    assert result[0].source_language == "en"
     assert len(calls) == 2
     assert sleeps == [0.25]
 

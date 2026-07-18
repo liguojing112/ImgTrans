@@ -51,6 +51,7 @@ class TranslationItemResponse(StrictContract):
     item_id: str
     status: Literal["translated", "failed"]
     translated_text: str | None = None
+    source_language: str | None = None
     error_code: str | None = None
     error_message: str | None = None
 
@@ -96,6 +97,7 @@ def translate_text(
                 item_id=request_item.item_id,
                 status="translated" if item.translated_text is not None else "failed",
                 translated_text=item.translated_text,
+                source_language=item.source_language,
                 error_code=item.error_code,
                 error_message=item.error_message,
             )

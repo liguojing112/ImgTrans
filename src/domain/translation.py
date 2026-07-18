@@ -28,6 +28,7 @@ class TranslationStatus(str, Enum):
 @dataclass(frozen=True, slots=True)
 class TranslationAdapterItem:
     translated_text: str | None = None
+    source_language: str | None = None
     error_code: str | None = None
     error_message: str | None = None
 
@@ -38,6 +39,8 @@ class TranslationAdapterItem:
             raise ValueError("Adapter item must contain either text or an error")
         if succeeded and not self.translated_text:
             raise ValueError("Translated text cannot be empty")
+        if self.source_language is not None and not self.source_language:
+            raise ValueError("Detected source language cannot be empty")
         if failed and not self.error_message:
             raise ValueError("Failed adapter item requires an error message")
 

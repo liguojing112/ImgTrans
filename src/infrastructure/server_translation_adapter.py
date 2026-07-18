@@ -19,6 +19,7 @@ TokenSource = str | Callable[[], str | None]
 
 class ServerTranslationAdapter:
     adapter_id = "imgtrans-server"
+    reports_source_language = True
 
     def __init__(
         self,
@@ -124,7 +125,17 @@ def _parse_response(
                 text = item["translated_text"]
                 if not isinstance(text, str) or not text:
                     raise ValueError
-                results.append(TranslationAdapterItem(translated_text=text))
+                source_language = item.get("source_language")
+                if source_language is not None and (
+                    not isinstance(source_language, str) or not source_language
+                ):
+                    raise ValueError
+                results.append(
+                    TranslationAdapterItem(
+                        translated_text=text,
+                        source_language=source_language,
+                    )
+                )
             elif item["status"] == "failed":
                 code = item["error_code"]
                 message = item["error_message"]
