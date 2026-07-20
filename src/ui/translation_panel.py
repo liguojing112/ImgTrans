@@ -26,6 +26,7 @@ _STATUS_LABELS = {
     TranslationStatus.TRANSLATED: "已翻译",
     TranslationStatus.SKIPPED_LANGUAGE: "跳过：非指定语言",
     TranslationStatus.SKIPPED_PROTECTED: "跳过：全部受保护",
+    TranslationStatus.REVIEW_REQUIRED: "待复核：OCR 置信度较低",
     TranslationStatus.FAILED: "失败：保留原文",
 }
 
@@ -156,11 +157,19 @@ class TranslationPanel(QFrame):
             )
             item.setToolTip(0, unit.source_text)
             item.setToolTip(1, unit.translated_text)
-            item.setToolTip(2, unit.error_message or _STATUS_LABELS[unit.status])
+            status_tooltip = (
+                "该区域未自动翻译，原图保持不变"
+                if unit.status is TranslationStatus.REVIEW_REQUIRED
+                else unit.error_message or _STATUS_LABELS[unit.status]
+            )
+            item.setToolTip(2, status_tooltip)
             item.setToolTip(3, protections)
             self.results.addTopLevelItem(item)
         translated_count = sum(
             unit.status is TranslationStatus.TRANSLATED for unit in result.units
+        )
+        review_count = sum(
+            unit.status is TranslationStatus.REVIEW_REQUIRED for unit in result.units
         )
         protected_values = [
             f"{_PROTECTION_LABELS[span.kind]} {span.text}"
@@ -173,7 +182,9 @@ class TranslationPanel(QFrame):
             else "没有匹配到保护词"
         )
         self.status_label.setText(
-            f"{self._provider_label}完成：{translated_count}/{len(result.units)} 个区域进入译文 · {result.elapsed_ms:.1f} ms"
+            f"{self._provider_label}完成：{translated_count} 个已翻译 · "
+            f"{review_count} 个待复核 · 共 {len(result.units)} 个区域 · "
+            f"{result.elapsed_ms:.1f} ms"
         )
 
     def clear_result(self) -> None:

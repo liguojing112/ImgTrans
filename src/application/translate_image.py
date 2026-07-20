@@ -96,6 +96,12 @@ class TranslateImage:
                 lambda: self._renderer.render(repair.result.document, layout),
                 on_stage,
             )
+            rendered = self._repair.restore_review_pixels(
+                document,
+                rendered,
+                ocr,
+                translation,
+            )
             job.complete()
             return TranslateImageResult(rendered, ocr, translation, repair, layout, job)
         except JobCancelled:

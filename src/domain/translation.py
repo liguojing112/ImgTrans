@@ -22,6 +22,7 @@ class TranslationStatus(str, Enum):
     TRANSLATED = "translated"
     SKIPPED_LANGUAGE = "skipped_language"
     SKIPPED_PROTECTED = "skipped_protected"
+    REVIEW_REQUIRED = "review_required"
     FAILED = "failed"
 
 
@@ -79,6 +80,11 @@ class TranslationUnit:
             raise ValueError("Failed translation unit requires an error")
         if not failed and (self.error_code is not None or self.error_message is not None):
             raise ValueError("Successful or skipped translation cannot contain an error")
+        if (
+            self.status is TranslationStatus.REVIEW_REQUIRED
+            and self.translated_text != self.source_text
+        ):
+            raise ValueError("Review-required translation must preserve source text")
 
     @property
     def should_erase_source(self) -> bool:
