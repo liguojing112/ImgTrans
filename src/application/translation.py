@@ -17,9 +17,19 @@ from src.domain.translation import (
 
 
 class TranslateRegions:
-    def __init__(self, adapter: TranslationAdapter, protection: ProtectionEngine) -> None:
+    def __init__(
+        self,
+        adapter: TranslationAdapter,
+        protection: ProtectionEngine,
+        automatic_confidence_threshold: float = 0.75,
+    ) -> None:
+        if not 0 <= automatic_confidence_threshold <= 1:
+            raise ValueError(
+                "Automatic translation confidence threshold must be between zero and one"
+            )
         self._adapter = adapter
         self._protection = protection
+        self._automatic_confidence_threshold = automatic_confidence_threshold
 
     @property
     def language_codes(self) -> tuple[str, ...]:
@@ -29,11 +39,16 @@ class TranslateRegions:
     def adapter_id(self) -> str:
         return self._adapter.adapter_id
 
+    @property
+    def automatic_confidence_threshold(self) -> float:
+        return self._automatic_confidence_threshold
+
     def execute(
         self,
         ocr_result: OcrResult,
         selection: TranslationSelection,
         brand_terms: tuple[str, ...] = (),
+        allow_low_confidence: bool = False,
     ) -> TranslationResult:
         started = perf_counter()
         units: list[TranslationUnit | None] = [None] * len(ocr_result.regions)
@@ -60,6 +75,20 @@ class TranslateRegions:
                     selection.target_language,
                     region.text,
                     TranslationStatus.SKIPPED_PROTECTED,
+                    protected.spans,
+                )
+                continue
+            if (
+                not allow_low_confidence
+                and region.confidence < self._automatic_confidence_threshold
+            ):
+                units[index] = TranslationUnit(
+                    region.region_id,
+                    region.text,
+                    region.language_code,
+                    selection.target_language,
+                    region.text,
+                    TranslationStatus.REVIEW_REQUIRED,
                     protected.spans,
                 )
                 continue

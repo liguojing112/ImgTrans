@@ -15,9 +15,17 @@ from src.domain.image import ImageDocument, ImageLimits
 from src.domain.ocr import OcrResult, TextRegion, order_quad
 from src.domain.product import ProductInfo
 from src.domain.protection import ProtectionEngine
+from src.domain.translation import (
+    TranslationMode,
+    TranslationResult,
+    TranslationSelection,
+    TranslationStatus,
+    TranslationUnit,
+)
 from src.infrastructure.mock_translator import MockTranslationAdapter
 from src.infrastructure.pillow_image_codec import PillowImageCodec
 from src.ui.main_window import MainWindow
+from src.ui.translation_panel import TranslationPanel
 
 
 class ImmediateTaskRunner:
@@ -77,3 +85,56 @@ def test_window_runs_mock_translation_and_shows_protected_terms(tmp_path: Path) 
     assert window.side_tabs.currentWidget() is window.translation_panel
     assert window.statusBar().currentMessage() == "模拟翻译完成：1 个区域生成译文"
     window.close()
+
+
+def test_panel_shows_review_required_without_counting_it_as_failure() -> None:
+    QApplication.instance() or QApplication(["imgtrans-review-status-test"])
+    panel = TranslationPanel(("en", "zh-Hans"), provider_id="server-proxy")
+    result = TranslationResult(
+        (
+            TranslationUnit(
+                "review",
+                "LOW",
+                "en",
+                "zh-Hans",
+                "LOW",
+                TranslationStatus.REVIEW_REQUIRED,
+            ),
+            TranslationUnit(
+                "translated",
+                "HIGH",
+                "en",
+                "zh-Hans",
+                "translated",
+                TranslationStatus.TRANSLATED,
+            ),
+            TranslationUnit(
+                "failed",
+                "BAD",
+                "en",
+                "zh-Hans",
+                "BAD",
+                TranslationStatus.FAILED,
+                error_code="fixture_failed",
+                error_message="fixture failure",
+            ),
+        ),
+        TranslationSelection(TranslationMode.ALL, "zh-Hans"),
+        "server-proxy",
+        12.3,
+    )
+
+    panel.set_result(result)
+
+    assert panel.results.topLevelItemCount() == 3
+    review = panel.results.topLevelItem(0)
+    assert review.text(0) == "LOW"
+    assert review.text(1) == "LOW"
+    assert review.text(2) == "\u5f85\u590d\u6838\uff1aOCR \u7f6e\u4fe1\u5ea6\u8f83\u4f4e"
+    assert review.toolTip(2) == "\u8be5\u533a\u57df\u672a\u81ea\u52a8\u7ffb\u8bd1\uff0c\u539f\u56fe\u4fdd\u6301\u4e0d\u53d8"
+    assert panel.results.topLevelItem(2).text(2) == "\u5931\u8d25\uff1a\u4fdd\u7559\u539f\u6587"
+    assert (
+        "\u670d\u52a1\u7aef\u7ffb\u8bd1\u5b8c\u6210\uff1a1 \u4e2a\u5df2\u7ffb\u8bd1 \u00b7 1 \u4e2a\u5f85\u590d\u6838 \u00b7 \u5171 3 \u4e2a\u533a\u57df"
+        in panel.status_label.text()
+    )
+    panel.close()

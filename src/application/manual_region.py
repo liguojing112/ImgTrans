@@ -101,7 +101,10 @@ class ProcessManualRegion:
             )
         else:
             translation = self._translate.execute(
-                ocr_result, selection, brand_terms
+                ocr_result,
+                selection,
+                brand_terms,
+                allow_low_confidence=True,
             )
             unit = translation.units[0]
             if not unit.should_erase_source:

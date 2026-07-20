@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from src.application.ports import InpaintingAdapter, MaskRasterizer
 from src.domain.image import ImageDocument
 from src.domain.inpainting import (
@@ -9,7 +11,13 @@ from src.domain.inpainting import (
     RepairOutcome,
 )
 from src.domain.ocr import OcrResult
-from src.domain.translation import TranslationResult
+from src.domain.translation import TranslationResult, TranslationStatus
+
+
+@dataclass(frozen=True, slots=True)
+class EraseMaskPlan:
+    erase_mask: EraseMask
+    protect_mask: EraseMask | None
 
 
 class BuildEraseMask:
@@ -25,6 +33,14 @@ class BuildEraseMask:
         ocr_result: OcrResult,
         translation_result: TranslationResult,
     ) -> EraseMask:
+        return self.build_plan(document, ocr_result, translation_result).erase_mask
+
+    def build_plan(
+        self,
+        document: ImageDocument,
+        ocr_result: OcrResult,
+        translation_result: TranslationResult,
+    ) -> EraseMaskPlan:
         translated = {
             unit.region_id
             for unit in translation_result.units
@@ -45,7 +61,54 @@ class BuildEraseMask:
         )
         if mask.is_empty:
             raise InpaintingError("empty_erase_mask", "擦除蒙版为空，请检查文字区域")
-        return mask
+        protect_mask = self.build_review_protect_mask(
+            document,
+            ocr_result,
+            translation_result,
+        )
+        if protect_mask is None:
+            return EraseMaskPlan(mask, None)
+        effective_mask = EraseMask(
+            mask.width,
+            mask.height,
+            bytes(
+                erase if protected == 0 else 0
+                for erase, protected in zip(
+                    mask.pixels,
+                    protect_mask.pixels,
+                    strict=True,
+                )
+            ),
+        )
+        if effective_mask.is_empty:
+            raise InpaintingError("empty_erase_mask", "擦除蒙版为空，请检查文字区域")
+        return EraseMaskPlan(effective_mask, protect_mask)
+
+    def build_review_protect_mask(
+        self,
+        document: ImageDocument,
+        ocr_result: OcrResult,
+        translation_result: TranslationResult,
+    ) -> EraseMask | None:
+        review_required = {
+            unit.region_id
+            for unit in translation_result.units
+            if unit.status is TranslationStatus.REVIEW_REQUIRED
+        }
+        if not review_required:
+            return None
+        protect_polygons = tuple(
+            tuple((point.x, point.y) for point in region.polygon)
+            for region in ocr_result.regions
+            if region.region_id in review_required
+        )
+        protect_mask = self._rasterizer.rasterize(
+            document.asset.width,
+            document.asset.height,
+            protect_polygons,
+            0,
+        )
+        return protect_mask
 
 
 class RepairTranslatedRegions:
@@ -68,11 +131,45 @@ class RepairTranslatedRegions:
         reset_cancel = getattr(self._inpainting, "reset_cancel", None)
         if reset_cancel is not None:
             reset_cancel()
-        mask = self._mask_builder.execute(document, ocr_result, translation_result)
+        plan = self._mask_builder.build_plan(document, ocr_result, translation_result)
         result = self._inpainting.inpaint(
-            InpaintingRequest(document, mask, self._context_pixels)
+            InpaintingRequest(
+                document,
+                plan.erase_mask,
+                self._context_pixels,
+                protect_mask=plan.protect_mask,
+            )
         )
-        return RepairOutcome(mask, result)
+        return RepairOutcome(plan.erase_mask, result)
+
+    def restore_review_pixels(
+        self,
+        original: ImageDocument,
+        rendered: ImageDocument,
+        ocr_result: OcrResult,
+        translation_result: TranslationResult,
+    ) -> ImageDocument:
+        protect_mask = self._mask_builder.build_review_protect_mask(
+            original,
+            ocr_result,
+            translation_result,
+        )
+        if protect_mask is None:
+            return rendered
+        if (
+            original.asset.width != rendered.asset.width
+            or original.asset.height != rendered.asset.height
+            or original.mode != rendered.mode
+        ):
+            raise ValueError("Original and rendered images must have matching geometry")
+        channels = 4 if original.mode == "RGBA" else 3
+        source = memoryview(original.pixels)
+        restored = bytearray(rendered.pixels)
+        for pixel_index, protected in enumerate(protect_mask.pixels):
+            if protected:
+                offset = pixel_index * channels
+                restored[offset : offset + channels] = source[offset : offset + channels]
+        return ImageDocument(rendered.asset, rendered.mode, bytes(restored))
 
     def close(self) -> None:
         close = getattr(self._inpainting, "close", None)
