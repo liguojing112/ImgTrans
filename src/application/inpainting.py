@@ -95,13 +95,27 @@ class BuildEraseMask:
             for unit in translation_result.units
             if unit.status is TranslationStatus.REVIEW_REQUIRED
         }
-        if not review_required:
+        return self.build_region_protect_mask(
+            document,
+            ocr_result,
+            review_required,
+        )
+
+    def build_region_protect_mask(
+        self,
+        document: ImageDocument,
+        ocr_result: OcrResult,
+        region_ids: set[str] | frozenset[str],
+    ) -> EraseMask | None:
+        if not region_ids:
             return None
         protect_polygons = tuple(
             tuple((point.x, point.y) for point in region.polygon)
             for region in ocr_result.regions
-            if region.region_id in review_required
+            if region.region_id in region_ids
         )
+        if not protect_polygons:
+            return None
         protect_mask = self._rasterizer.rasterize(
             document.asset.width,
             document.asset.height,
@@ -154,6 +168,28 @@ class RepairTranslatedRegions:
             ocr_result,
             translation_result,
         )
+        return self._restore_protected_pixels(original, rendered, protect_mask)
+
+    def restore_region_pixels(
+        self,
+        original: ImageDocument,
+        rendered: ImageDocument,
+        ocr_result: OcrResult,
+        region_ids: set[str] | frozenset[str],
+    ) -> ImageDocument:
+        protect_mask = self._mask_builder.build_region_protect_mask(
+            original,
+            ocr_result,
+            region_ids,
+        )
+        return self._restore_protected_pixels(original, rendered, protect_mask)
+
+    @staticmethod
+    def _restore_protected_pixels(
+        original: ImageDocument,
+        rendered: ImageDocument,
+        protect_mask: EraseMask | None,
+    ) -> ImageDocument:
         if protect_mask is None:
             return rendered
         if (

@@ -89,11 +89,24 @@ class TranslateImage:
                 lambda: self._layout.layout(document, ocr, translation),
                 on_stage,
             )
+            overflow_region_ids = frozenset(
+                layer.region_id for layer in layout.layers if layer.overflow
+            )
+            renderable_layout = (
+                TextLayout(
+                    tuple(layer for layer in layout.layers if not layer.overflow)
+                )
+                if overflow_region_ids
+                else layout
+            )
             rendered = self._run_stage(
                 job,
                 token,
                 ImageStage.RENDERING,
-                lambda: self._renderer.render(repair.result.document, layout),
+                lambda: self._renderer.render(
+                    repair.result.document,
+                    renderable_layout,
+                ),
                 on_stage,
             )
             rendered = self._repair.restore_review_pixels(
@@ -101,6 +114,12 @@ class TranslateImage:
                 rendered,
                 ocr,
                 translation,
+            )
+            rendered = self._repair.restore_region_pixels(
+                document,
+                rendered,
+                ocr,
+                overflow_region_ids,
             )
             job.complete()
             return TranslateImageResult(rendered, ocr, translation, repair, layout, job)
