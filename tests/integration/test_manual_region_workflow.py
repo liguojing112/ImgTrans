@@ -15,7 +15,11 @@ from src.domain.layout import TextBox
 from src.domain.manual_region import ManualInputMode, ManualRegionSpec
 from src.domain.ocr import OcrResult, TextRegion, order_quad
 from src.domain.protection import ProtectionEngine
-from src.domain.translation import TranslationMode, TranslationSelection
+from src.domain.translation import (
+    TranslationAdapterItem,
+    TranslationMode,
+    TranslationSelection,
+)
 from src.infrastructure.mock_translator import MockTranslationAdapter
 from src.infrastructure.pillow_image_cropper import PillowImageCropper
 from src.infrastructure.pillow_mask_rasterizer import PillowMaskRasterizer
@@ -58,10 +62,13 @@ def _document() -> ImageDocument:
     return ImageDocument(asset, "RGB", bytes([240]) * 120 * 80 * 3)
 
 
-def _processor() -> ProcessManualRegion:
+def _processor(translation_adapter=None) -> ProcessManualRegion:
     return ProcessManualRegion(
         RecognizeText(_FixtureOcr()),
-        TranslateRegions(MockTranslationAdapter(), ProtectionEngine()),
+        TranslateRegions(
+            translation_adapter or MockTranslationAdapter(),
+            ProtectionEngine(),
+        ),
         PillowImageCropper(),
         PillowMaskRasterizer(),
         _FillInpaint(),
@@ -123,3 +130,42 @@ def test_direct_source_and_translated_modes_skip_the_expected_steps() -> None:
     assert direct.source_text == ""
     assert direct.translated_text == "人工译文"
     assert direct.layer.text == "人工译文"
+
+
+def test_manual_source_translation_uses_current_brand_terms() -> None:
+    class RecordingAdapter:
+        adapter_id = "recording"
+
+        def __init__(self) -> None:
+            self.calls = []
+
+        def translate(self, texts, source_language, target_language):
+            self.calls.append((texts, source_language, target_language))
+            return tuple(
+                TranslationAdapterItem(translated_text=f"{text} translated")
+                for text in texts
+            )
+
+    QApplication.instance() or QApplication(["manual-brand-terms-test"])
+    adapter = RecordingAdapter()
+    document = _document()
+    box = TextBox(40, 30, 50, 20)
+    result = _processor(adapter).execute(
+        document,
+        document,
+        ManualRegionSpec(
+            ManualInputMode.SOURCE_TEXT,
+            box,
+            box,
+            box,
+            source_text="Alpha SALE",
+        ),
+        "en",
+        TranslationSelection(TranslationMode.ALL, "zh-Hans"),
+        ("Alpha",),
+    )
+
+    assert adapter.calls == [
+        (('<x id="0"/> SALE',), None, "zh-Hans"),
+    ]
+    assert result.translated_text == "Alpha SALE translated"

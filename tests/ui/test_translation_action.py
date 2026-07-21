@@ -51,6 +51,19 @@ class FixtureOcrAdapter:
         return OcrResult((region,), language_code, "fixture-model", 8)
 
 
+class MemoryBrandTermsPreferences:
+    def __init__(self, values=()) -> None:
+        self.values = tuple(values)
+        self.saved: list[tuple[str, ...]] = []
+
+    def load(self) -> tuple[str, ...]:
+        return self.values
+
+    def save(self, brand_terms: tuple[str, ...]) -> None:
+        self.values = brand_terms
+        self.saved.append(brand_terms)
+
+
 def test_window_runs_mock_translation_and_shows_protected_terms(tmp_path: Path) -> None:
     application = QApplication.instance() or QApplication(["imgtrans-translation-test"])
     source = tmp_path / "product.png"
@@ -138,3 +151,29 @@ def test_panel_shows_review_required_without_counting_it_as_failure() -> None:
         in panel.status_label.text()
     )
     panel.close()
+
+
+def test_window_loads_persists_and_immediately_applies_brand_terms(tmp_path: Path) -> None:
+    QApplication.instance() or QApplication(["imgtrans-brand-preferences-test"])
+    preferences = MemoryBrandTermsPreferences(("Alpha", "Beta"))
+    window = MainWindow(
+        StartupSnapshot(
+            ProductInfo("Image Translator", "0.1.0", "M1"),
+            tmp_path / "data",
+            tmp_path / "cache",
+        ),
+        translate_regions=TranslateRegions(
+            MockTranslationAdapter(), ProtectionEngine()
+        ),
+        brand_terms_preferences=preferences,
+    )
+
+    assert window.translation_panel.configured_brand_terms == ("Alpha", "Beta")
+    window.translation_panel.brand_terms.setText(
+        " Gamma， Alpha, gamma "
+    )
+    assert window.translation_panel.configured_brand_terms == ("Gamma", "Alpha")
+    window.translation_panel.brand_terms.editingFinished.emit()
+    assert preferences.saved[-1] == ("Gamma", "Alpha")
+    assert window.translation_panel.brand_terms.text() == "Gamma, Alpha"
+    window.close()

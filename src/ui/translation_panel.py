@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from src.domain.protection import ProtectionKind
+from src.domain.protection import ProtectionKind, normalize_brand_terms
 from src.domain.translation import (
     TranslationMode,
     TranslationResult,
@@ -126,11 +126,10 @@ class TranslationPanel(QFrame):
 
     @property
     def configured_brand_terms(self) -> tuple[str, ...]:
-        return tuple(
-            value.strip()
-            for value in self.brand_terms.text().replace("，", ",").split(",")
-            if value.strip()
-        )
+        return normalize_brand_terms(self.brand_terms.text())
+
+    def set_configured_brand_terms(self, brand_terms: tuple[str, ...]) -> None:
+        self.brand_terms.setText(", ".join(normalize_brand_terms(brand_terms)))
 
     def set_source_language(self, language_code: str) -> None:
         index = self.source_combo.findData(language_code)

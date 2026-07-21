@@ -37,7 +37,7 @@ from src.domain.models import ModelUpdateResult
 from src.domain.activation import ActivationSession
 from src.application.inpainting import RepairTranslatedRegions
 from src.application.manual_region import ProcessManualRegion
-from src.application.ports import BatchResultStore
+from src.application.ports import BatchResultStore, BrandTermsPreferences
 from src.application.ocr import RecognizeText
 from src.application.translation import TranslateRegions
 from src.application.translate_image import TranslateImage, TranslateImageResult
@@ -99,6 +99,7 @@ class MainWindow(QMainWindow):
         process_manual_region: ProcessManualRegion | None = None,
         run_batch: RunBatch | None = None,
         batch_result_store: BatchResultStore | None = None,
+        brand_terms_preferences: BrandTermsPreferences | None = None,
         export_batch_selection: ExportBatchSelection | None = None,
         confirm_discard: Callable[[str], bool] | None = None,
         refresh_image_limits: Callable[[], ImageLimitsRefreshResult] | None = None,
@@ -119,6 +120,7 @@ class MainWindow(QMainWindow):
         self._process_manual_region = process_manual_region
         self._run_batch = run_batch
         self._batch_result_store = batch_result_store
+        self._brand_terms_preferences = brand_terms_preferences
         self._export_batch_selection = export_batch_selection
         self._confirm_discard_callback = confirm_discard
         self._refresh_image_limits = refresh_image_limits
@@ -156,7 +158,31 @@ class MainWindow(QMainWindow):
             Qt.ConnectionType.QueuedConnection,
         )
         self.statusBar().showMessage("应用已就绪")
+        self.translation_panel.brand_terms.editingFinished.connect(
+            self._persist_brand_terms
+        )
+        self._load_brand_terms()
         self.setStyleSheet(_STYLE)
+
+    def _load_brand_terms(self) -> None:
+        if self._brand_terms_preferences is None:
+            return
+        try:
+            self.translation_panel.set_configured_brand_terms(
+                self._brand_terms_preferences.load()
+            )
+        except Exception as error:
+            self.statusBar().showMessage(f"无法加载品牌保护词：{error}", 7000)
+
+    def _persist_brand_terms(self) -> None:
+        if self._brand_terms_preferences is None:
+            return
+        brand_terms = self.translation_panel.configured_brand_terms
+        self.translation_panel.set_configured_brand_terms(brand_terms)
+        try:
+            self._brand_terms_preferences.save(brand_terms)
+        except Exception as error:
+            self.statusBar().showMessage(f"无法保存品牌保护词：{error}", 7000)
 
     @property
     def current_document(self) -> ImageDocument | None:
@@ -1480,6 +1506,7 @@ class MainWindow(QMainWindow):
         ):
             event.ignore()
             return
+        self._persist_brand_terms()
         if self._run_batch is not None:
             self._run_batch.cancel()
         if self._batch_snapshot is not None and self._batch_result_store is not None:

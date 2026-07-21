@@ -69,6 +69,35 @@ class FixtureRepairAdapter:
         return InpaintingResult(repaired, self.adapter_id, 1)
 
 
+class RecordingWorkflow:
+    def __init__(self, delegate: TranslateImage) -> None:
+        self._delegate = delegate
+        self.brand_terms: tuple[str, ...] = ()
+
+    def execute(
+        self,
+        document,
+        ocr_language,
+        selection,
+        brand_terms=(),
+        on_stage=None,
+    ):
+        self.brand_terms = brand_terms
+        return self._delegate.execute(
+            document,
+            ocr_language,
+            selection,
+            brand_terms,
+            on_stage,
+        )
+
+    def cancel(self) -> None:
+        self._delegate.cancel()
+
+    def close(self) -> None:
+        self._delegate.close()
+
+
 def test_window_runs_and_exports_complete_single_image_workflow(tmp_path: Path) -> None:
     application = QApplication.instance() or QApplication(["workflow-ui-test"])
     source = tmp_path / "source.png"
@@ -84,12 +113,14 @@ def test_window_runs_and_exports_complete_single_image_workflow(tmp_path: Path) 
         BuildEraseMask(PillowMaskRasterizer(), expansion=0),
         FixtureRepairAdapter(),
     )
-    workflow = TranslateImage(
-        recognize,
-        translate,
-        repair,
-        QtBasicTextLayoutAdapter(),
-        QtTextRenderer(),
+    workflow = RecordingWorkflow(
+        TranslateImage(
+            recognize,
+            translate,
+            repair,
+            QtBasicTextLayoutAdapter(),
+            QtTextRenderer(),
+        )
     )
     window = MainWindow(
         StartupSnapshot(ProductInfo("图片翻译", "0.1.0", "M1"), tmp_path / "data", tmp_path / "cache"),
@@ -103,12 +134,14 @@ def test_window_runs_and_exports_complete_single_image_workflow(tmp_path: Path) 
     )
     window.show()
     window.request_import(source)
+    window.translation_panel.brand_terms.setText("Alpha，Beta, Alpha")
     original = window.current_document.pixels
     assert window.pipeline_panel.start_button.isEnabled()
     completed: list[Any] = []
     window.workflow_completed.connect(completed.append)
     window.request_workflow()
     application.processEvents()
+    assert workflow.brand_terms == ("Alpha", "Beta")
     assert completed[0].job.status is JobStatus.COMPLETED
     assert window.current_document.pixels != original
     assert window.pipeline_panel.status_label.text().startswith("单图翻译完成")

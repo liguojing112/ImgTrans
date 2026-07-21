@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import Enum
 import re
@@ -25,6 +26,20 @@ class ProtectionKind(str, Enum):
     SKU = "sku"
     URL = "url"
     NUMBER = "number"
+
+
+def normalize_brand_terms(values: str | Iterable[str]) -> tuple[str, ...]:
+    source = (values,) if isinstance(values, str) else values
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for value in source:
+        for candidate in value.replace("，", ",").split(","):
+            term = candidate.strip()
+            key = term.casefold()
+            if term and key not in seen:
+                seen.add(key)
+                normalized.append(term)
+    return tuple(normalized)
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,7 +110,7 @@ class ProtectionEngine:
         candidates.extend(self._matches(self._SKU, text, ProtectionKind.SKU))
         candidates.extend(self._matches(self._MODEL, text, ProtectionKind.MODEL))
         candidates.extend(self._matches(self._NUMBER, text, ProtectionKind.NUMBER))
-        for term in sorted({term.strip() for term in brand_terms if term.strip()}, key=len, reverse=True):
+        for term in sorted(normalize_brand_terms(brand_terms), key=len, reverse=True):
             escaped = re.escape(term)
             pattern = (
                 re.compile(rf"(?<![A-Za-z0-9_]){escaped}(?![A-Za-z0-9_])", re.IGNORECASE)

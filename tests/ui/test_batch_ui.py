@@ -57,9 +57,11 @@ class _MemoryStore:
 class _CompletedBatch:
     def __init__(self) -> None:
         self.cancelled = False
+        self.brand_terms: tuple[str, ...] = ()
 
     def execute(self, sources, ocr_language, selection, brand_terms=(), on_update=None):
-        del ocr_language, selection, brand_terms
+        del ocr_language, selection
+        self.brand_terms = brand_terms
         snapshot = BatchSnapshot(
             "batch-ui",
             BatchStatus.COMPLETED,
@@ -135,9 +137,11 @@ def test_main_window_runs_previews_and_selectively_exports_batch(tmp_path: Path)
     window.show()
     sources = (tmp_path / "one.png", tmp_path / "two.png")
     window.batch_panel.add_sources(sources)
+    window.translation_panel.brand_terms.setText("Alpha，Beta, Alpha")
     window._set_busy(False, "ready")
     window.request_batch()
     application.processEvents()
+    assert scheduler.brand_terms == ("Alpha", "Beta")
     assert window._batch_snapshot.completed_count == 2
     assert window.batch_panel.selected_result_ids == ("item-0", "item-1")
     window.request_batch_preview("item-0")

@@ -148,6 +148,31 @@ def test_language_and_fully_protected_precedence_over_confidence_gate() -> None:
     assert adapter.calls == []
 
 
+def test_brand_terms_skip_fully_protected_regions_and_restore_partial_spans() -> None:
+    adapter = _RecordingAdapter()
+    result = TranslateRegions(adapter, ProtectionEngine()).execute(
+        OcrResult(
+            (
+                _region("full", "Alpha", "en", 0),
+                _region("partial", "Alpha SALE", "en", 40),
+            ),
+            "en",
+            "fixture-model",
+            1,
+        ),
+        TranslationSelection(TranslationMode.ALL, "zh-Hans"),
+        ("Alpha",),
+    )
+
+    assert result.units[0].status is TranslationStatus.SKIPPED_PROTECTED
+    assert result.units[0].translated_text == "Alpha"
+    assert result.units[1].status is TranslationStatus.TRANSLATED
+    assert result.units[1].translated_text == "translated:Alpha SALE"
+    assert adapter.calls == [
+        (('<x id="0"/> SALE',), None, "zh-Hans"),
+    ]
+
+
 
 def test_low_confidence_region_does_not_trigger_remote_language_detection() -> None:
     class _DetectingAdapter(_RecordingAdapter):

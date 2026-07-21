@@ -53,6 +53,7 @@ from src.infrastructure.rapidocr_adapter import RapidOcrAdapter
 from src.infrastructure.rapidocr_models import InstalledRapidOcrModels
 from src.infrastructure.server_translation_adapter import ServerTranslationAdapter
 from src.infrastructure.text_renderer import QtBasicTextLayoutAdapter, QtTextRenderer
+from src.infrastructure.user_preferences import JsonBrandTermsPreferences
 from src.platform.paths import PlatformPaths, discover_model_target
 from src.platform.credentials import create_platform_credential_store
 from src.platform.qt_runtime import QtRuntimeMonitor, configure_qt_runtime
@@ -168,6 +169,9 @@ def create_main_window() -> MainWindow:
         batch_result_store,
         export_image,
     )
+    brand_terms_preferences = JsonBrandTermsPreferences(
+        startup.data_dir / "config" / "preferences.json"
+    )
     update_models = None
     if backend_url:
         model_platform, model_architecture = discover_model_target()
@@ -192,6 +196,7 @@ def create_main_window() -> MainWindow:
         process_manual_region=process_manual_region,
         run_batch=run_batch,
         batch_result_store=batch_result_store,
+        brand_terms_preferences=brand_terms_preferences,
         export_batch_selection=export_batch_selection,
         task_runner=task_runner,
         refresh_image_limits=image_limits.refresh,
