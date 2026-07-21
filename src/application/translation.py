@@ -5,7 +5,13 @@ from time import perf_counter
 from src.application.ports import TranslationAdapter
 from src.domain.language import SUPPORTED_LANGUAGE_CODES
 from src.domain.ocr import OcrResult, TextRegion
-from src.domain.protection import ProtectedText, ProtectionEngine, ProtectionError
+from src.domain.protection import (
+    ProtectedText,
+    ProtectionEngine,
+    ProtectionError,
+    ProtectionKind,
+)
+from src.domain.terminology import TerminologyCatalog
 from src.domain.translation import (
     TranslationAdapterItem,
     TranslationError,
@@ -22,6 +28,7 @@ class TranslateRegions:
         adapter: TranslationAdapter,
         protection: ProtectionEngine,
         automatic_confidence_threshold: float = 0.75,
+        terminology_catalog: TerminologyCatalog | None = None,
     ) -> None:
         if not 0 <= automatic_confidence_threshold <= 1:
             raise ValueError(
@@ -30,6 +37,7 @@ class TranslateRegions:
         self._adapter = adapter
         self._protection = protection
         self._automatic_confidence_threshold = automatic_confidence_threshold
+        self._terminology_catalog = terminology_catalog or TerminologyCatalog()
 
     @property
     def language_codes(self) -> tuple[str, ...]:
@@ -42,6 +50,10 @@ class TranslateRegions:
     @property
     def automatic_confidence_threshold(self) -> float:
         return self._automatic_confidence_threshold
+
+    @property
+    def terminology_catalog(self) -> TerminologyCatalog:
+        return self._terminology_catalog
 
     def execute(
         self,
@@ -89,6 +101,29 @@ class TranslateRegions:
                     selection.target_language,
                     region.text,
                     TranslationStatus.REVIEW_REQUIRED,
+                    protected.spans,
+                )
+                continue
+            has_brand_protection = any(
+                span.kind is ProtectionKind.BRAND for span in protected.spans
+            )
+            terminology_text = (
+                None
+                if has_brand_protection
+                else self._terminology_catalog.lookup(
+                    selection.source_language or region.language_code,
+                    selection.target_language,
+                    region.text,
+                )
+            )
+            if terminology_text is not None:
+                units[index] = TranslationUnit(
+                    region.region_id,
+                    region.text,
+                    selection.source_language or region.language_code,
+                    selection.target_language,
+                    terminology_text,
+                    TranslationStatus.TRANSLATED,
                     protected.spans,
                 )
                 continue

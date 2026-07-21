@@ -15,6 +15,7 @@ from src.domain.layout import TextBox
 from src.domain.manual_region import ManualInputMode, ManualRegionSpec
 from src.domain.ocr import OcrResult, TextRegion, order_quad
 from src.domain.protection import ProtectionEngine
+from src.domain.terminology import TerminologyCatalog, TerminologyEntry
 from src.domain.translation import (
     TranslationAdapterItem,
     TranslationMode,
@@ -62,12 +63,16 @@ def _document() -> ImageDocument:
     return ImageDocument(asset, "RGB", bytes([240]) * 120 * 80 * 3)
 
 
-def _processor(translation_adapter=None) -> ProcessManualRegion:
+def _processor(
+    translation_adapter=None,
+    terminology_catalog: TerminologyCatalog | None = None,
+) -> ProcessManualRegion:
     return ProcessManualRegion(
         RecognizeText(_FixtureOcr()),
         TranslateRegions(
             translation_adapter or MockTranslationAdapter(),
             ProtectionEngine(),
+            terminology_catalog=terminology_catalog,
         ),
         PillowImageCropper(),
         PillowMaskRasterizer(),
@@ -169,3 +174,35 @@ def test_manual_source_translation_uses_current_brand_terms() -> None:
         (('<x id="0"/> SALE',), None, "zh-Hans"),
     ]
     assert result.translated_text == "Alpha SALE translated"
+
+
+def test_manual_source_translation_uses_exact_terminology_without_adapter() -> None:
+    class FailingAdapter:
+        adapter_id = "must-not-run"
+
+        def translate(self, texts, source_language, target_language):
+            raise AssertionError("Exact terminology must bypass the adapter")
+
+    QApplication.instance() or QApplication(["manual-terminology-test"])
+    document = _document()
+    box = TextBox(40, 30, 50, 20)
+    result = _processor(
+        FailingAdapter(),
+        TerminologyCatalog(
+            (TerminologyEntry("en", "zh-Hans", "Clamp", "卡箍"),)
+        ),
+    ).execute(
+        document,
+        document,
+        ManualRegionSpec(
+            ManualInputMode.SOURCE_TEXT,
+            box,
+            box,
+            box,
+            source_text="Clamp",
+        ),
+        "en",
+        TranslationSelection(TranslationMode.ALL, "zh-Hans"),
+    )
+
+    assert result.translated_text == "卡箍"

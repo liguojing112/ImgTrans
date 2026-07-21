@@ -37,7 +37,11 @@ from src.domain.models import ModelUpdateResult
 from src.domain.activation import ActivationSession
 from src.application.inpainting import RepairTranslatedRegions
 from src.application.manual_region import ProcessManualRegion
-from src.application.ports import BatchResultStore, BrandTermsPreferences
+from src.application.ports import (
+    BatchResultStore,
+    BrandTermsPreferences,
+    TerminologyPreferences,
+)
 from src.application.ocr import RecognizeText
 from src.application.translation import TranslateRegions
 from src.application.translate_image import TranslateImage, TranslateImageResult
@@ -45,11 +49,21 @@ from src.domain.image import ImageDocument
 from src.domain.batch import BatchItemStatus, BatchSnapshot, BatchStatus
 from src.domain.job import ImageStage, JobCancelled
 from src.domain.layout import ArcTextPath, TextBox, TextLayout
+from src.domain.language import SUPPORTED_LANGUAGE_CODES
 from src.domain.manual_region import ManualRegionResult
 from src.domain.ocr import OcrResult
 from src.domain.inpainting import RepairOutcome
-from src.domain.translation import TranslationResult, TranslationStatus
+from src.domain.translation import (
+    TranslationMode,
+    TranslationResult,
+    TranslationStatus,
+)
 from src.domain.session import SessionChanges
+from src.domain.terminology import (
+    TerminologyCatalog,
+    TerminologyEntry,
+    normalize_terminology_entries,
+)
 from src.ui.image_canvas import ImageCanvas
 from src.ui.batch_panel import BatchPanel
 from src.ui.curved_text_panel import CurvedTextPanel
@@ -100,6 +114,8 @@ class MainWindow(QMainWindow):
         run_batch: RunBatch | None = None,
         batch_result_store: BatchResultStore | None = None,
         brand_terms_preferences: BrandTermsPreferences | None = None,
+        terminology_preferences: TerminologyPreferences | None = None,
+        terminology_catalog: TerminologyCatalog | None = None,
         export_batch_selection: ExportBatchSelection | None = None,
         confirm_discard: Callable[[str], bool] | None = None,
         refresh_image_limits: Callable[[], ImageLimitsRefreshResult] | None = None,
@@ -121,6 +137,13 @@ class MainWindow(QMainWindow):
         self._run_batch = run_batch
         self._batch_result_store = batch_result_store
         self._brand_terms_preferences = brand_terms_preferences
+        self._terminology_preferences = terminology_preferences
+        self._terminology_catalog = terminology_catalog or (
+            translate_regions.terminology_catalog
+            if translate_regions is not None
+            else None
+        )
+        self._terminology_entries: tuple[TerminologyEntry, ...] = ()
         self._export_batch_selection = export_batch_selection
         self._confirm_discard_callback = confirm_discard
         self._refresh_image_limits = refresh_image_limits
@@ -162,6 +185,22 @@ class MainWindow(QMainWindow):
             self._persist_brand_terms
         )
         self._load_brand_terms()
+        self.translation_panel.terminology_editor.textChanged.connect(
+            self._persist_current_terminology
+        )
+        self.translation_panel.mode_combo.currentIndexChanged.connect(
+            self._terminology_pair_changed
+        )
+        self.translation_panel.source_combo.currentIndexChanged.connect(
+            self._terminology_pair_changed
+        )
+        self.translation_panel.target_combo.currentIndexChanged.connect(
+            self._terminology_pair_changed
+        )
+        self.ocr_panel.language_combo.currentIndexChanged.connect(
+            self._terminology_pair_changed
+        )
+        self._load_terminology()
         self.setStyleSheet(_STYLE)
 
     def _load_brand_terms(self) -> None:
@@ -183,6 +222,87 @@ class MainWindow(QMainWindow):
             self._brand_terms_preferences.save(brand_terms)
         except Exception as error:
             self.statusBar().showMessage(f"无法保存品牌保护词：{error}", 7000)
+
+    def _load_terminology(self) -> None:
+        try:
+            entries = (
+                self._terminology_preferences.load()
+                if self._terminology_preferences is not None
+                else (
+                    self._terminology_catalog.snapshot()
+                    if self._terminology_catalog is not None
+                    else ()
+                )
+            )
+            self._terminology_entries = normalize_terminology_entries(entries)
+            if self._terminology_catalog is not None:
+                self._terminology_catalog.replace(self._terminology_entries)
+            self._show_current_terminology()
+        except Exception as error:
+            self.statusBar().showMessage(f"无法加载精确术语表：{error}", 7000)
+
+    def _current_terminology_pair(self) -> tuple[str, str] | None:
+        mode = self.translation_panel.mode_combo.currentData()
+        source_value = (
+            self.translation_panel.source_combo.currentData()
+            if mode is TranslationMode.SPECIFIC_LANGUAGE
+            else self.ocr_panel.language_combo.currentData()
+        )
+        target_value = self.translation_panel.target_combo.currentData()
+        source_language = str(source_value) if source_value is not None else ""
+        target_language = str(target_value) if target_value is not None else ""
+        if (
+            source_language not in SUPPORTED_LANGUAGE_CODES
+            or target_language not in SUPPORTED_LANGUAGE_CODES
+        ):
+            return None
+        return source_language, target_language
+
+    def _show_current_terminology(self) -> None:
+        pair = self._current_terminology_pair()
+        if pair is None:
+            self.translation_panel.set_terminology_unavailable()
+            return
+        source_language, target_language = pair
+        self.translation_panel.set_terminology_pair(
+            source_language,
+            target_language,
+            self._terminology_entries,
+        )
+
+    def _terminology_pair_changed(self, *_: object) -> None:
+        self._show_current_terminology()
+
+    def _persist_current_terminology(self) -> None:
+        source_language, target_language = self.translation_panel.terminology_pair
+        if not source_language or not target_language:
+            return
+        try:
+            configured = self.translation_panel.configured_terminology_entries
+            retained = tuple(
+                entry
+                for entry in self._terminology_entries
+                if (
+                    entry.source_language != source_language
+                    or entry.target_language != target_language
+                    or not entry.enabled
+                )
+            )
+            entries = normalize_terminology_entries([*retained, *configured])
+            if self._terminology_catalog is not None:
+                self._terminology_catalog.replace(entries)
+            if self._terminology_preferences is not None:
+                self._terminology_preferences.save(entries)
+            self._terminology_entries = entries
+            self.translation_panel.terminology_status.setText(
+                f"当前语言对已启用 {len(configured)} 条精确术语"
+            )
+        except ValueError as error:
+            self.translation_panel.set_terminology_error(str(error))
+        except Exception as error:
+            self.translation_panel.set_terminology_error(
+                f"无法保存精确术语表：{error}"
+            )
 
     @property
     def current_document(self) -> ImageDocument | None:
@@ -1507,6 +1627,7 @@ class MainWindow(QMainWindow):
             event.ignore()
             return
         self._persist_brand_terms()
+        self._persist_current_terminology()
         if self._run_batch is not None:
             self._run_batch.cancel()
         if self._batch_snapshot is not None and self._batch_result_store is not None:

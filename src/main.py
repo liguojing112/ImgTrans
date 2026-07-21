@@ -28,6 +28,7 @@ from src.application.translate_image import TranslateImage
 from src.domain.image import ImageLimits
 from src.domain.activation import ActivationError
 from src.domain.protection import ProtectionEngine
+from src.domain.terminology import TerminologyCatalog
 from src.domain.product import ProductInfo
 from src.infrastructure.logging_config import configure_logging
 from src.infrastructure.batch_result_store import PngBatchResultStore
@@ -53,7 +54,10 @@ from src.infrastructure.rapidocr_adapter import RapidOcrAdapter
 from src.infrastructure.rapidocr_models import InstalledRapidOcrModels
 from src.infrastructure.server_translation_adapter import ServerTranslationAdapter
 from src.infrastructure.text_renderer import QtBasicTextLayoutAdapter, QtTextRenderer
-from src.infrastructure.user_preferences import JsonBrandTermsPreferences
+from src.infrastructure.user_preferences import (
+    JsonBrandTermsPreferences,
+    JsonTerminologyPreferences,
+)
 from src.platform.paths import PlatformPaths, discover_model_target
 from src.platform.credentials import create_platform_credential_store
 from src.platform.qt_runtime import QtRuntimeMonitor, configure_qt_runtime
@@ -130,7 +134,12 @@ def create_main_window() -> MainWindow:
         translation_adapter = ServerTranslationAdapter(backend_url, access_token)
     else:
         raise ValueError("IMGTRANS_TRANSLATION_MODE must be mock or server")
-    translate = TranslateRegions(translation_adapter, ProtectionEngine())
+    terminology_catalog = TerminologyCatalog()
+    translate = TranslateRegions(
+        translation_adapter,
+        ProtectionEngine(),
+        terminology_catalog=terminology_catalog,
+    )
     repair = RepairTranslatedRegions(
         BuildEraseMask(PillowMaskRasterizer()),
         inpainting,
@@ -169,9 +178,9 @@ def create_main_window() -> MainWindow:
         batch_result_store,
         export_image,
     )
-    brand_terms_preferences = JsonBrandTermsPreferences(
-        startup.data_dir / "config" / "preferences.json"
-    )
+    preferences_path = startup.data_dir / "config" / "preferences.json"
+    brand_terms_preferences = JsonBrandTermsPreferences(preferences_path)
+    terminology_preferences = JsonTerminologyPreferences(preferences_path)
     update_models = None
     if backend_url:
         model_platform, model_architecture = discover_model_target()
@@ -197,6 +206,8 @@ def create_main_window() -> MainWindow:
         run_batch=run_batch,
         batch_result_store=batch_result_store,
         brand_terms_preferences=brand_terms_preferences,
+        terminology_preferences=terminology_preferences,
+        terminology_catalog=terminology_catalog,
         export_batch_selection=export_batch_selection,
         task_runner=task_runner,
         refresh_image_limits=image_limits.refresh,

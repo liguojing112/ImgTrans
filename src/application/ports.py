@@ -7,6 +7,7 @@ from src.domain.image import ImageDocument, ImageFileFormat, ImageLimits
 from src.domain.inpainting import EraseMask, InpaintingRequest, InpaintingResult
 from src.domain.layout import TextBox, TextLayer, TextLayout
 from src.domain.ocr import OcrResult
+from src.domain.terminology import TerminologyEntry
 from src.domain.translation import TranslationAdapterItem, TranslationResult
 
 
@@ -91,3 +92,9 @@ class BrandTermsPreferences(Protocol):
     def load(self) -> tuple[str, ...]: ...
 
     def save(self, brand_terms: tuple[str, ...]) -> None: ...
+
+
+class TerminologyPreferences(Protocol):
+    def load(self) -> tuple[TerminologyEntry, ...]: ...
+
+    def save(self, entries: tuple[TerminologyEntry, ...]) -> None: ...

@@ -15,6 +15,7 @@ from src.domain.image import ImageDocument, ImageLimits
 from src.domain.ocr import OcrResult, TextRegion, order_quad
 from src.domain.product import ProductInfo
 from src.domain.protection import ProtectionEngine
+from src.domain.terminology import TerminologyCatalog, TerminologyEntry
 from src.domain.translation import (
     TranslationMode,
     TranslationResult,
@@ -62,6 +63,19 @@ class MemoryBrandTermsPreferences:
     def save(self, brand_terms: tuple[str, ...]) -> None:
         self.values = brand_terms
         self.saved.append(brand_terms)
+
+
+class MemoryTerminologyPreferences:
+    def __init__(self, values=()) -> None:
+        self.values = tuple(values)
+        self.saved: list[tuple[TerminologyEntry, ...]] = []
+
+    def load(self) -> tuple[TerminologyEntry, ...]:
+        return self.values
+
+    def save(self, entries: tuple[TerminologyEntry, ...]) -> None:
+        self.values = entries
+        self.saved.append(entries)
 
 
 def test_window_runs_mock_translation_and_shows_protected_terms(tmp_path: Path) -> None:
@@ -176,4 +190,51 @@ def test_window_loads_persists_and_immediately_applies_brand_terms(tmp_path: Pat
     window.translation_panel.brand_terms.editingFinished.emit()
     assert preferences.saved[-1] == ("Gamma", "Alpha")
     assert window.translation_panel.brand_terms.text() == "Gamma, Alpha"
+    window.close()
+
+
+def test_window_edits_current_language_pair_and_updates_catalog_immediately(
+    tmp_path: Path,
+) -> None:
+    QApplication.instance() or QApplication(["imgtrans-terminology-preferences-test"])
+    catalog = TerminologyCatalog()
+    preferences = MemoryTerminologyPreferences(
+        (
+            TerminologyEntry("en", "zh-Hans", "Clamp", "卡箍"),
+            TerminologyEntry("zh-Hans", "en", "卡箍", "Clamp"),
+        )
+    )
+    translate = TranslateRegions(
+        MockTranslationAdapter(),
+        ProtectionEngine(),
+        terminology_catalog=catalog,
+    )
+    window = MainWindow(
+        StartupSnapshot(
+            ProductInfo("Image Translator", "0.1.0", "M1"),
+            tmp_path / "data",
+            tmp_path / "cache",
+        ),
+        recognize_text=RecognizeText(FixtureOcrAdapter()),
+        translate_regions=translate,
+        terminology_preferences=preferences,
+        terminology_catalog=catalog,
+    )
+    window.ocr_panel.language_combo.setCurrentIndex(
+        window.ocr_panel.language_combo.findData("en")
+    )
+    window.translation_panel.target_combo.setCurrentIndex(
+        window.translation_panel.target_combo.findData("zh-Hans")
+    )
+
+    assert "Clamp => 卡箍" in window.translation_panel.terminology_editor.toPlainText()
+    window.translation_panel.terminology_editor.setPlainText(
+        " Ａ  B => first\nA B => second"
+    )
+
+    assert catalog.lookup("en", "zh-Hans", "A B") == "second"
+    assert preferences.saved[-1][-1] == TerminologyEntry(
+        "en", "zh-Hans", "A B", "second"
+    )
+    assert catalog.lookup("zh-Hans", "en", "卡箍") == "Clamp"
     window.close()

@@ -3,6 +3,7 @@ import pytest
 from src.application.translation import TranslateRegions
 from src.domain.ocr import OcrResult, TextRegion, order_quad
 from src.domain.protection import ProtectionEngine, ProtectionKind
+from src.domain.terminology import TerminologyCatalog, TerminologyEntry
 from src.domain.translation import (
     TranslationAdapterItem,
     TranslationMode,
@@ -171,6 +172,159 @@ def test_brand_terms_skip_fully_protected_regions_and_restore_partial_spans() ->
     assert adapter.calls == [
         (('<x id="0"/> SALE',), None, "zh-Hans"),
     ]
+
+
+def test_exact_terminology_overrides_complete_region_without_adapter_call() -> None:
+    adapter = _RecordingAdapter()
+    catalog = TerminologyCatalog(
+        (
+            TerminologyEntry(
+                "zh-Hans",
+                "en",
+                "50-75管通用",
+                "Fits 50–75 mm Pipes",
+            ),
+        )
+    )
+    result = TranslateRegions(
+        adapter,
+        ProtectionEngine(),
+        terminology_catalog=catalog,
+    ).execute(
+        OcrResult(
+            (
+                _region("term", "50-75管通用", "zh-Hans", 0),
+                _region("ordinary", "普通文字", "zh-Hans", 40),
+            ),
+            "zh-Hans",
+            "fixture-model",
+            1,
+        ),
+        TranslationSelection(TranslationMode.ALL, "en"),
+    )
+
+    assert result.units[0].status is TranslationStatus.TRANSLATED
+    assert result.units[0].translated_text == "Fits 50–75 mm Pipes"
+    assert adapter.calls == [(('普通文字',), None, "en")]
+
+
+def test_terminology_requires_complete_match_and_enabled_entry() -> None:
+    adapter = _RecordingAdapter()
+    catalog = TerminologyCatalog(
+        (
+            TerminologyEntry("en", "zh-Hans", "Clamp", "卡箍"),
+            TerminologyEntry(
+                "en", "zh-Hans", "Disabled", "禁用", enabled=False
+            ),
+        )
+    )
+    result = TranslateRegions(
+        adapter,
+        ProtectionEngine(),
+        terminology_catalog=catalog,
+    ).execute(
+        OcrResult(
+            (
+                _region("substring", "Clamp set", "en", 0),
+                _region("disabled", "Disabled", "en", 40),
+            ),
+            "en",
+            "fixture-model",
+            1,
+        ),
+        TranslationSelection(TranslationMode.ALL, "zh-Hans"),
+    )
+
+    assert [unit.translated_text for unit in result.units] == [
+        "translated:Clamp set",
+        "translated:Disabled",
+    ]
+    assert adapter.calls == [(('Clamp set', 'Disabled'), None, "zh-Hans")]
+
+
+def test_brand_protection_precedes_exact_terminology() -> None:
+    adapter = _RecordingAdapter()
+    catalog = TerminologyCatalog(
+        (
+            TerminologyEntry("en", "zh-Hans", "Alpha", "错误覆盖"),
+            TerminologyEntry("en", "zh-Hans", "Alpha SALE", "错误覆盖"),
+        )
+    )
+    result = TranslateRegions(
+        adapter,
+        ProtectionEngine(),
+        terminology_catalog=catalog,
+    ).execute(
+        OcrResult(
+            (
+                _region("full", "Alpha", "en", 0),
+                _region("partial", "Alpha SALE", "en", 40),
+            ),
+            "en",
+            "fixture-model",
+            1,
+        ),
+        TranslationSelection(TranslationMode.ALL, "zh-Hans"),
+        ("Alpha",),
+    )
+
+    assert result.units[0].status is TranslationStatus.SKIPPED_PROTECTED
+    assert result.units[1].translated_text == "translated:Alpha SALE"
+    assert adapter.calls == [(('<x id="0"/> SALE',), None, "zh-Hans")]
+
+
+def test_review_precedes_terminology_and_manual_override_can_use_term() -> None:
+    adapter = _RecordingAdapter()
+    catalog = TerminologyCatalog(
+        (TerminologyEntry("en", "zh-Hans", "Clamp", "卡箍"),)
+    )
+    use_case = TranslateRegions(
+        adapter,
+        ProtectionEngine(),
+        terminology_catalog=catalog,
+    )
+    ocr = OcrResult(
+        (_region("low", "Clamp", "en", 0, 0.74),),
+        "en",
+        "fixture-model",
+        1,
+    )
+    selection = TranslationSelection(TranslationMode.ALL, "zh-Hans")
+
+    automatic = use_case.execute(ocr, selection)
+    manual = use_case.execute(ocr, selection, allow_low_confidence=True)
+
+    assert automatic.units[0].status is TranslationStatus.REVIEW_REQUIRED
+    assert manual.units[0].status is TranslationStatus.TRANSLATED
+    assert manual.units[0].translated_text == "卡箍"
+    assert adapter.calls == []
+
+
+def test_local_language_skip_precedes_exact_terminology() -> None:
+    adapter = _RecordingAdapter()
+    catalog = TerminologyCatalog(
+        (TerminologyEntry("fr", "zh-Hans", "Clamp", "错误覆盖"),)
+    )
+    result = TranslateRegions(
+        adapter,
+        ProtectionEngine(),
+        terminology_catalog=catalog,
+    ).execute(
+        OcrResult(
+            (_region("wrong-language", "Clamp", "fr", 0),),
+            "fr",
+            "fixture-model",
+            1,
+        ),
+        TranslationSelection(
+            TranslationMode.SPECIFIC_LANGUAGE,
+            "zh-Hans",
+            source_language="en",
+        ),
+    )
+
+    assert result.units[0].status is TranslationStatus.SKIPPED_LANGUAGE
+    assert adapter.calls == []
 
 
 

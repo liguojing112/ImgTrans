@@ -6,9 +6,14 @@ from time import monotonic, sleep
 from types import SimpleNamespace
 
 from src.application.batch import RunBatch
+from src.application.translation import TranslateRegions
 from src.domain.batch import BatchStatus
 from src.domain.image import ImageAsset, ImageDocument, ImageFileFormat
 from src.domain.job import ImageStage, JobCancelled
+from src.domain.ocr import OcrResult, TextRegion, order_quad
+from src.domain.protection import ProtectionEngine
+from src.domain.terminology import TerminologyCatalog, TerminologyEntry
+from src.domain.translation import TranslationAdapterItem
 from src.domain.translation import TranslationMode, TranslationSelection
 
 
@@ -89,6 +94,50 @@ class _ReleasingStore:
         self.refs = {value for value in self.refs if not value.startswith(batch_id)}
 
 
+class _UnusedTranslationAdapter:
+    adapter_id = "unused"
+
+    def __init__(self) -> None:
+        self.calls = []
+
+    def translate(self, texts, source_language, target_language):
+        self.calls.append((texts, source_language, target_language))
+        return tuple(
+            TranslationAdapterItem(translated_text=f"translated:{text}")
+            for text in texts
+        )
+
+
+class _TerminologyWorkflow:
+    def __init__(self, translate: TranslateRegions) -> None:
+        self._translate = translate
+        self.results = []
+
+    def execute(self, document, ocr_language, selection, brand_terms=(), on_stage=None):
+        del ocr_language, on_stage
+        ocr = OcrResult(
+            (
+                TextRegion(
+                    "term",
+                    order_quad(((0, 0), (5, 0), (5, 1), (0, 1))),
+                    "Clamp",
+                    0.99,
+                    "en",
+                    "fixture",
+                ),
+            ),
+            "en",
+            "fixture",
+            0,
+        )
+        translation = self._translate.execute(ocr, selection, brand_terms)
+        self.results.append(translation)
+        return SimpleNamespace(document=document, translation=translation)
+
+    def cancel(self) -> None:
+        pass
+
+
 def _selection() -> TranslationSelection:
     return TranslationSelection(TranslationMode.ALL, "zh-Hans")
 
@@ -151,3 +200,36 @@ def test_50_and_100_items_keep_the_same_bounded_active_image_count() -> None:
         assert result.completed_count == count
         peaks.append(importer.peak_live)
     assert peaks == [2, 2]
+
+
+def test_single_and_batch_workflows_use_the_same_exact_terminology() -> None:
+    catalog = TerminologyCatalog(
+        (TerminologyEntry("en", "zh-Hans", "Clamp", "卡箍"),)
+    )
+    adapter = _UnusedTranslationAdapter()
+    workflow = _TerminologyWorkflow(
+        TranslateRegions(
+            adapter,
+            ProtectionEngine(),
+            terminology_catalog=catalog,
+        )
+    )
+    selection = _selection()
+    single_importer = _TrackingImporter(pixel_bytes=30)
+    single = workflow.execute(
+        single_importer.execute(Path("single.png")),
+        "en",
+        selection,
+    )
+    batch_importer = _TrackingImporter(pixel_bytes=30)
+    batch = RunBatch(
+        batch_importer,
+        workflow,
+        _ReleasingStore(batch_importer),
+        1,
+    ).execute((Path("batch.png"),), "en", selection)
+
+    assert single.translation.units[0].translated_text == "卡箍"
+    assert workflow.results[-1].units[0].translated_text == "卡箍"
+    assert batch.completed_count == 1
+    assert adapter.calls == []

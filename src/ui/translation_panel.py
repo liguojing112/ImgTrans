@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from PySide6.QtCore import QSignalBlocker
 from PySide6.QtWidgets import (
     QComboBox,
     QFrame,
@@ -7,12 +8,17 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QPushButton,
+    QPlainTextEdit,
     QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
 )
 
 from src.domain.protection import ProtectionKind, normalize_brand_terms
+from src.domain.terminology import (
+    TerminologyEntry,
+    normalize_terminology_entries,
+)
 from src.domain.translation import (
     TranslationMode,
     TranslationResult,
@@ -90,6 +96,21 @@ class TranslationPanel(QFrame):
         self.brand_terms.setObjectName("brandTerms")
         self.brand_terms.setPlaceholderText("品牌保护词，使用逗号分隔（可选）")
         layout.addWidget(self.brand_terms)
+        self._terminology_source_language = str(self.source_combo.currentData())
+        self._terminology_target_language = str(self.target_combo.currentData())
+        self.terminology_label = QLabel()
+        self.terminology_label.setObjectName("terminologyLabel")
+        layout.addWidget(self.terminology_label)
+        self.terminology_editor = QPlainTextEdit()
+        self.terminology_editor.setObjectName("terminologyEditor")
+        self.terminology_editor.setPlaceholderText("源词 => 目标词（每行一项）")
+        self.terminology_editor.setMaximumHeight(90)
+        layout.addWidget(self.terminology_editor)
+        self.terminology_status = QLabel()
+        self.terminology_status.setObjectName("terminologyStatus")
+        self.terminology_status.setWordWrap(True)
+        layout.addWidget(self.terminology_status)
+        self._update_terminology_label()
         self.translate_button = QPushButton(f"执行{self._provider_label}")
         self.translate_button.setObjectName("translateButton")
         self.translate_button.setEnabled(False)
@@ -130,6 +151,85 @@ class TranslationPanel(QFrame):
 
     def set_configured_brand_terms(self, brand_terms: tuple[str, ...]) -> None:
         self.brand_terms.setText(", ".join(normalize_brand_terms(brand_terms)))
+
+    @property
+    def terminology_pair(self) -> tuple[str, str]:
+        return (
+            self._terminology_source_language,
+            self._terminology_target_language,
+        )
+
+    @property
+    def configured_terminology_entries(self) -> tuple[TerminologyEntry, ...]:
+        entries = []
+        for line_number, line in enumerate(
+            self.terminology_editor.toPlainText().splitlines(), start=1
+        ):
+            value = line.strip()
+            if not value:
+                continue
+            parts = value.split("=>")
+            if len(parts) != 2:
+                raise ValueError(f"术语表第 {line_number} 行必须使用“源词 => 目标词”格式")
+            entries.append(
+                TerminologyEntry(
+                    self._terminology_source_language,
+                    self._terminology_target_language,
+                    parts[0],
+                    parts[1],
+                )
+            )
+        return normalize_terminology_entries(entries)
+
+    def set_terminology_pair(
+        self,
+        source_language: str,
+        target_language: str,
+        entries: tuple[TerminologyEntry, ...],
+    ) -> None:
+        self._terminology_source_language = source_language
+        self._terminology_target_language = target_language
+        self.terminology_editor.setEnabled(True)
+        self._update_terminology_label()
+        lines = [
+            f"{entry.source_text} => {entry.target_text}"
+            for entry in entries
+            if entry.enabled
+            and entry.source_language == source_language
+            and entry.target_language == target_language
+        ]
+        blocker = QSignalBlocker(self.terminology_editor)
+        self.terminology_editor.setPlainText("\n".join(lines))
+        del blocker
+        self.terminology_status.setText(
+            f"当前语言对已启用 {len(lines)} 条精确术语"
+        )
+
+    def set_terminology_unavailable(self) -> None:
+        self._terminology_source_language = ""
+        self._terminology_target_language = ""
+        self.terminology_label.setText("精确术语：暂无可用语言对")
+        blocker = QSignalBlocker(self.terminology_editor)
+        self.terminology_editor.clear()
+        del blocker
+        self.terminology_editor.setEnabled(False)
+        self.terminology_status.clear()
+
+    def set_terminology_error(self, message: str) -> None:
+        self.terminology_status.setText(message)
+
+    def _update_terminology_label(self) -> None:
+        source = LANGUAGE_LABELS.get(
+            self._terminology_source_language,
+            self._terminology_source_language,
+        )
+        target = LANGUAGE_LABELS.get(
+            self._terminology_target_language,
+            self._terminology_target_language,
+        )
+        self.terminology_label.setText(
+            f"精确术语：{source} → {target}（每行：源词 => 目标词）"
+        )
 
     def set_source_language(self, language_code: str) -> None:
         index = self.source_combo.findData(language_code)
