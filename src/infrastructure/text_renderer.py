@@ -231,18 +231,33 @@ def _font_for_style(style: TextStyle) -> QFont:
 
 
 def _font_for_layer(layer: TextLayer) -> QFont:
-    font = _font_for_style(layer.style)
-    if layer.style.font_weight == 400 or not layer.text:
-        return font
-    regular_style = replace(layer.style, font_weight=400)
-    regular_width = QFontMetricsF(_font_for_style(regular_style)).horizontalAdvance(
-        layer.text
+    return _font_for_text(layer.style, layer.text)
+
+
+def _font_for_text(
+    style: TextStyle,
+    text: str,
+    *,
+    font_size: float | None = None,
+    font_stretch: int | None = None,
+) -> QFont:
+    measured_style = replace(
+        style,
+        font_size=style.font_size if font_size is None else font_size,
+        font_stretch=style.font_stretch if font_stretch is None else font_stretch,
     )
-    weighted_width = QFontMetricsF(font).horizontalAdvance(layer.text)
+    font = _font_for_style(measured_style)
+    if measured_style.font_weight == 400 or not text:
+        return font
+    regular_style = replace(measured_style, font_weight=400)
+    regular_width = QFontMetricsF(_font_for_style(regular_style)).horizontalAdvance(
+        text
+    )
+    weighted_width = QFontMetricsF(font).horizontalAdvance(text)
     if regular_width > 0 and weighted_width > regular_width:
         compensated_stretch = max(
             50,
-            round(layer.style.font_stretch * regular_width / weighted_width),
+            round(measured_style.font_stretch * regular_width / weighted_width),
         )
         font.setStretch(compensated_stretch)
     return font
@@ -410,12 +425,20 @@ def _normalize_visual_group_sizes(
         )
         weights = sorted(layers[index].style.font_weight for index in indexes)
         common_weight = weights[(len(weights) - 1) // 2]
+        group_layers = {
+            index: replace(
+                layers[index],
+                box=group_boxes[index],
+                style=replace(layers[index].style, font_weight=common_weight),
+            )
+            for index in indexes
+        }
         common_size = min(
             fit_font_size(
                 6,
                 max(6, min(160, layers[index].box.height * 0.9)),
                 lambda size, index=index: _text_fits(
-                    replace(layers[index], box=group_boxes[index]),
+                    group_layers[index],
                     layers[index].text,
                     size,
                     common_stretch,
@@ -424,14 +447,21 @@ def _normalize_visual_group_sizes(
             for index in indexes
         )
         for index in indexes:
-            normalized[index] = replace(
-                layers[index],
-                box=group_boxes[index],
+            candidate = replace(
+                group_layers[index],
                 style=replace(
-                    layers[index].style,
+                    group_layers[index].style,
                     font_size=common_size,
                     font_stretch=common_stretch,
-                    font_weight=common_weight,
+                ),
+            )
+            normalized[index] = replace(
+                candidate,
+                overflow=not _text_fits(
+                    candidate,
+                    candidate.text,
+                    candidate.style.font_size,
+                    candidate.style.font_stretch,
                 ),
             )
     return tuple(normalized)
@@ -524,9 +554,12 @@ def _text_fits(
     size: float,
     stretch: int,
 ) -> bool:
-    font = QFont(layer.style.font_family)
-    font.setPixelSize(max(1, round(size)))
-    font.setStretch(stretch)
+    font = _font_for_text(
+        layer.style,
+        text,
+        font_size=size,
+        font_stretch=stretch,
+    )
     metrics = QFontMetricsF(font)
     if layer.path is not None:
         return (

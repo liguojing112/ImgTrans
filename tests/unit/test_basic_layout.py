@@ -1,4 +1,5 @@
 import os
+from dataclasses import replace
 from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -7,7 +8,8 @@ import numpy as np
 import cv2
 import pytest
 from PySide6.QtWidgets import QApplication
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QRectF, Qt
+from PySide6.QtGui import QFontMetricsF
 
 from src.domain.image import ImageAsset, ImageDocument, ImageFileFormat
 from src.domain.layout import (
@@ -32,9 +34,12 @@ from src.infrastructure.text_renderer import (
     _estimate_font_weight,
     _font_for_layer,
     _font_for_style,
+    _font_for_text,
     _normalize_visual_group_sizes,
+    _text_fits,
     _text_flags,
 )
+from src.platform.fonts import resolve_system_font
 
 
 def _document() -> ImageDocument:
@@ -98,6 +103,103 @@ def test_qfont_uses_text_style_weight() -> None:
     )
     assert int(layer_font.weight()) == 700
     assert layer_font.stretch() <= 100
+
+
+def test_weight_aware_reflow_and_renderer_share_effective_font() -> None:
+    QApplication.instance() or QApplication(["layout-weight-aware-fit-test"])
+    font_family = resolve_system_font("en")
+    adapter = QtBasicTextLayoutAdapter(font_family)
+    box = TextBox(20, 22.5, 40, 45)
+    regular = adapter.reflow(
+        TextLayer(
+            "regular",
+            "Label * 2",
+            box,
+            TextStyle(font_family, 6, (0, 0, 0), font_weight=400),
+        ),
+        "Label * 2",
+    )
+    bold = adapter.reflow(
+        TextLayer(
+            "bold",
+            "Label * 2",
+            box,
+            TextStyle(font_family, 6, (0, 0, 0), font_weight=700),
+        ),
+        "Label * 2",
+    )
+
+    assert bold.style.font_size < regular.style.font_size
+    assert bold.style.font_weight == 700
+    measured = _font_for_text(
+        bold.style,
+        bold.text,
+        font_size=bold.style.font_size,
+        font_stretch=bold.style.font_stretch,
+    )
+    rendered = _font_for_layer(bold)
+    assert (
+        measured.family(),
+        measured.pixelSize(),
+        int(measured.weight()),
+        measured.stretch(),
+    ) == (
+        rendered.family(),
+        rendered.pixelSize(),
+        int(rendered.weight()),
+        rendered.stretch(),
+    )
+
+
+def test_bold_wrap_and_overflow_use_rendered_font_metrics() -> None:
+    QApplication.instance() or QApplication(["layout-bold-overflow-test"])
+    adapter = QtBasicTextLayoutAdapter("Segoe UI")
+    style = TextStyle(
+        "Segoe UI",
+        20,
+        (0, 0, 0),
+        font_weight=700,
+        auto_fit=False,
+    )
+    overflowing = adapter.reflow(
+        TextLayer("bold", "Label * 2", TextBox(34.5, 14.5, 69, 29), style),
+        "Label * 2",
+    )
+    assert overflowing.overflow
+
+    fitting = adapter.reflow(
+        TextLayer(
+            "bold",
+            "Label * 2",
+            TextBox(34.5, 14.5, 69, 29),
+            replace(style, font_size=13),
+        ),
+        "Label * 2",
+    )
+    assert not fitting.overflow
+    font = _font_for_layer(fitting)
+    bounds = QFontMetricsF(font).boundingRect(
+        QRectF(0, 0, fitting.box.width, fitting.box.height),
+        _text_flags(fitting.style, fitting.text),
+        fitting.text,
+    )
+    assert bounds.width() <= fitting.box.width + 0.5
+    assert bounds.height() <= fitting.box.height + 0.5
+
+
+def test_weight_aware_reflow_marks_overflow_at_minimum_size() -> None:
+    QApplication.instance() or QApplication(["layout-bold-minimum-test"])
+    layer = TextLayer(
+        "tiny",
+        "A label that cannot fit",
+        TextBox(5, 2.5, 10, 5),
+        TextStyle("Segoe UI", 6, (0, 0, 0), font_weight=700),
+    )
+
+    result = QtBasicTextLayoutAdapter("Segoe UI").reflow(layer, layer.text)
+
+    assert result.style.font_size == 6
+    assert result.overflow
 
 
 @pytest.mark.parametrize(
@@ -206,6 +308,16 @@ def test_reflow_and_visual_group_normalization_preserve_and_unify_weight() -> No
 
     normalized = _normalize_visual_group_sizes(document, grouped)
     assert {item.style.font_weight for item in normalized} == {600}
+    assert not any(item.overflow for item in normalized)
+    assert all(
+        _text_fits(
+            item,
+            item.text,
+            item.style.font_size,
+            item.style.font_stretch,
+        )
+        for item in normalized
+    )
 
 
 def test_qt_layout_preserves_region_geometry_and_estimates_foreground() -> None:
