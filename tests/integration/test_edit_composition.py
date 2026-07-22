@@ -33,7 +33,12 @@ def test_edit_reflows_renders_and_round_trips_history() -> None:
         "r1",
         "促销",
         TextBox(90, 40, 120, 30),
-        TextStyle(resolve_system_font("zh-Hans"), 20, (20, 30, 40)),
+        TextStyle(
+            resolve_system_font("zh-Hans"),
+            20,
+            (20, 30, 40),
+            font_weight=700,
+        ),
     )
     renderer = QtTextRenderer()
     initial_layout = TextLayout((layer,))
@@ -43,6 +48,7 @@ def test_edit_reflows_renders_and_round_trips_history() -> None:
     ).execute(background, initial, initial_layout)
     edited = editor.replace_text("r1", "夏季新品促销")
     assert edited.layout.layer_by_id("r1").text == "夏季新品促销"
+    assert edited.layout.layer_by_id("r1").style.font_weight == 700
     assert edited.can_undo and not edited.can_redo
     assert edited.document.pixels != initial.pixels
     undone = editor.undo()
@@ -51,6 +57,7 @@ def test_edit_reflows_renders_and_round_trips_history() -> None:
     assert undone.can_redo
     redone = editor.redo()
     assert redone.layout.layer_by_id("r1").text == "夏季新品促销"
+    assert redone.layout.layer_by_id("r1").style.font_weight == 700
     assert redone.document.pixels == edited.document.pixels
 
 

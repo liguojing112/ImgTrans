@@ -60,7 +60,12 @@ def test_window_edits_translation_and_undoes_redoes(tmp_path: Path) -> None:
                 "r1",
                 "促销",
                 TextBox(90, 38, 130, 32),
-                TextStyle(resolve_system_font("zh-Hans"), 22, (20, 30, 40)),
+                TextStyle(
+                    resolve_system_font("zh-Hans"),
+                    22,
+                    (20, 30, 40),
+                    font_weight=700,
+                ),
             ),
         )
     )
@@ -113,6 +118,7 @@ def test_window_edits_translation_and_undoes_redoes(tmp_path: Path) -> None:
     window.request_style_edit()
     styled = window._composition_editor.layout.layer_by_id("r1")
     assert styled.style.font_size == 15
+    assert styled.style.font_weight == 700
     assert styled.style.stroke_width == 2
     assert styled.style.shadow_opacity == 0.6
     assert styled.box.rotation_degrees == 20

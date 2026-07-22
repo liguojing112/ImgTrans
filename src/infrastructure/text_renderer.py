@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 from math import atan2, degrees, hypot
 
+import cv2
 import numpy as np
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import (
@@ -84,6 +85,7 @@ class QtBasicTextLayoutAdapter:
                             alignment,
                             font_degraded=resolution.degraded if resolution else False,
                             font_fallback_reason=resolution.reason if resolution else None,
+                            font_weight=_estimate_font_weight(source, region),
                         ),
                     ),
                     text,
@@ -158,9 +160,7 @@ class QtTextRenderer:
             QPainter.RenderHint.Antialiasing | QPainter.RenderHint.TextAntialiasing
         )
         for layer in layout.layers:
-            font = QFont(layer.style.font_family)
-            font.setPixelSize(max(1, round(layer.style.font_size)))
-            font.setStretch(layer.style.font_stretch)
+            font = _font_for_layer(layer)
             if layer.path is not None:
                 _render_arc_layer(painter, layer, font)
                 continue
@@ -220,6 +220,32 @@ def _qimage(document: ImageDocument) -> QImage:
         document.asset.width * channels,
         image_format,
     ).copy()
+
+
+def _font_for_style(style: TextStyle) -> QFont:
+    font = QFont(style.font_family)
+    font.setPixelSize(max(1, round(style.font_size)))
+    font.setStretch(style.font_stretch)
+    font.setWeight(QFont.Weight(style.font_weight))
+    return font
+
+
+def _font_for_layer(layer: TextLayer) -> QFont:
+    font = _font_for_style(layer.style)
+    if layer.style.font_weight == 400 or not layer.text:
+        return font
+    regular_style = replace(layer.style, font_weight=400)
+    regular_width = QFontMetricsF(_font_for_style(regular_style)).horizontalAdvance(
+        layer.text
+    )
+    weighted_width = QFontMetricsF(font).horizontalAdvance(layer.text)
+    if regular_width > 0 and weighted_width > regular_width:
+        compensated_stretch = max(
+            50,
+            round(layer.style.font_stretch * regular_width / weighted_width),
+        )
+        font.setStretch(compensated_stretch)
+    return font
 
 
 def _rgba_bytes(image: QImage, width: int, height: int) -> np.ndarray:
@@ -382,6 +408,8 @@ def _normalize_visual_group_sizes(
         common_stretch = min(
             layers[index].style.font_stretch for index in indexes
         )
+        weights = sorted(layers[index].style.font_weight for index in indexes)
+        common_weight = weights[(len(weights) - 1) // 2]
         common_size = min(
             fit_font_size(
                 6,
@@ -403,6 +431,7 @@ def _normalize_visual_group_sizes(
                     layers[index].style,
                     font_size=common_size,
                     font_stretch=common_stretch,
+                    font_weight=common_weight,
                 ),
             )
     return tuple(normalized)
@@ -720,6 +749,110 @@ def _estimate_foreground_color(
             else white
         )
     return tuple(int(value) for value in color)  # type: ignore[return-value]
+
+
+def _estimate_font_weight(
+    document: ImageDocument,
+    region: TextRegion,
+) -> int:
+    channels = 4 if document.mode == "RGBA" else 3
+    pixels = np.frombuffer(document.pixels, dtype=np.uint8).reshape(
+        document.asset.height,
+        document.asset.width,
+        channels,
+    )[:, :, :3]
+    xs = [point.x for point in region.polygon]
+    ys = [point.y for point in region.polygon]
+    x0 = max(0, min(document.asset.width - 1, int(min(xs))))
+    x1 = max(x0 + 1, min(document.asset.width, int(max(xs)) + 1))
+    y0 = max(0, min(document.asset.height - 1, int(min(ys))))
+    y1 = max(y0 + 1, min(document.asset.height, int(max(ys)) + 1))
+    patch = pixels[y0:y1, x0:x1]
+    height, width = patch.shape[:2]
+    if height < 18 or width < 12:
+        return 400
+    edge = max(1, min(height, width) // 8)
+    border = np.concatenate(
+        (
+            patch[:edge].reshape(-1, 3),
+            patch[-edge:].reshape(-1, 3),
+            patch[:, :edge].reshape(-1, 3),
+            patch[:, -edge:].reshape(-1, 3),
+        )
+    ).astype(np.float32)
+    background = np.median(border, axis=0)
+    foreground = np.asarray(
+        _estimate_foreground_color(document, region),
+        dtype=np.float32,
+    )
+    contrast = float(np.linalg.norm(foreground - background))
+    if contrast < 70:
+        return 400
+    values = patch.astype(np.float32)
+    foreground_distance = np.linalg.norm(values - foreground, axis=2)
+    background_distance = np.linalg.norm(values - background, axis=2)
+    ink = (
+        (foreground_distance + 8 < background_distance)
+        & (background_distance > max(24, contrast * 0.18))
+    ).astype(np.uint8)
+    polygon = np.asarray(
+        [
+            [
+                round(point.x - x0),
+                round(point.y - y0),
+            ]
+            for point in region.polygon
+        ],
+        dtype=np.int32,
+    )
+    polygon[:, 0] = np.clip(polygon[:, 0], 0, width - 1)
+    polygon[:, 1] = np.clip(polygon[:, 1], 0, height - 1)
+    polygon_mask = np.zeros((height, width), dtype=np.uint8)
+    cv2.fillPoly(polygon_mask, (polygon,), 1)
+    ink &= polygon_mask
+    ink_pixels = int(np.count_nonzero(ink))
+    polygon_pixels = int(np.count_nonzero(polygon_mask))
+    if not ink_pixels or not polygon_pixels:
+        return 400
+    ink_ratio = ink_pixels / polygon_pixels
+    if not 0.03 <= ink_ratio <= 0.5:
+        return 400
+    component_count, _, stats, _ = cv2.connectedComponentsWithStats(ink, 8)
+    component_areas = stats[1:, cv2.CC_STAT_AREA]
+    visible_characters = sum(not character.isspace() for character in region.text)
+    if (
+        component_count <= 1
+        or (visible_characters >= 2 and component_count <= 2)
+        or (
+            visible_characters >= 3
+            and len(component_areas)
+            and int(component_areas.max()) > ink_pixels * 0.85
+        )
+    ):
+        return 400
+    distance = cv2.distanceTransform(ink, cv2.DIST_L2, 3)
+    thickness_samples = distance[distance > 0]
+    if not len(thickness_samples):
+        return 400
+    common_radius = float(np.percentile(thickness_samples, 90))
+    maximum_radius = float(thickness_samples.max())
+    relative_thickness = common_radius * 2 / height
+    if (
+        common_radius >= 1.75
+        and maximum_radius >= 4.0
+        and (
+            (height >= 24 and relative_thickness >= 0.18)
+            or (height >= 48 and ink_ratio >= 0.33 and common_radius >= 2.5)
+        )
+    ):
+        return 700
+    if (
+        common_radius >= 1.45
+        and maximum_radius >= 2.35
+        and relative_thickness >= 0.09
+    ):
+        return 600
+    return 400
 
 
 def _contrast_ratio(first: np.ndarray, second: np.ndarray) -> float:

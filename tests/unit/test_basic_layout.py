@@ -4,11 +4,19 @@ from pathlib import Path
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import numpy as np
+import cv2
+import pytest
 from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import Qt
 
 from src.domain.image import ImageAsset, ImageDocument, ImageFileFormat
-from src.domain.layout import TextAlignment, TextStyle, fit_font_size
+from src.domain.layout import (
+    TextAlignment,
+    TextBox,
+    TextLayer,
+    TextStyle,
+    fit_font_size,
+)
 from src.domain.ocr import OcrResult, TextRegion, order_quad
 from src.domain.translation import (
     TranslationMode,
@@ -21,6 +29,10 @@ from src.infrastructure.text_renderer import (
     QtBasicTextLayoutAdapter,
     QtTextRenderer,
     _estimate_foreground_color,
+    _estimate_font_weight,
+    _font_for_layer,
+    _font_for_style,
+    _normalize_visual_group_sizes,
     _text_flags,
 )
 
@@ -55,6 +67,145 @@ def test_binary_font_fit_returns_largest_fitting_value_and_overflow() -> None:
     assert 17.9 <= size <= 18
     assert not overflow
     assert fit_font_size(6, 30, lambda value: False) == (6, True)
+
+
+def test_text_style_defaults_to_regular_and_rejects_unsupported_weights() -> None:
+    assert TextStyle("Arial", 12, (0, 0, 0)).font_weight == 400
+    with pytest.raises(ValueError, match="Font weight"):
+        TextStyle("Arial", 12, (0, 0, 0), font_weight=500)
+
+
+def test_qfont_uses_text_style_weight() -> None:
+    QApplication.instance() or QApplication(["layout-qfont-weight-test"])
+    assert int(_font_for_style(TextStyle("Arial", 12, (0, 0, 0))).weight()) == 400
+    assert int(
+        _font_for_style(
+            TextStyle("Arial", 12, (0, 0, 0), font_weight=600)
+        ).weight()
+    ) == 600
+    assert int(
+        _font_for_style(
+            TextStyle("Arial", 12, (0, 0, 0), font_weight=700)
+        ).weight()
+    ) == 700
+    layer_font = _font_for_layer(
+        TextLayer(
+            "weighted",
+            "Long weighted heading",
+            TextBox(100, 20, 180, 30),
+            TextStyle("Arial", 20, (0, 0, 0), font_weight=700),
+        )
+    )
+    assert int(layer_font.weight()) == 700
+    assert layer_font.stretch() <= 100
+
+
+@pytest.mark.parametrize(
+    ("stroke_thickness", "expected_weight"),
+    ((1, 400), (2, 600), (5, 700)),
+)
+def test_font_weight_estimation_distinguishes_synthetic_strokes(
+    stroke_thickness: int,
+    expected_weight: int,
+) -> None:
+    pixels = np.full((60, 240, 3), 255, dtype=np.uint8)
+    cv2.putText(
+        pixels,
+        "SAMPLE",
+        (8, 45),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        1.4,
+        (0, 0, 0),
+        stroke_thickness,
+        cv2.LINE_AA,
+    )
+    asset = ImageAsset(
+        Path("synthetic-weight.png"),
+        240,
+        60,
+        1,
+        ImageFileFormat.PNG,
+        False,
+        False,
+    )
+    document = ImageDocument(asset, "RGB", pixels.tobytes())
+    region = TextRegion(
+        "weight",
+        order_quad(((5, 10), (210, 10), (210, 50), (5, 50))),
+        "SAMPLE",
+        1,
+        "en",
+        "fixture",
+    )
+
+    assert _estimate_font_weight(document, region) == expected_weight
+
+
+def test_font_weight_estimation_falls_back_for_unreliable_region() -> None:
+    pixels = np.full((60, 240, 3), 127, dtype=np.uint8)
+    asset = ImageAsset(
+        Path("unreliable-weight.png"),
+        240,
+        60,
+        1,
+        ImageFileFormat.PNG,
+        False,
+        False,
+    )
+    document = ImageDocument(asset, "RGB", pixels.tobytes())
+    region = TextRegion(
+        "weight",
+        order_quad(((5, 5), (210, 5), (210, 55), (5, 55))),
+        "SAMPLE",
+        1,
+        "en",
+        "fixture",
+    )
+
+    assert _estimate_font_weight(document, region) == 400
+
+
+def test_reflow_and_visual_group_normalization_preserve_and_unify_weight() -> None:
+    QApplication.instance() or QApplication(["layout-weight-group-test"])
+    adapter = QtBasicTextLayoutAdapter("Arial")
+    layer = TextLayer(
+        "single",
+        "TEXT",
+        TextBox(90, 30, 100, 24),
+        TextStyle("Arial", 12, (255, 255, 255), font_weight=700),
+    )
+    assert adapter.reflow(layer, "UPDATED").style.font_weight == 700
+
+    document = ImageDocument(
+        ImageAsset(
+            Path("weight-group.png"),
+            180,
+            120,
+            1,
+            ImageFileFormat.PNG,
+            False,
+            False,
+        ),
+        "RGB",
+        np.full((120, 180, 3), (40, 60, 80), dtype=np.uint8).tobytes(),
+    )
+    grouped = tuple(
+        TextLayer(
+            f"group-{index}",
+            "TEXT",
+            TextBox(90, 22 + index * 30, 100, 24),
+            TextStyle(
+                "Arial",
+                12,
+                (255, 255, 255),
+                font_weight=weight,
+            ),
+        )
+        for index, weight in enumerate((400, 600, 700))
+    )
+
+    normalized = _normalize_visual_group_sizes(document, grouped)
+    assert {item.style.font_weight for item in normalized} == {600}
 
 
 def test_qt_layout_preserves_region_geometry_and_estimates_foreground() -> None:

@@ -131,6 +131,7 @@ class TextStyle:
     font_degraded: bool = False
     font_fallback_reason: str | None = None
     font_stretch: int = 100
+    font_weight: int = 400
 
     def __post_init__(self) -> None:
         if not self.font_family or self.font_size <= 0:
@@ -146,6 +147,8 @@ class TextStyle:
             raise ValueError("Font fallback reason requires a degraded font")
         if not 50 <= self.font_stretch <= 200:
             raise ValueError("Font stretch must be between 50 and 200")
+        if self.font_weight not in {400, 600, 700}:
+            raise ValueError("Font weight must be 400, 600 or 700")
 
 
 @dataclass(frozen=True, slots=True)

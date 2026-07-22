@@ -36,6 +36,7 @@ class LayerStylePanel(QFrame):
         self._fill_rgb = (24, 32, 51)
         self._stroke_rgb = (255, 255, 255)
         self._shadow_rgb = (0, 0, 0)
+        self._font_weight = 400
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(8)
@@ -165,6 +166,7 @@ class LayerStylePanel(QFrame):
             style = layer.style
             self.font_family.setCurrentFont(QFont(style.font_family))
             self.font_size.setValue(style.font_size)
+            self._font_weight = style.font_weight
             self.auto_fit.setChecked(style.auto_fit)
             self.wrap.setChecked(style.wrap)
             self.horizontal.setCurrentIndex(self.horizontal.findData(style.alignment))
@@ -208,6 +210,7 @@ class LayerStylePanel(QFrame):
                 self.shadow_x.value(),
                 self.shadow_y.value(),
                 ArtisticPreset(self.effect_preset.currentData()),
+                font_weight=self._font_weight,
             ),
             self.rotation.value(),
         )
