@@ -13,6 +13,8 @@ from src.domain.terminology import (
 
 
 _MAX_PREFERENCES_BYTES = 64 * 1024
+_CURRENT_SCHEMA_VERSION = 1
+_KNOWN_FIELDS = {"brand_terms", "terminology_entries"}
 
 
 class UserPreferencesError(RuntimeError):
@@ -25,18 +27,39 @@ class _JsonPreferencesFile:
 
     def load(self) -> dict:
         if not self._path.is_file():
-            return {"schema_version": 1}
+            return {"schema_version": _CURRENT_SCHEMA_VERSION}
         try:
             if self._path.stat().st_size > _MAX_PREFERENCES_BYTES:
-                raise UserPreferencesError("User preferences file is too large")
+                return self._recover_corrupt()
             payload = json.loads(self._path.read_text(encoding="utf-8"))
-            if not isinstance(payload, dict) or payload.get("schema_version") != 1:
-                raise UserPreferencesError("Unsupported user preferences schema")
-            return payload
-        except UserPreferencesError:
-            raise
-        except (OSError, ValueError, TypeError, AttributeError) as error:
-            raise UserPreferencesError("Unable to load user preferences") from error
+        except OSError as error:
+            raise UserPreferencesError("Unable to read user preferences") from error
+        except (ValueError, TypeError, AttributeError):
+            return self._recover_corrupt()
+        if not isinstance(payload, dict):
+            return self._recover_corrupt()
+        version = payload.get("schema_version")
+        if version is not None and type(version) is not int:
+            return self._recover_corrupt()
+        if (version is None or version == 0) and set(payload).difference(
+            {"schema_version", *_KNOWN_FIELDS}
+        ) == set():
+            migrated = {**payload, "schema_version": _CURRENT_SCHEMA_VERSION}
+            try:
+                self._validate(migrated)
+            except (KeyError, TypeError, ValueError, AttributeError):
+                return self._recover_corrupt()
+            self.save(migrated)
+            return migrated
+        if version != _CURRENT_SCHEMA_VERSION:
+            if isinstance(version, int) and version > _CURRENT_SCHEMA_VERSION:
+                raise UserPreferencesError("Unsupported newer user preferences schema")
+            return self._recover_corrupt()
+        try:
+            self._validate(payload)
+        except (KeyError, TypeError, ValueError, AttributeError):
+            return self._recover_corrupt()
+        return payload
 
     def save(self, payload: dict) -> None:
         encoded = json.dumps(
@@ -58,6 +81,44 @@ class _JsonPreferencesFile:
             raise UserPreferencesError("Unable to save user preferences") from error
         finally:
             temporary.unlink(missing_ok=True)
+
+    def _recover_corrupt(self) -> dict:
+        backup = self._path.with_name(
+            f"{self._path.name}.corrupt-{uuid4().hex}.bak"
+        )
+        try:
+            self._path.parent.mkdir(parents=True, exist_ok=True)
+            os.replace(self._path, backup)
+            payload = {"schema_version": _CURRENT_SCHEMA_VERSION}
+            self.save(payload)
+            return payload
+        except OSError as error:
+            raise UserPreferencesError(
+                "Unable to preserve and recover corrupt user preferences"
+            ) from error
+
+    @staticmethod
+    def _validate(payload: dict) -> None:
+        brand_terms = payload.get("brand_terms", [])
+        if not isinstance(brand_terms, list) or not all(
+            isinstance(term, str) for term in brand_terms
+        ):
+            raise ValueError("Invalid brand terms preferences")
+        terminology = payload.get("terminology_entries", [])
+        if not isinstance(terminology, list):
+            raise ValueError("Invalid terminology preferences")
+        for value in terminology:
+            if not isinstance(value, dict) or not isinstance(
+                value.get("enabled"), bool
+            ):
+                raise ValueError("Invalid terminology preferences")
+            TerminologyEntry(
+                source_language=value["source_language"],
+                target_language=value["target_language"],
+                source_text=value["source_text"],
+                target_text=value["target_text"],
+                enabled=value["enabled"],
+            )
 
 
 class JsonBrandTermsPreferences:
