@@ -1,6 +1,6 @@
 # TASK-M4-006：发布加固、秘密扫描、版本与回滚
 
-**状态**：待实施  
+**状态**：自动化加固完成，商业签名与人工验收待执行（2026-07-23）
 **依赖**：TASK-M4-005
 
 ## 目标
@@ -26,3 +26,11 @@ python -m compileall -q src server tests
 python -m src --smoke-test
 python -m server --smoke-test
 ```
+
+## 自动化完成项
+
+- 版本一致性、源码和安装产物秘密扫描、目标平台兼容性、发布 ZIP 哈希 manifest 与模型独立回滚契约已实现。
+- Windows x64 发布候选已在干净配置目录完成首次启动与重启 smoke test。
+- 六张客户图片正式链路全部成功；REVIEW_REQUIRED 与 overflow 多边形像素保护全部通过。
+- V1 已知限制、V1.1 候选和人工发布步骤记录在 `RELEASE_NOTES.md`、`MANUAL_ACTIONS.md` 与 release-readiness 报告中。
+- Windows 商业签名、macOS Developer ID 签名/公证、真实 Apple Silicon GUI 和客户主观视觉验收仍是人工门禁。

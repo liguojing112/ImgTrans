@@ -8,7 +8,7 @@
 - **M1**：单图翻译闭环完成
 - **M2**：批量处理和完整编辑完成
 - **M3**：后端、管理后台和激活码基础闭环完成
-- **M4**：发布适配进行中
+- **M4**：Windows V1 发布候选已生成；macOS arm64 等待真实设备、签名和公证验收
 
 ## 快速开始
 
@@ -37,6 +37,22 @@ python -m scripts.build_desktop --target windows-x64 --dry-run
 ```
 
 正式 Windows x64 和 macOS arm64 构建由 `.github/workflows/m4-desktop-release-build.yml` 在对应原生 runner 执行。构建产物不包含 ONNX 模型权重；OCR 与背景修复模型继续由版本化对象存储清单独立安装。
+
+## V1 发布候选
+
+Windows 10/11 x64 原生构建：
+
+```powershell
+python -m scripts.release_hardening check-source
+python -m scripts.build_desktop --target windows-x64
+python -m scripts.verify_desktop_artifact --target windows-x64
+```
+
+默认输出为 `dist/release-candidate/windows-x64/ImgTrans`。验证器检查 PE 架构、Qt 图片插件、RapidOCR 配置、ONNX Runtime、OpenCV、Qt Core、模型权重隔离、敏感内容和打包后启动。发布 ZIP 与 manifest 由 `scripts.release_hardening` 生成并校验。
+
+macOS 只支持 macOS 13+ Apple Silicon arm64，不支持 Intel Mac 或 Universal 2。构建命令与 Windows 相同，仅将 target 改为 `macos-arm64`；必须在原生 Apple Silicon runner 执行。构建流程已准备，但未在真实 macOS Apple Silicon 设备验收。签名、公证和真机检查见 `MANUAL_ACTIONS.md`。
+
+当前候选默认使用离线 mock 翻译。生产部署必须通过外部配置设置 `IMGTRANS_TRANSLATION_MODE=server` 和 HTTPS `IMGTRANS_API_BASE_URL`，并完成设备激活；不要将服务端 Microsoft Translator 密钥或管理密钥写入客户端配置。
 
 ## 当前可用功能
 
