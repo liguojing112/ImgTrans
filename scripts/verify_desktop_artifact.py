@@ -16,7 +16,7 @@ REQUIRED_IMAGE_PLUGINS = frozenset({"qgif", "qjpeg", "qtiff", "qwebp"})
 
 def default_artifact(target: str) -> Path:
     root = Path(__file__).resolve().parents[1]
-    base = root / "dist" / "release" / target
+    base = root / "dist" / "release-candidate" / target
     return base / ("ImgTrans" if target == "windows-x64" else "ImgTrans.app")
 
 

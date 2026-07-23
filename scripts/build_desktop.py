@@ -38,8 +38,8 @@ def build_command(target: str) -> tuple[list[str], Path, Path]:
     if target not in TARGETS:
         raise ValueError(f"unsupported release target: {target}")
     root = Path(__file__).resolve().parents[1]
-    dist_path = root / "dist" / "release" / target
-    work_path = root / "build" / "release" / target
+    dist_path = root / "dist" / "release-candidate" / target
+    work_path = root / "build" / "release-candidate" / target
     command = [
         sys.executable,
         "-m",

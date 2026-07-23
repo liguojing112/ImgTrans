@@ -55,8 +55,8 @@ def test_build_command_uses_formal_spec_and_release_directories() -> None:
     assert "--clean" in command
     assert "packaging" in command_text and "imgtrans.spec" in command_text
     assert "prototypes" not in command_text
-    assert tuple(dist_path.parts[-2:]) == ("release", target)
-    assert tuple(work_path.parts[-2:]) == ("release", target)
+    assert tuple(dist_path.parts[-2:]) == ("release-candidate", target)
+    assert tuple(work_path.parts[-2:]) == ("release-candidate", target)
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="PE host check requires Windows")

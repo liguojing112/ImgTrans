@@ -83,15 +83,15 @@ jobs:
         shell: pwsh
         run: >-
           Compress-Archive
-          -Path dist/release/windows-x64/ImgTrans
-          -DestinationPath dist/release/ImgTrans-windows-x64.zip
+          -Path dist/release-candidate/windows-x64/ImgTrans
+          -DestinationPath dist/release-candidate/ImgTrans-windows-x64.zip
 
       - name: Generate verified Windows release manifest
         run: >-
           python -m scripts.release_hardening create-manifest
           --target windows-x64
-          --archive dist/release/ImgTrans-windows-x64.zip
-          --output dist/release/ImgTrans-windows-x64.manifest.json
+          --archive dist/release-candidate/ImgTrans-windows-x64.zip
+          --output dist/release-candidate/ImgTrans-windows-x64.manifest.json
 
       - name: Upload Windows application
         uses: actions/upload-artifact@v4
@@ -100,8 +100,8 @@ jobs:
           if-no-files-found: error
           retention-days: 14
           path: |
-            dist/release/ImgTrans-windows-x64.zip
-            dist/release/ImgTrans-windows-x64.manifest.json
+            dist/release-candidate/ImgTrans-windows-x64.zip
+            dist/release-candidate/ImgTrans-windows-x64.manifest.json
 
   macos-arm64:
     name: Test and build macOS arm64
@@ -157,20 +157,20 @@ jobs:
         run: python -m scripts.verify_desktop_artifact --target macos-arm64
 
       - name: Verify ad-hoc application signature
-        run: codesign --verify --deep --strict --verbose=2 dist/release/macos-arm64/ImgTrans.app
+        run: codesign --verify --deep --strict --verbose=2 dist/release-candidate/macos-arm64/ImgTrans.app
 
       - name: Archive verified macOS application
         run: >-
           ditto -c -k --sequesterRsrc --keepParent
-          dist/release/macos-arm64/ImgTrans.app
-          dist/release/ImgTrans-macos-arm64.zip
+          dist/release-candidate/macos-arm64/ImgTrans.app
+          dist/release-candidate/ImgTrans-macos-arm64.zip
 
       - name: Generate verified macOS release manifest
         run: >-
           python -m scripts.release_hardening create-manifest
           --target macos-arm64
-          --archive dist/release/ImgTrans-macos-arm64.zip
-          --output dist/release/ImgTrans-macos-arm64.manifest.json
+          --archive dist/release-candidate/ImgTrans-macos-arm64.zip
+          --output dist/release-candidate/ImgTrans-macos-arm64.manifest.json
 
       - name: Upload macOS application
         uses: actions/upload-artifact@v4
@@ -179,5 +179,5 @@ jobs:
           if-no-files-found: error
           retention-days: 14
           path: |
-            dist/release/ImgTrans-macos-arm64.zip
-            dist/release/ImgTrans-macos-arm64.manifest.json
+            dist/release-candidate/ImgTrans-macos-arm64.zip
+            dist/release-candidate/ImgTrans-macos-arm64.manifest.json
