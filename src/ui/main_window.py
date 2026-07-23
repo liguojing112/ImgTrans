@@ -242,7 +242,9 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(f"无法加载精确术语表：{error}", 7000)
 
     def _current_terminology_pair(self) -> tuple[str, str] | None:
-        mode = self.translation_panel.mode_combo.currentData()
+        mode = TranslationMode(
+            self.translation_panel.mode_combo.currentData()
+        )
         source_value = (
             self.translation_panel.source_combo.currentData()
             if mode is TranslationMode.SPECIFIC_LANGUAGE

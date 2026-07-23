@@ -11,6 +11,7 @@ from src.application.bootstrap import StartupSnapshot
 from src.application.image_io import ExportImage, ImportImage
 from src.application.ocr import RecognizeText
 from src.application.translation import TranslateRegions
+from src.domain.language import SUPPORTED_LANGUAGE_CODES
 from src.domain.image import ImageDocument, ImageLimits
 from src.domain.ocr import OcrResult, TextRegion, order_quad
 from src.domain.product import ProductInfo
@@ -173,6 +174,41 @@ def test_panel_defaults_target_language_to_english_when_available() -> None:
 
     assert panel.selection.target_language == "en"
 
+    panel.close()
+
+
+def test_panel_exposes_customer_language_baseline_and_auto_source_detection() -> None:
+    QApplication.instance() or QApplication(["imgtrans-language-baseline-test"])
+    panel = TranslationPanel(
+        SUPPORTED_LANGUAGE_CODES,
+        provider_id="server-proxy",
+    )
+
+    assert panel.source_combo.currentData() is None
+    assert panel.source_combo.currentText() == "自动识别源语言"
+    assert tuple(
+        panel.source_combo.itemData(index)
+        for index in range(1, panel.source_combo.count())
+    ) == SUPPORTED_LANGUAGE_CODES
+    assert tuple(
+        panel.target_combo.itemData(index)
+        for index in range(panel.target_combo.count())
+    ) == SUPPORTED_LANGUAGE_CODES
+
+    panel.mode_combo.setCurrentIndex(
+        panel.mode_combo.findData(TranslationMode.SPECIFIC_LANGUAGE)
+    )
+    assert panel.source_combo.isEnabled()
+    assert panel.selection.mode is TranslationMode.SPECIFIC_LANGUAGE
+    assert panel.selection.source_language == "zh-Hans"
+
+    panel.source_combo.setCurrentIndex(panel.source_combo.findData("bn"))
+    assert panel.selection.source_language == "bn"
+
+    panel.mode_combo.setCurrentIndex(panel.mode_combo.findData(TranslationMode.ALL))
+    assert panel.source_combo.currentData() is None
+    assert panel.selection.mode is TranslationMode.ALL
+    assert panel.selection.source_language is None
     panel.close()
 
 

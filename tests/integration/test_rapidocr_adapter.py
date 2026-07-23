@@ -53,6 +53,8 @@ def test_adapter_normalizes_result_and_caches_profile_engine() -> None:
 
 def test_adapter_reports_unavailable_language_and_inconsistent_runtime() -> None:
     adapter = RapidOcrAdapter(engine_factory=lambda _profile: FakeEngine(inconsistent=True))
+    assert len(adapter.language_codes) == 24
+    assert "bn" not in adapter.language_codes
     with pytest.raises(OcrError) as unavailable:
         adapter.recognize(_document(), "bn")
     assert unavailable.value.code == "model_unavailable"

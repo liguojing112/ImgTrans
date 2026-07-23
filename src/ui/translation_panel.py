@@ -81,6 +81,7 @@ class TranslationPanel(QFrame):
         self.source_combo.setObjectName("sourceLanguageCombo")
         self.target_combo = QComboBox()
         self.target_combo.setObjectName("targetLanguageCombo")
+        self.source_combo.addItem("自动识别源语言", None)
         for code in language_codes:
             label = LANGUAGE_LABELS.get(code, code)
             self.source_combo.addItem(label, code)
@@ -96,7 +97,7 @@ class TranslationPanel(QFrame):
         self.brand_terms.setObjectName("brandTerms")
         self.brand_terms.setPlaceholderText("品牌保护词，使用逗号分隔（可选）")
         layout.addWidget(self.brand_terms)
-        self._terminology_source_language = str(self.source_combo.currentData())
+        self._terminology_source_language = ""
         self._terminology_target_language = str(self.target_combo.currentData())
         self.terminology_label = QLabel()
         self.terminology_label.setObjectName("terminologyLabel")
@@ -137,7 +138,7 @@ class TranslationPanel(QFrame):
 
     @property
     def selection(self) -> TranslationSelection:
-        mode = self.mode_combo.currentData()
+        mode = TranslationMode(self.mode_combo.currentData())
         source = str(self.source_combo.currentData()) if mode is TranslationMode.SPECIFIC_LANGUAGE else None
         return TranslationSelection(
             mode=mode,
@@ -232,9 +233,13 @@ class TranslationPanel(QFrame):
         )
 
     def set_source_language(self, language_code: str) -> None:
-        index = self.source_combo.findData(language_code)
-        if index >= 0:
-            self.source_combo.setCurrentIndex(index)
+        if (
+            TranslationMode(self.mode_combo.currentData())
+            is TranslationMode.SPECIFIC_LANGUAGE
+        ):
+            index = self.source_combo.findData(language_code)
+            if index >= 0:
+                self.source_combo.setCurrentIndex(index)
         target = "en" if language_code.startswith("zh") else "zh-Hans"
         target_index = self.target_combo.findData(target)
         if target_index >= 0:
@@ -292,6 +297,12 @@ class TranslationPanel(QFrame):
         self.protection_summary.setText("尚无保护片段")
 
     def _mode_changed(self) -> None:
-        self.source_combo.setEnabled(
-            self.mode_combo.currentData() is TranslationMode.SPECIFIC_LANGUAGE
+        specific = (
+            TranslationMode(self.mode_combo.currentData())
+            is TranslationMode.SPECIFIC_LANGUAGE
         )
+        if specific and self.source_combo.currentData() is None:
+            self.source_combo.setCurrentIndex(1)
+        elif not specific:
+            self.source_combo.setCurrentIndex(0)
+        self.source_combo.setEnabled(specific)

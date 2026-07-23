@@ -46,7 +46,9 @@ class RapidOcrAdapter:
 
     @property
     def language_codes(self) -> tuple[str, ...]:
-        return tuple(LANGUAGE_PROFILES)
+        return tuple(
+            code for code, profile in LANGUAGE_PROFILES.items() if profile is not None
+        )
 
     def recognize(self, document: ImageDocument, language_code: str) -> OcrResult:
         try:
