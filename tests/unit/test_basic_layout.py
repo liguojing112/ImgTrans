@@ -320,6 +320,41 @@ def test_reflow_and_visual_group_normalization_preserve_and_unify_weight() -> No
     )
 
 
+def test_visual_group_keeps_distinct_text_hierarchy() -> None:
+    QApplication.instance() or QApplication(["layout-weight-hierarchy-test"])
+    document = ImageDocument(
+        ImageAsset(
+            Path("weight-hierarchy.png"),
+            240,
+            100,
+            1,
+            ImageFileFormat.PNG,
+            False,
+            False,
+        ),
+        "RGB",
+        np.full((100, 240, 3), (245, 245, 245), dtype=np.uint8).tobytes(),
+    )
+    layers = (
+        TextLayer(
+            "heading",
+            "Heading",
+            TextBox(120, 25, 190, 40),
+            TextStyle("Arial", 20, (30, 30, 30), font_weight=700),
+        ),
+        TextLayer(
+            "body",
+            "Body copy",
+            TextBox(120, 62, 190, 32),
+            TextStyle("Arial", 14, (30, 30, 30), font_weight=400),
+        ),
+    )
+
+    normalized = _normalize_visual_group_sizes(document, layers)
+
+    assert normalized == layers
+
+
 def test_qt_layout_preserves_region_geometry_and_estimates_foreground() -> None:
     QApplication.instance() or QApplication(["layout-test"])
     document = _document()

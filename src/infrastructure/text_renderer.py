@@ -480,7 +480,7 @@ def _same_visual_group(
     first_height = first.box.height
     second_height = second.box.height
     if (
-        max(first_height, second_height) > min(first_height, second_height) * 1.3
+        max(first_height, second_height) > min(first_height, second_height) * 1.08
         or abs(first.box.rotation_degrees) > 3
         or abs(second.box.rotation_degrees) > 3
         or abs(first.box.rotation_degrees - second.box.rotation_degrees) > 3
