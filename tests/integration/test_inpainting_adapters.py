@@ -115,6 +115,64 @@ class _ResultAdapter:
         )
 
 
+class _SplitResultAdapter:
+    def __init__(
+        self,
+        adapter_id: str,
+        left_color: tuple[int, int, int],
+        right_color: tuple[int, int, int],
+    ) -> None:
+        self.adapter_id = adapter_id
+        self.left_color = left_color
+        self.right_color = right_color
+
+    def inpaint(self, request: InpaintingRequest) -> InpaintingResult:
+        height, width = request.document.asset.height, request.document.asset.width
+        pixels = np.frombuffer(request.document.pixels, dtype=np.uint8).reshape(
+            height, width, 3
+        ).copy()
+        mask = np.frombuffer(request.erase_mask.pixels, dtype=np.uint8).reshape(
+            height, width
+        ) > 0
+        columns = np.arange(width)[None, :]
+        pixels[mask & (columns < width // 2)] = self.left_color
+        pixels[mask & (columns >= width // 2)] = self.right_color
+        return InpaintingResult(
+            ImageDocument(request.document.asset, "RGB", pixels.tobytes()),
+            self.adapter_id,
+            1,
+        )
+
+
+def _mixed_background_request() -> InpaintingRequest:
+    width, height = 96, 48
+    pixels = np.full((height, width, 3), (30, 80, 130), dtype=np.uint8)
+    checker = np.indices((height, width // 2)).sum(axis=0) % 2
+    pixels[:, width // 2 :] = np.where(
+        checker[:, :, None] == 0,
+        np.array((25, 35, 45), dtype=np.uint8),
+        np.array((210, 220, 230), dtype=np.uint8),
+    )
+    mask = np.zeros((height, width), dtype=np.uint8)
+    mask[14:34, 0:20] = 255
+    mask[14:34, 66:86] = 255
+    pixels[mask > 0] = (250, 250, 250)
+    asset = ImageAsset(
+        Path("mixed-background.png"),
+        width,
+        height,
+        1,
+        ImageFileFormat.PNG,
+        False,
+        False,
+    )
+    return InpaintingRequest(
+        ImageDocument(asset, "RGB", pixels.tobytes()),
+        EraseMask(width, height, mask.tobytes()),
+        context_pixels=4,
+    )
+
+
 def test_fallback_reports_visible_warning() -> None:
     result = FallbackInpaintAdapter(
         _UnavailableAdapter(), OpenCvInpaintAdapter()
@@ -139,6 +197,41 @@ def test_fallback_keeps_primary_when_smooth_background_matches_boundary() -> Non
         _ResultAdapter((30, 80, 130)),
         _UnavailableAdapter(),
     ).inpaint(_request("RGB"))
+    assert result.backend_id == "fixture-result"
+    assert result.warning is None
+
+
+def test_fallback_replaces_only_edge_touching_artifact_region() -> None:
+    request = _mixed_background_request()
+    result = FallbackInpaintAdapter(
+        _SplitResultAdapter("primary", (220, 220, 220), (10, 190, 20)),
+        _SplitResultAdapter("fallback", (30, 80, 130), (190, 10, 190)),
+    ).inpaint(request)
+    pixels = np.frombuffer(result.document.pixels, dtype=np.uint8).reshape(
+        48, 96, 3
+    )
+
+    assert np.all(pixels[20, 15] == (30, 80, 130))
+    assert np.all(pixels[20, 72] == (10, 190, 20))
+    assert result.backend_id == "primary+fallback"
+    assert result.warning is not None
+
+
+def test_fallback_keeps_primary_for_large_edge_touching_mask() -> None:
+    base = _request("RGB")
+    mask = np.zeros((40, 48), dtype=np.uint8)
+    mask[:, :24] = 255
+    request = InpaintingRequest(
+        base.document,
+        EraseMask(48, 40, mask.tobytes()),
+        context_pixels=4,
+    )
+
+    result = FallbackInpaintAdapter(
+        _ResultAdapter((220, 220, 220)),
+        _UnavailableAdapter(),
+    ).inpaint(request)
+
     assert result.backend_id == "fixture-result"
     assert result.warning is None
 
