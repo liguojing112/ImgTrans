@@ -1,10 +1,12 @@
 import os
+from io import BytesIO
 from pathlib import Path
 from typing import Any
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PIL import Image
+from PySide6.QtCore import QBuffer, QIODevice
 from PySide6.QtWidgets import QApplication
 
 from src.application.bootstrap import StartupSnapshot
@@ -98,6 +100,16 @@ class RecordingWorkflow:
         self._delegate.close()
 
 
+def _canvas_pixels(window: MainWindow) -> bytes:
+    pixmap = window.image_canvas.pixmap()
+    assert pixmap is not None
+    buffer = QBuffer()
+    assert buffer.open(QIODevice.OpenModeFlag.WriteOnly)
+    assert pixmap.save(buffer, "PNG")
+    with Image.open(BytesIO(bytes(buffer.data()))) as image:
+        return image.convert("RGB").tobytes()
+
+
 def test_window_runs_and_exports_complete_single_image_workflow(tmp_path: Path) -> None:
     application = QApplication.instance() or QApplication(["workflow-ui-test"])
     source = tmp_path / "source.png"
@@ -134,6 +146,9 @@ def test_window_runs_and_exports_complete_single_image_workflow(tmp_path: Path) 
     )
     window.show()
     window.request_import(source)
+    window.translation_panel.target_combo.setCurrentIndex(
+        window.translation_panel.target_combo.findData("zh-Hans")
+    )
     window.translation_panel.brand_terms.setText("Alpha，Beta, Alpha")
     original = window.current_document.pixels
     assert window.pipeline_panel.start_button.isEnabled()
@@ -142,13 +157,26 @@ def test_window_runs_and_exports_complete_single_image_workflow(tmp_path: Path) 
     window.request_workflow()
     application.processEvents()
     assert workflow.brand_terms == ("Alpha", "Beta")
-    assert completed[0].job.status is JobStatus.COMPLETED
-    assert window.current_document.pixels != original
+    result = completed[0]
+    assert result.job.status is JobStatus.COMPLETED
+    assert result.document.pixels != original
+    assert window.current_document is result.document
+    assert _canvas_pixels(window) == result.document.pixels
+    assert window.image_canvas.region_count == 0
     assert window.pipeline_panel.status_label.text().startswith("单图翻译完成")
     assert window.statusBar().currentMessage() == "单图翻译完成：已渲染 1 个译文区域"
+
+    window.toggle_original_preview()
+    assert _canvas_pixels(window) == original
+    assert window.image_canvas.region_count == 0
     target = tmp_path / "translated.png"
     window.request_export(target)
     assert target.is_file()
     with Image.open(target) as reopened:
         assert reopened.size == (160, 80)
+        assert reopened.convert(result.document.mode).tobytes() == result.document.pixels
+
+    window.toggle_original_preview()
+    assert _canvas_pixels(window) == result.document.pixels
+    assert window.image_canvas.region_count == 0
     window.close()

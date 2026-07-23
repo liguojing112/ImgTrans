@@ -916,7 +916,7 @@ class MainWindow(QMainWindow):
             else self._current_document
         )
         self.image_canvas.set_document(document)
-        self.image_canvas.set_regions(self._ocr_result.regions if self._ocr_result else ())
+        self.image_canvas.set_regions(())
         if self._composition_editor is not None:
             self.image_canvas.set_text_layout(self._composition_editor.layout)
         self.image_canvas.set_erase_mask(self._repair_outcome.erase_mask)
@@ -1308,7 +1308,7 @@ class MainWindow(QMainWindow):
             self.layer_style_panel.set_layer(None)
             self.curved_text_panel.set_layer(None)
         self.image_canvas.set_document(value.document)
-        self.image_canvas.set_regions(value.ocr.regions)
+        self.image_canvas.set_regions(())
         self.image_canvas.set_text_layout(value.layout)
         self.image_canvas.set_erase_mask(value.repair.erase_mask)
         self.inpainting_panel.show_mask.setChecked(False)
@@ -1339,7 +1339,7 @@ class MainWindow(QMainWindow):
         self._session_changes.mark_single_changed()
         self._previewing_original = False
         self.image_canvas.set_document(value.document)
-        self.image_canvas.set_regions(self._ocr_result.regions if self._ocr_result else ())
+        self.image_canvas.set_regions(())
         self.image_canvas.set_text_layout(value.layout)
         self.image_canvas.set_erase_mask(
             self._repair_outcome.erase_mask if self._repair_outcome else None

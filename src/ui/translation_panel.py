@@ -86,7 +86,7 @@ class TranslationPanel(QFrame):
             self.source_combo.addItem(label, code)
             self.target_combo.addItem(label, code)
         self.source_combo.setEnabled(False)
-        target_index = self.target_combo.findData("zh-Hans")
+        target_index = self.target_combo.findData("en")
         self.target_combo.setCurrentIndex(max(0, target_index))
         language_row.addWidget(self.source_combo)
         language_row.addWidget(self.target_combo)

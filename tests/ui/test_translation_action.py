@@ -167,6 +167,15 @@ def test_panel_shows_review_required_without_counting_it_as_failure() -> None:
     panel.close()
 
 
+def test_panel_defaults_target_language_to_english_when_available() -> None:
+    QApplication.instance() or QApplication(["imgtrans-default-target-test"])
+    panel = TranslationPanel(("zh-Hans", "en"), provider_id="server-proxy")
+
+    assert panel.selection.target_language == "en"
+
+    panel.close()
+
+
 def test_window_loads_persists_and_immediately_applies_brand_terms(tmp_path: Path) -> None:
     QApplication.instance() or QApplication(["imgtrans-brand-preferences-test"])
     preferences = MemoryBrandTermsPreferences(("Alpha", "Beta"))

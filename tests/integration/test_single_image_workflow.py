@@ -151,6 +151,7 @@ def test_workflow_completes_all_stages_and_excludes_protected_region() -> None:
     assert result.repair.erase_mask.pixels[25 * 190 + 165] == 0
     before = np.frombuffer(source.pixels, dtype=np.uint8).reshape(72, 190, 3)
     after = np.frombuffer(result.document.pixels, dtype=np.uint8).reshape(72, 190, 3)
+    assert result.document.pixels != result.repair.result.document.pixels
     assert np.array_equal(after[18:49, 18:79], before[18:49, 18:79])
     assert not np.array_equal(after[18:49, 95:146], before[18:49, 95:146])
     assert not any(
