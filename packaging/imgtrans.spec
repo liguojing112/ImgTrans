@@ -6,7 +6,6 @@ import sys
 from PyInstaller.utils.hooks import (
     collect_data_files,
     collect_dynamic_libs,
-    collect_submodules,
 )
 
 
@@ -30,7 +29,11 @@ rapidocr_datas = collect_data_files(
     excludes=["models/*.onnx", "**/*.onnx"],
 )
 rapidocr_binaries = collect_dynamic_libs("rapidocr")
-rapidocr_hidden = collect_submodules("rapidocr")
+rapidocr_hidden = [
+    "rapidocr.inference_engine.onnxruntime",
+    "rapidocr.inference_engine.onnxruntime.main",
+    "rapidocr.inference_engine.onnxruntime.provider_config",
+]
 onnx_binaries = collect_dynamic_libs("onnxruntime")
 
 analysis = Analysis(

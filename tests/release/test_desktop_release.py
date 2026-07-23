@@ -139,7 +139,8 @@ def test_formal_spec_and_workflow_have_release_gates() -> None:
     assert 'root / "src" / "__main__.py"' in spec
     assert 'collect_data_files(' in spec
     assert 'excludes=["models/*.onnx", "**/*.onnx"]' in spec
-    assert 'collect_submodules("rapidocr")' in spec
+    assert '"rapidocr.inference_engine.onnxruntime"' in spec
+    assert 'collect_submodules("rapidocr")' not in spec
     assert 'collect_dynamic_libs("onnxruntime")' in spec
     assert '"server"' in spec and '"prototypes"' in spec
     assert "windows-2022" in workflow
