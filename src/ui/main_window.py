@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -51,7 +52,7 @@ from src.domain.job import ImageStage, JobCancelled
 from src.domain.layout import ArcTextPath, TextBox, TextLayout
 from src.domain.language import SUPPORTED_LANGUAGE_CODES
 from src.domain.manual_region import ManualRegionResult
-from src.domain.ocr import OcrResult
+from src.domain.ocr import OcrResult, Point
 from src.domain.inpainting import RepairOutcome
 from src.domain.translation import (
     TranslationMode,
@@ -610,14 +611,56 @@ class MainWindow(QMainWindow):
             if index >= 0:
                 self.ocr_panel.language_combo.setCurrentIndex(index)
         selected_language = self.ocr_panel.selected_language_code
+        mode = self.ocr_panel.selected_mode
+        options = self.ocr_panel.high_recall_options
         self._active_operation = "ocr"
         self._set_busy(True, "正在加载 OCR 模型并识别文字…")
         self.ocr_panel.status_label.setText("正在识别，首次加载模型可能需要数秒…")
         self._task_runner.submit(
-            lambda: self._recognize_text.execute(document, selected_language),
+            lambda: self._recognize_text.execute(
+                document,
+                selected_language,
+                mode,
+                options,
+            ),
             self._ocr_succeeded,
             self._operation_failed,
         )
+
+    def _ocr_center_selected(self, value: object) -> None:
+        x = value.x() if callable(getattr(value, "x", None)) else getattr(value, "x", None)
+        y = value.y() if callable(getattr(value, "y", None)) else getattr(value, "y", None)
+        if x is None or y is None:
+            return
+        self.ocr_panel.set_center(Point(float(x), float(y)))
+        self.statusBar().showMessage(
+            f"高召回 OCR 圆心已设置为 ({float(x):.1f}, {float(y):.1f})",
+            5000,
+        )
+
+    def _confirm_ocr_region(self, region_id: str, text: str) -> None:
+        if self._ocr_result is None:
+            return
+        changed = False
+        regions = []
+        for region in self._ocr_result.regions:
+            if region.region_id != region_id:
+                regions.append(region)
+                continue
+            regions.append(
+                replace(
+                    region,
+                    text=text.strip(),
+                    auto_process_eligible=True,
+                )
+            )
+            changed = True
+        if not changed:
+            return
+        self._ocr_result = replace(self._ocr_result, regions=tuple(regions))
+        self.ocr_panel.set_result(self._ocr_result)
+        self.image_canvas.set_regions(self._ocr_result.regions)
+        self.statusBar().showMessage("增强 OCR 结果已人工确认，可进入翻译", 5000)
 
     def request_translation(self) -> None:
         if not self._ocr_result or not self._translate_regions or not self._task_runner:
@@ -667,21 +710,37 @@ class MainWindow(QMainWindow):
     def request_workflow(self) -> None:
         if not self._source_document or not self._translate_image or not self._task_runner:
             return
+        self._persist_brand_terms()
         document = self._source_document
         ocr_language = self.ocr_panel.selected_language_code
         selection = self.translation_panel.selection
         brand_terms = self.translation_panel.configured_brand_terms
+        ocr_mode = self.ocr_panel.selected_mode
+        high_recall_options = self.ocr_panel.high_recall_options
         self._active_operation = "workflow"
         self.pipeline_panel.reset()
         self._set_busy(True, "正在执行单图自动翻译…")
-        self._task_runner.submit(
+        operation = (
             lambda: self._translate_image.execute(
                 document,
                 ocr_language,
                 selection,
                 brand_terms,
                 self.workflow_stage_changed.emit,
-            ),
+            )
+            if ocr_mode.value == "standard"
+            else lambda: self._translate_image.execute(
+                document,
+                ocr_language,
+                selection,
+                brand_terms,
+                self.workflow_stage_changed.emit,
+                ocr_mode,
+                high_recall_options,
+            )
+        )
+        self._task_runner.submit(
+            operation,
             self._workflow_succeeded,
             self._workflow_failed,
         )
@@ -1005,6 +1064,13 @@ class MainWindow(QMainWindow):
         language_codes = self._recognize_text.language_codes if self._recognize_text else ()
         self.ocr_panel = OcrPanel(language_codes)
         self.ocr_panel.recognize_button.clicked.connect(self.request_ocr)
+        self.ocr_panel.center_pick_requested.connect(
+            lambda: self.image_canvas.set_point_selection_enabled(True)
+        )
+        self.image_canvas.point_selected.connect(self._ocr_center_selected)
+        self.ocr_panel.region_confirmation_requested.connect(
+            self._confirm_ocr_region
+        )
         translation_codes = (
             self._translate_regions.language_codes if self._translate_regions else ()
         )
@@ -1184,6 +1250,7 @@ class MainWindow(QMainWindow):
         self.pipeline_panel.reset()
         self.content_stack.setCurrentWidget(self.image_workspace)
         asset = value.asset
+        self.ocr_panel.set_image_geometry(asset.width, asset.height)
         alpha = " · Alpha" if asset.has_alpha else ""
         orientation = " · 已校正 EXIF 方向" if asset.orientation_applied else ""
         self.readiness_label.setText(

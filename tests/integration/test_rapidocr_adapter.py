@@ -6,16 +6,71 @@ from PIL import Image, ImageDraw, ImageFont
 import pytest
 
 from src.domain.image import ImageAsset, ImageDocument, ImageFileFormat, ImageLimits
-from src.domain.ocr import OcrError, TextRegionStatus
+from src.domain.ocr import (
+    HighRecallOcrOptions,
+    OcrError,
+    OcrMode,
+    OcrObservation,
+    Point,
+    TextRegion,
+    TextRegionStatus,
+    order_quad,
+)
 from src.infrastructure.ocr_profiles import OcrProfile
 from src.infrastructure.pillow_image_codec import PillowImageCodec
-from src.infrastructure.rapidocr_adapter import RapidOcrAdapter, RapidOcrModelFiles
+from src.infrastructure.rapidocr_adapter import (
+    RapidOcrAdapter,
+    RapidOcrModelFiles,
+    _alphabetic_token_spans,
+    _map_cartesian_polygon_to_polar_strip,
+    _map_polar_strip_polygon,
+    _merge_high_recall_regions,
+    _polar_ring_centers,
+    _polar_token_quad,
+    _polar_word_intervals,
+    _recover_dense_repeated_regions,
+    _rotate_image_expand,
+)
 
 
 def _document() -> ImageDocument:
     width, height = 240, 120
     return ImageDocument(
         ImageAsset(Path("fixture.png"), width, height, 1, ImageFileFormat.PNG, False, False),
+        "RGB",
+        bytes([255]) * width * height * 3,
+    )
+
+
+def _large_document() -> ImageDocument:
+    width = height = 1254
+    return ImageDocument(
+        ImageAsset(
+            Path("large-fixture.png"),
+            width,
+            height,
+            1,
+            ImageFileFormat.PNG,
+            False,
+            False,
+        ),
+        "RGB",
+        bytes([255]) * width * height * 3,
+    )
+
+
+def _rotated_document() -> ImageDocument:
+    width, height = 330, 327
+    return ImageDocument(
+        ImageAsset(
+            Path("rotated-fixture.png"),
+            width,
+            height,
+            1,
+            ImageFileFormat.PNG,
+            False,
+            False,
+        ),
         "RGB",
         bytes([255]) * width * height * 3,
     )
@@ -49,6 +104,362 @@ def test_adapter_normalizes_result_and_caches_profile_engine() -> None:
     assert first.regions[0].status is TextRegionStatus.LOW_CONFIDENCE
     assert second.model_id == first.model_id
     assert first.regions[0].polygon[0].x == 10
+
+
+def test_high_resolution_tiles_recover_small_region_without_duplicate() -> None:
+    class _TiledEngine:
+        def __init__(self) -> None:
+            self.detection_calls = 0
+
+        def __call__(self, image, **options):
+            if not options["use_det"]:
+                return SimpleNamespace(boxes=None, txts=["耐用"], scores=[0.999])
+            self.detection_calls += 1
+            if image.shape[:2] == (1254, 1254):
+                return SimpleNamespace(
+                    boxes=np.array(
+                        [[[1044, 87], [1147, 87], [1147, 147], [1044, 147]]],
+                        dtype=float,
+                    ),
+                    txts=["厚实"],
+                    scores=[1.0],
+                )
+            if self.detection_calls == 3:
+                return SimpleNamespace(
+                    boxes=np.array(
+                        [
+                            [[494, 87], [597, 87], [597, 147], [494, 147]],
+                            [[494, 133], [595, 133], [595, 190], [494, 190]],
+                        ],
+                        dtype=float,
+                    ),
+                    txts=["厚实", "耐用"],
+                    scores=[1.0, 0.999],
+                )
+            return SimpleNamespace(boxes=None, txts=None, scores=None)
+
+    engine = _TiledEngine()
+    result = RapidOcrAdapter(engine_factory=lambda _profile: engine).recognize(
+        _large_document(),
+        "zh-Hans",
+    )
+
+    assert [region.text for region in result.regions] == ["厚实", "耐用"]
+    assert engine.detection_calls == 5
+    assert min(point.x for point in result.regions[1].polygon) == 1044
+
+
+def test_dense_repeated_word_recovers_digit_shaped_detection_at_higher_scale() -> None:
+    boxes = []
+    for index in range(40):
+        x = (index % 8) * 40
+        y = (index // 8) * 40
+        boxes.append(
+            np.array(
+                ((x, y), (x + 24, y), (x + 24, y + 14), (x, y + 14)),
+                dtype=float,
+            )
+        )
+    canonical = "\u4e92\u52a8"
+    texts = [canonical] * 5 + ["\u54c1\u8d28"] * 34 + ["4"]
+    scores = [0.95] * 40
+    suspicious_box = boxes[-1].copy()
+    missed_box = np.array(
+        ((350, 210), (378, 210), (378, 226), (350, 226)),
+        dtype=float,
+    )
+
+    class _DenseScaleEngine:
+        def __call__(self, image, **options):
+            assert options["use_det"]
+            if image.shape[:2] == (480, 800):
+                return SimpleNamespace(
+                    boxes=np.array([missed_box * 2], dtype=float),
+                    txts=["\u54c1\u8d28"],
+                    scores=[0.82],
+                )
+            assert image.shape[:2] == (720, 1200)
+            return SimpleNamespace(
+                boxes=np.array(
+                    (suspicious_box * 3, missed_box * 3),
+                    dtype=float,
+                ),
+                txts=[canonical, "\u54c1\u8d28"],
+                scores=[0.9, 0.88],
+            )
+
+    recovered_boxes, recovered_texts, recovered_scores = (
+        _recover_dense_repeated_regions(
+            _DenseScaleEngine(),
+            np.full((240, 400, 3), 255, dtype=np.uint8),
+            boxes,
+            texts,
+            scores,
+            0.5,
+        )
+    )
+
+    assert recovered_texts[39] == canonical
+    assert recovered_scores[39] == 0.9
+    assert np.array_equal(recovered_boxes[39], suspicious_box)
+    assert recovered_texts[-1] == "\u54c1\u8d28"
+    assert recovered_scores[-1] == 0.82
+    assert np.allclose(recovered_boxes[-1], missed_box)
+
+
+def test_standard_mode_does_not_run_multi_angle_recovery() -> None:
+    class _RotatedEngine:
+        def __init__(self) -> None:
+            self.detection_calls = 0
+
+        def __call__(self, image, **options):
+            assert options["use_det"]
+            self.detection_calls += 1
+            if self.detection_calls == 1:
+                return SimpleNamespace(
+                    boxes=np.array(
+                        [
+                            [[10, 20], [50, 40], [42, 56], [2, 36]],
+                            [[80, 100], [100, 140], [84, 148], [64, 108]],
+                        ],
+                        dtype=float,
+                    ),
+                    txts=["One", "Two"],
+                    scores=[0.99, 0.98],
+                )
+            if self.detection_calls == 2:
+                return SimpleNamespace(
+                    boxes=np.array(
+                        [[[150, 150], [210, 150], [210, 170], [150, 170]]],
+                        dtype=float,
+                    ),
+                    txts=["Three"],
+                    scores=[0.97],
+                )
+            return SimpleNamespace(boxes=None, txts=None, scores=None)
+
+    engine = _RotatedEngine()
+    result = RapidOcrAdapter(engine_factory=lambda _profile: engine).recognize(
+        _rotated_document(),
+        "en",
+    )
+
+    assert [region.text for region in result.regions] == ["One", "Two"]
+    assert result.mode is OcrMode.STANDARD
+    assert engine.detection_calls == 1
+
+
+def test_high_recall_mode_filters_single_view_rotation_noise() -> None:
+    class _RotatedEngine:
+        def __init__(self) -> None:
+            self.detection_calls = 0
+
+        def __call__(self, image, **options):
+            assert options["use_det"]
+            self.detection_calls += 1
+            if self.detection_calls == 1:
+                return SimpleNamespace(
+                    boxes=np.array(
+                        [[[10, 20], [50, 40], [42, 56], [2, 36]]],
+                        dtype=float,
+                    ),
+                    txts=["One"],
+                    scores=[0.99],
+                )
+            if self.detection_calls == 2:
+                return SimpleNamespace(
+                    boxes=np.array(
+                        [[[150, 150], [210, 150], [210, 170], [150, 170]]],
+                        dtype=float,
+                    ),
+                    txts=["Three"],
+                    scores=[0.97],
+                )
+            return SimpleNamespace(boxes=None, txts=None, scores=None)
+
+    engine = _RotatedEngine()
+    result = RapidOcrAdapter(engine_factory=lambda _profile: engine).recognize_high_recall(
+        _rotated_document(),
+        "en",
+        HighRecallOcrOptions(ring_bands=()),
+    )
+
+    assert result.mode is OcrMode.HIGH_RECALL
+    assert [region.text for region in result.regions] == ["One"]
+    assert engine.detection_calls == 5
+
+
+def test_rotation_expands_canvas_and_inverse_mapping_does_not_crop() -> None:
+    image = np.full((40, 100, 3), 255, dtype=np.uint8)
+    image[0:4, 0:4] = 0
+    rotated, matrix = _rotate_image_expand(image, 37)
+    original_corners = np.asarray(
+        ((0, 0), (99, 0), (99, 39), (0, 39)),
+        dtype=float,
+    )
+    transformed = np.column_stack(
+        (
+            original_corners[:, 0] * matrix[0, 0]
+            + original_corners[:, 1] * matrix[0, 1]
+            + matrix[0, 2],
+            original_corners[:, 0] * matrix[1, 0]
+            + original_corners[:, 1] * matrix[1, 1]
+            + matrix[1, 2],
+        )
+    )
+
+    assert rotated.shape[0] > image.shape[0]
+    assert rotated.shape[1] > image.shape[1]
+    assert transformed[:, 0].min() >= -1
+    assert transformed[:, 1].min() >= -1
+    assert transformed[:, 0].max() <= rotated.shape[1] + 1
+    assert transformed[:, 1].max() <= rotated.shape[0] + 1
+
+
+def test_polar_mapping_round_trip_for_multiple_radii_and_angles() -> None:
+    center = (120.0, 100.0)
+    maximum_radius = 90.0
+    angle_steps = 720
+    local = np.asarray(
+        ((60, 2), (180, 4), (300, 12), (540, 18)),
+        dtype=float,
+    )
+    cartesian = _map_polar_strip_polygon(
+        local,
+        10,
+        center,
+        maximum_radius,
+        angle_steps,
+    )
+    restored = _map_cartesian_polygon_to_polar_strip(
+        cartesian,
+        10,
+        center,
+        maximum_radius,
+        angle_steps,
+    )
+
+    assert np.allclose(restored, local, atol=1e-6)
+
+
+def test_multi_view_dedup_is_deterministic_and_controls_eligibility() -> None:
+    polygon = order_quad(((40, 40), (90, 40), (90, 60), (40, 60)))
+    standard = TextRegion("standard", polygon, "Base", 0.95, "en", "model")
+    enhanced_polygon = order_quad(((140, 80), (200, 80), (200, 100), (140, 100)))
+    observations = [
+        OcrObservation(
+            "polar",
+            15,
+            scale,
+            confidence,
+            enhanced_polygon,
+            text,
+            f"polar:0:scale:{scale}",
+        )
+        for scale, confidence, text in (
+            (2, 0.91, "Strategy"),
+            (3, 0.93, "Strategy"),
+            (4, 0.81, "Strategv"),
+        )
+    ]
+    first = _merge_high_recall_regions(
+        (standard,),
+        observations,
+        "en",
+        "model",
+        0.5,
+        0.85,
+    )
+    second = _merge_high_recall_regions(
+        (standard,),
+        list(reversed(observations)),
+        "en",
+        "model",
+        0.5,
+        0.85,
+    )
+
+    assert [(region.region_id, region.text) for region in first] == [
+        (region.region_id, region.text) for region in second
+    ]
+    enhanced = next(region for region in first if region.enhanced_only)
+    assert enhanced.text == "Strategy"
+    assert enhanced.auto_process_eligible
+    assert len(enhanced.observations) == 3
+
+
+def test_multi_view_borderline_candidate_is_kept_for_review_but_noise_is_dropped() -> None:
+    polygon = order_quad(((80, 70), (140, 70), (140, 90), (80, 90)))
+    observations = [
+        OcrObservation(
+            "polar",
+            20,
+            2,
+            0.81,
+            polygon,
+            "Finance",
+            "polar:0:scale:2",
+        ),
+        OcrObservation(
+            "polar",
+            20,
+            3,
+            0.83,
+            polygon,
+            "Finance",
+            "polar:0:scale:3",
+        ),
+        OcrObservation(
+            "rotation",
+            90,
+            1,
+            0.99,
+            order_quad(((200, 180), (240, 180), (240, 200), (200, 200))),
+            "Noise",
+            "rotation:90",
+        ),
+    ]
+
+    regions = _merge_high_recall_regions(
+        (),
+        observations,
+        "en",
+        "model",
+        0.5,
+        0.85,
+    )
+
+    assert len(regions) == 1
+    assert regions[0].text == "Finance"
+    assert regions[0].enhanced_only
+    assert not regions[0].auto_process_eligible
+
+
+def test_polar_helpers_find_rows_words_and_restore_tangent_geometry() -> None:
+    unwrapped = np.full((100, 600, 3), 255, dtype=np.uint8)
+    for y in (12, 25, 38, 51, 64):
+        unwrapped[y - 3 : y + 4, 30:90] = 40
+        unwrapped[y - 3 : y + 4, 130:210] = 70
+
+    centers = _polar_ring_centers(unwrapped)
+    intervals = _polar_word_intervals(unwrapped[centers[0] - 7 : centers[0] + 7])
+    tokens = _alphabetic_token_spans("Import-Export Strategy")
+    quad = _polar_token_quad(
+        120,
+        180,
+        10,
+        20,
+        (100, 100),
+        100,
+        600,
+    )
+
+    assert len(centers) == 5
+    assert intervals == ((30, 90), (130, 210))
+    assert [token[0] for token in tokens] == ["Import", "Export", "Strategy"]
+    assert quad.shape == (4, 2)
+    assert np.isfinite(quad).all()
+    assert abs(np.cross(quad[1] - quad[0], quad[3] - quad[0])) > 1
 
 
 def test_adapter_reports_unavailable_language_and_inconsistent_runtime() -> None:

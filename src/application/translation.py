@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from dataclasses import replace
+from difflib import SequenceMatcher
+from math import atan2, degrees
 from time import perf_counter
 
 from src.application.ports import TranslationAdapter
@@ -68,6 +71,14 @@ class TranslateRegions:
         reports_source_language = bool(
             getattr(self._adapter, "reports_source_language", False)
         )
+        complex_layout_review = (
+            not allow_low_confidence
+            and _requires_rotated_layout_review(ocr_result)
+        )
+        corroborated_regions = _corroborated_low_confidence_regions(
+            ocr_result,
+            self._automatic_confidence_threshold,
+        )
         for index, region in enumerate(ocr_result.regions):
             if (
                 selection.source_language is not None
@@ -78,6 +89,9 @@ class TranslateRegions:
                     region, selection.target_language, TranslationStatus.SKIPPED_LANGUAGE
                 )
                 continue
+            corroborated_text = corroborated_regions.get(region.region_id)
+            if corroborated_text is not None:
+                region = replace(region, text=corroborated_text)
             protected = self._protection.protect(region.text, brand_terms)
             if protected.fully_protected:
                 units[index] = TranslationUnit(
@@ -92,7 +106,40 @@ class TranslateRegions:
                 continue
             if (
                 not allow_low_confidence
+                and region.enhanced_only
+                and not region.auto_process_eligible
+            ):
+                units[index] = TranslationUnit(
+                    region.region_id,
+                    region.text,
+                    region.language_code,
+                    selection.target_language,
+                    region.text,
+                    TranslationStatus.REVIEW_REQUIRED,
+                    protected.spans,
+                )
+                continue
+            if (
+                complex_layout_review
+                and region.confidence < max(
+                    0.9,
+                    self._automatic_confidence_threshold,
+                )
+            ):
+                units[index] = TranslationUnit(
+                    region.region_id,
+                    region.text,
+                    region.language_code,
+                    selection.target_language,
+                    region.text,
+                    TranslationStatus.REVIEW_REQUIRED,
+                    protected.spans,
+                )
+                continue
+            if (
+                not allow_low_confidence
                 and region.confidence < self._automatic_confidence_threshold
+                and region.region_id not in corroborated_regions
             ):
                 units[index] = TranslationUnit(
                     region.region_id,
@@ -298,3 +345,150 @@ def _obvious_script_language(text: str, fallback: str) -> str | None:
     ):
         return fallback if fallback in {"zh-Hans", "zh-Hant", "ja"} else "zh-Hans"
     return None
+
+
+def _requires_rotated_layout_review(ocr_result: OcrResult) -> bool:
+    regions = ocr_result.regions
+    if len(regions) < 12:
+        return False
+    rotated = 0
+    for region in regions:
+        first, second = region.polygon[:2]
+        angle = degrees(atan2(second.y - first.y, second.x - first.x))
+        while angle > 90:
+            angle -= 180
+        while angle < -90:
+            angle += 180
+        if abs(angle) >= 12:
+            rotated += 1
+    return rotated / len(regions) >= 0.7
+
+
+def _corroborated_low_confidence_regions(
+    ocr_result: OcrResult,
+    threshold: float,
+) -> dict[str, str]:
+    reliable = tuple(
+        region
+        for region in ocr_result.regions
+        if region.confidence >= threshold and len(region.text.strip()) >= 6
+    )
+    corroborated: dict[str, str] = {}
+    for candidate in ocr_result.regions:
+        if (
+            candidate.confidence >= threshold
+            or candidate.confidence < max(0.7, threshold - 0.05)
+            or len(candidate.text.strip()) < 6
+        ):
+            continue
+        candidate_width, candidate_height, candidate_angle = _region_geometry(candidate)
+        for reference in reliable:
+            if (
+                candidate.language_code != reference.language_code
+                or SequenceMatcher(
+                    None,
+                    candidate.text.strip(),
+                    reference.text.strip(),
+                ).ratio()
+                < 0.72
+            ):
+                continue
+            reference_width, reference_height, reference_angle = _region_geometry(
+                reference
+            )
+            if (
+                abs(candidate_angle - reference_angle) <= 5
+                and max(candidate_width, reference_width)
+                / min(candidate_width, reference_width)
+                <= 1.3
+                and max(candidate_height, reference_height)
+                / min(candidate_height, reference_height)
+                <= 1.3
+            ):
+                corroborated[candidate.region_id] = candidate.text
+                break
+    if len(ocr_result.regions) < 40:
+        return corroborated
+
+    repeated_reliable: dict[str, list[TextRegion]] = {}
+    for region in ocr_result.regions:
+        text = region.text.strip()
+        if (
+            region.confidence >= threshold
+            and len(text) >= 2
+            and _obvious_script_language(text, region.language_code)
+            in {"zh-Hans", "zh-Hant", "ja"}
+        ):
+            repeated_reliable.setdefault(text, []).append(region)
+    canonical_groups = {
+        text: tuple(regions)
+        for text, regions in repeated_reliable.items()
+        if len(regions) >= 5
+    }
+    for candidate in ocr_result.regions:
+        candidate_text = candidate.text.strip()
+        if (
+            candidate.confidence >= max(0.9, threshold)
+            or candidate.region_id in corroborated
+            or candidate.confidence < max(0.5, threshold - 0.25)
+            or len(candidate_text) < 2
+        ):
+            continue
+        matches = []
+        for canonical_text, references in canonical_groups.items():
+            if (
+                candidate.language_code != references[0].language_code
+                or len(candidate_text) != len(canonical_text)
+            ):
+                continue
+            similarity = SequenceMatcher(
+                None,
+                candidate_text,
+                canonical_text,
+            ).ratio()
+            minimum_similarity = (
+                1.0
+                if candidate.confidence < max(0.62, threshold - 0.13)
+                else 0.5
+            )
+            if similarity < minimum_similarity or not any(
+                _regions_have_similar_orientation(candidate, reference)
+                for reference in references
+            ):
+                continue
+            matches.append((similarity, len(references), canonical_text))
+        if not matches:
+            continue
+        matches.sort(reverse=True)
+        best = matches[0]
+        if len(matches) > 1 and matches[1][0] == best[0]:
+            continue
+        corroborated[candidate.region_id] = best[2]
+    return corroborated
+
+
+def _regions_have_similar_orientation(
+    first: TextRegion,
+    second: TextRegion,
+) -> bool:
+    _, _, first_angle = _region_geometry(first)
+    _, _, second_angle = _region_geometry(second)
+    return abs(first_angle - second_angle) <= 8
+
+
+def _region_geometry(region: TextRegion) -> tuple[float, float, float]:
+    first, second, _, fourth = region.polygon
+    width = max(
+        0.01,
+        ((second.x - first.x) ** 2 + (second.y - first.y) ** 2) ** 0.5,
+    )
+    height = max(
+        0.01,
+        ((fourth.x - first.x) ** 2 + (fourth.y - first.y) ** 2) ** 0.5,
+    )
+    angle = degrees(atan2(second.y - first.y, second.x - first.x))
+    while angle > 90:
+        angle -= 180
+    while angle < -90:
+        angle += 180
+    return width, height, angle

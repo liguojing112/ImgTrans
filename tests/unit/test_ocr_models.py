@@ -3,6 +3,9 @@ from math import nan
 import pytest
 
 from src.domain.ocr import (
+    HighRecallOcrOptions,
+    OcrMode,
+    OcrObservation,
     OcrResult,
     Point,
     TextRegion,
@@ -32,3 +35,23 @@ def test_text_normalization_and_empty_result_are_valid() -> None:
     assert normalize_ocr_text("  café\n product  ") == "café product"
     result = OcrResult((), "en", "common", 0)
     assert result.regions == ()
+    assert result.mode is OcrMode.STANDARD
+
+
+def test_high_recall_configuration_and_observation_validate_safety_fields() -> None:
+    polygon = order_quad(((0, 0), (20, 0), (20, 10), (0, 10)))
+    observation = OcrObservation(
+        "polar",
+        30,
+        3,
+        0.91,
+        polygon,
+        "Text",
+        "polar:0:scale:3",
+    )
+    assert observation.scale == 3
+    assert HighRecallOcrOptions().consensus_confidence == 0.85
+    with pytest.raises(ValueError, match="scales"):
+        HighRecallOcrOptions(scales=(0,))
+    with pytest.raises(ValueError, match="confidence"):
+        HighRecallOcrOptions(consensus_confidence=1.1)

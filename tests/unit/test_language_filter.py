@@ -1,4 +1,6 @@
 import pytest
+from dataclasses import replace
+from math import cos, radians, sin
 
 from src.application.translation import TranslateRegions
 from src.domain.ocr import OcrResult, TextRegion, order_quad
@@ -119,6 +121,233 @@ def test_all_low_confidence_regions_skip_adapter_and_manual_override_translates(
     assert adapter.calls == [
         (("FIRST", "SECOND"), None, "zh-Hans"),
     ]
+
+
+def test_unconfirmed_enhanced_region_never_calls_adapter_until_manual_confirmation() -> None:
+    adapter = _RecordingAdapter()
+    use_case = TranslateRegions(adapter, ProtectionEngine())
+    enhanced = replace(
+        _region("enhanced", "ROTATED", "en", 0, 0.99),
+        enhanced_only=True,
+        auto_process_eligible=False,
+    )
+    ocr = OcrResult((enhanced,), "en", "fixture-model", 1)
+    selection = TranslationSelection(TranslationMode.ALL, "zh-Hans")
+
+    automatic = use_case.execute(ocr, selection)
+    assert automatic.units[0].status is TranslationStatus.REVIEW_REQUIRED
+    assert not automatic.units[0].should_erase_source
+    assert adapter.calls == []
+
+    confirmed = use_case.execute(
+        OcrResult(
+            (replace(enhanced, auto_process_eligible=True),),
+            "en",
+            "fixture-model",
+            1,
+        ),
+        selection,
+    )
+    assert confirmed.units[0].status is TranslationStatus.TRANSLATED
+    assert adapter.calls == [(("ROTATED",), None, "zh-Hans")]
+
+
+def test_repeated_high_confidence_region_corroborates_borderline_curved_label() -> None:
+    adapter = _RecordingAdapter()
+
+    def repeated_region(
+        region_id: str,
+        text: str,
+        confidence: float,
+        y: float,
+        width: float,
+        height: float,
+    ) -> TextRegion:
+        angle = radians(-24)
+        horizontal = (cos(angle) * width, sin(angle) * width)
+        vertical = (-sin(angle) * height, cos(angle) * height)
+        return TextRegion(
+            region_id,
+            order_quad(
+                (
+                    (40, y),
+                    (40 + horizontal[0], y + horizontal[1]),
+                    (
+                        40 + horizontal[0] + vertical[0],
+                        y + horizontal[1] + vertical[1],
+                    ),
+                    (40 + vertical[0], y + vertical[1]),
+                )
+            ),
+            text,
+            confidence,
+            "zh-Hans",
+            "fixture-model",
+        )
+
+    result = TranslateRegions(adapter, ProtectionEngine()).execute(
+        OcrResult(
+            (
+                repeated_region(
+                    "reliable",
+                    "干湿两用柔软亲肤",
+                    0.82,
+                    80,
+                    120,
+                    50,
+                ),
+                repeated_region(
+                    "corroborated",
+                    "干温雨用柔软亲肤",
+                    0.711,
+                    180,
+                    108,
+                    47,
+                ),
+                repeated_region(
+                    "unmatched",
+                    "完全不同低置信文字",
+                    0.72,
+                    280,
+                    110,
+                    48,
+                ),
+            ),
+            "zh-Hans",
+            "fixture-model",
+            1,
+        ),
+        TranslationSelection(TranslationMode.ALL, "en"),
+    )
+
+    assert [unit.status for unit in result.units] == [
+        TranslationStatus.TRANSLATED,
+        TranslationStatus.TRANSLATED,
+        TranslationStatus.REVIEW_REQUIRED,
+    ]
+    assert adapter.calls == [
+        (("干湿两用柔软亲肤", "干温雨用柔软亲肤"), None, "en"),
+    ]
+
+
+def test_dense_horizontal_artwork_uses_per_region_confidence_gate() -> None:
+    adapter = _RecordingAdapter()
+    use_case = TranslateRegions(adapter, ProtectionEngine())
+    ocr = OcrResult(
+        tuple(
+            _region(f"dense-{index}", f"WORD {index}", "en", index * 4)
+            for index in range(60)
+        ),
+        "en",
+        "fixture-model",
+        1,
+    )
+    selection = TranslationSelection(TranslationMode.ALL, "zh-Hans")
+
+    assert all(
+        unit.status is TranslationStatus.TRANSLATED
+        for unit in use_case.execute(ocr, selection).units
+    )
+    assert len(adapter.calls) == 1
+    assert len(adapter.calls[0][0]) == 60
+
+
+def test_dense_artwork_corroborates_repeated_short_cjk_text() -> None:
+    adapter = _RecordingAdapter()
+    canonical = "\u54c1\u8d28"
+    regions = [
+        _region(f"reliable-{index}", canonical, "zh-Hans", index * 40)
+        for index in range(5)
+    ]
+    regions.extend(
+        (
+            _region("exact-low", canonical, "zh-Hans", 220, 0.55),
+            TextRegion(
+                "fuzzy-low",
+                order_quad(((0, 260), (420, 260), (420, 330), (0, 330))),
+                "\u54c1\u79e9",
+                0.70,
+                "zh-Hans",
+                "fixture-model",
+            ),
+            _region("fuzzy-high", "\u54c1\u79e7", "zh-Hans", 280, 0.86),
+            _region("unmatched-low", "\u69bb\u79e7", "zh-Hans", 300, 0.70),
+        )
+    )
+    regions.extend(
+        _region(f"filler-{index}", f"TEXT {index}", "zh-Hans", 340 + index * 40)
+        for index in range(32)
+    )
+
+    result = TranslateRegions(adapter, ProtectionEngine()).execute(
+        OcrResult(tuple(regions), "zh-Hans", "fixture-model", 1),
+        TranslationSelection(TranslationMode.ALL, "en"),
+    )
+    units = {unit.region_id: unit for unit in result.units}
+
+    assert units["exact-low"].status is TranslationStatus.TRANSLATED
+    assert units["exact-low"].source_text == canonical
+    assert units["fuzzy-low"].status is TranslationStatus.TRANSLATED
+    assert units["fuzzy-low"].source_text == canonical
+    assert units["fuzzy-high"].status is TranslationStatus.TRANSLATED
+    assert units["fuzzy-high"].source_text == canonical
+    assert units["unmatched-low"].status is TranslationStatus.REVIEW_REQUIRED
+    assert adapter.calls[0][0].count(canonical) == 8
+
+
+def test_rotated_word_cloud_translates_only_high_confidence_regions() -> None:
+    adapter = _RecordingAdapter()
+
+    def rotated_region(index: int) -> TextRegion:
+        angle = radians(30)
+        center_x = 120 + index * 3
+        center_y = 80 + index * 4
+        horizontal = (cos(angle) * 40, sin(angle) * 40)
+        vertical = (-sin(angle) * 10, cos(angle) * 10)
+        return TextRegion(
+            f"rotated-{index}",
+            order_quad(
+                (
+                    (
+                        center_x - horizontal[0] - vertical[0],
+                        center_y - horizontal[1] - vertical[1],
+                    ),
+                    (
+                        center_x + horizontal[0] - vertical[0],
+                        center_y + horizontal[1] - vertical[1],
+                    ),
+                    (
+                        center_x + horizontal[0] + vertical[0],
+                        center_y + horizontal[1] + vertical[1],
+                    ),
+                    (
+                        center_x - horizontal[0] + vertical[0],
+                        center_y - horizontal[1] + vertical[1],
+                    ),
+                )
+            ),
+            f"WORD {index}",
+            0.85 if index == 0 else 0.99,
+            "en",
+            "fixture-model",
+        )
+
+    result = TranslateRegions(adapter, ProtectionEngine()).execute(
+        OcrResult(
+            tuple(rotated_region(index) for index in range(12)),
+            "en",
+            "fixture-model",
+            1,
+        ),
+        TranslationSelection(TranslationMode.ALL, "zh-Hans"),
+    )
+
+    assert result.units[0].status is TranslationStatus.REVIEW_REQUIRED
+    assert all(
+        unit.status is TranslationStatus.TRANSLATED for unit in result.units[1:]
+    )
+    assert len(adapter.calls) == 1
+    assert len(adapter.calls[0][0]) == 11
 
 
 def test_language_and_fully_protected_precedence_over_confidence_gate() -> None:

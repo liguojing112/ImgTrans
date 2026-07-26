@@ -15,7 +15,13 @@ from src.domain.image import ImageAsset, ImageDocument, ImageFileFormat
 from src.domain.inpainting import InpaintingRequest, InpaintingResult
 from src.domain.job import ImageStage, JobCancelled, JobStatus
 from src.domain.layout import TextBox, TextLayer, TextLayout, TextStyle
-from src.domain.ocr import OcrResult, TextRegion, order_quad
+from src.domain.ocr import (
+    HighRecallOcrOptions,
+    OcrMode,
+    OcrResult,
+    TextRegion,
+    order_quad,
+)
 from src.domain.protection import ProtectionEngine
 from src.domain.translation import (
     TranslationAdapterItem,
@@ -159,6 +165,69 @@ def test_workflow_completes_all_stages_and_excludes_protected_region() -> None:
     )
 
 
+def test_brand_region_is_not_translated_erased_or_rendered() -> None:
+    QApplication.instance() or QApplication(["workflow-brand-protection-test"])
+    adapter = RecordingTranslationAdapter()
+    renderer = RecordingRenderer()
+    source = _document()
+
+    result = _workflow(adapter, renderer).execute(
+        source,
+        "en",
+        TranslationSelection(TranslationMode.ALL, "zh-Hans"),
+        brand_terms=("SUMMER",),
+    )
+
+    assert adapter.calls == [(("SALE",), None, "zh-Hans")]
+    assert [unit.status for unit in result.translation.units] == [
+        TranslationStatus.SKIPPED_PROTECTED,
+        TranslationStatus.TRANSLATED,
+        TranslationStatus.SKIPPED_PROTECTED,
+    ]
+    protected = result.translation.units[0]
+    assert protected.translated_text == "SUMMER"
+    assert protected.should_erase_source is False
+    assert result.repair.erase_mask.pixels[25 * 190 + 25] == 0
+    assert result.repair.erase_mask.pixels[25 * 190 + 120] == 255
+    assert renderer.received_layout is result.layout
+    assert [layer.region_id for layer in result.layout.layers] == ["high"]
+    before = np.frombuffer(source.pixels, dtype=np.uint8).reshape(72, 190, 3)
+    after = np.frombuffer(result.document.pixels, dtype=np.uint8).reshape(72, 190, 3)
+    assert np.array_equal(after[18:49, 18:79], before[18:49, 18:79])
+
+
+def test_adjacent_translation_cannot_change_brand_region_pixels() -> None:
+    QApplication.instance() or QApplication(["workflow-adjacent-brand-protection-test"])
+    source = _document()
+    renderer = RecordingRenderer()
+    workflow = TranslateImage(
+        RecognizeText(AdjacentFixtureOcrAdapter()),
+        TranslateRegions(RecordingTranslationAdapter(), ProtectionEngine()),
+        RepairTranslatedRegions(
+            BuildEraseMask(PillowMaskRasterizer(), expansion=4),
+            FixtureRepairAdapter(),
+        ),
+        QtBasicTextLayoutAdapter(),
+        renderer,
+    )
+
+    result = workflow.execute(
+        source,
+        "en",
+        TranslationSelection(TranslationMode.ALL, "zh-Hans"),
+        brand_terms=("SUMMER",),
+    )
+
+    assert [unit.status for unit in result.translation.units] == [
+        TranslationStatus.TRANSLATED,
+        TranslationStatus.SKIPPED_PROTECTED,
+    ]
+    before = np.frombuffer(source.pixels, dtype=np.uint8).reshape(72, 190, 3)
+    after = np.frombuffer(result.document.pixels, dtype=np.uint8).reshape(72, 190, 3)
+    assert np.array_equal(after[18:49, 70:121], before[18:49, 70:121])
+    assert not np.array_equal(after[18:49, 18:69], before[18:49, 18:69])
+
+
 def test_workflow_cancels_at_stage_boundary() -> None:
     QApplication.instance() or QApplication(["workflow-cancel-test"])
     workflow = _workflow()
@@ -202,6 +271,35 @@ class AdjacentFixtureOcrAdapter:
             language_code,
             "fixture",
             1,
+        )
+
+
+class EnhancedAdjacentFixtureOcrAdapter(AdjacentFixtureOcrAdapter):
+    def recognize_high_recall(
+        self,
+        document: ImageDocument,
+        language_code: str,
+        options: HighRecallOcrOptions,
+    ) -> OcrResult:
+        del options
+        base = self.recognize(document, language_code)
+        high, review = base.regions
+        review = TextRegion(
+            review.region_id,
+            review.polygon,
+            review.text,
+            0.99,
+            review.language_code,
+            review.model_id,
+            enhanced_only=True,
+            auto_process_eligible=False,
+        )
+        return OcrResult(
+            (high, review),
+            language_code,
+            "fixture",
+            2,
+            OcrMode.HIGH_RECALL,
         )
 
 
@@ -368,6 +466,40 @@ def test_review_pixels_are_restored_after_text_rendering(mode: str) -> None:
     assert not any(
         unit.status is TranslationStatus.FAILED for unit in result.translation.units
     )
+
+
+def test_unconfirmed_high_recall_region_is_not_translated_erased_or_rendered() -> None:
+    QApplication.instance() or QApplication(["workflow-high-recall-review-test"])
+    translation_adapter = ShortTranslationAdapter()
+    repair_adapter = RecordingProtectRepairAdapter()
+    workflow = TranslateImage(
+        RecognizeText(EnhancedAdjacentFixtureOcrAdapter()),
+        TranslateRegions(translation_adapter, ProtectionEngine()),
+        RepairTranslatedRegions(
+            BuildEraseMask(PillowMaskRasterizer(), expansion=2),
+            repair_adapter,
+        ),
+        QtBasicTextLayoutAdapter(),
+        QtTextRenderer(),
+    )
+    source = _adjacent_document()
+    result = workflow.execute(
+        source,
+        "en",
+        TranslationSelection(TranslationMode.ALL, "zh-Hans"),
+        ocr_mode=OcrMode.HIGH_RECALL,
+        high_recall_options=HighRecallOcrOptions(),
+    )
+
+    assert [unit.status for unit in result.translation.units] == [
+        TranslationStatus.TRANSLATED,
+        TranslationStatus.REVIEW_REQUIRED,
+    ]
+    assert translation_adapter.calls == [(("SALE",), None, "zh-Hans")]
+    assert [layer.region_id for layer in result.layout.layers] == ["high"]
+    before = np.frombuffer(source.pixels, dtype=np.uint8).reshape(72, 190, 3)
+    after = np.frombuffer(result.document.pixels, dtype=np.uint8).reshape(72, 190, 3)
+    assert np.array_equal(after[18:49, 70:121], before[18:49, 70:121])
 
 
 class OverflowFixtureOcrAdapter:

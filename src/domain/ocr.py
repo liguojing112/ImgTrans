@@ -31,6 +31,77 @@ class TextRegionStatus(str, Enum):
     LOW_CONFIDENCE = "low_confidence"
 
 
+class OcrMode(str, Enum):
+    STANDARD = "standard"
+    HIGH_RECALL = "high_recall"
+
+
+@dataclass(frozen=True, slots=True)
+class RingBand:
+    inner_radius: float
+    outer_radius: float
+
+    def __post_init__(self) -> None:
+        if self.inner_radius < 0:
+            raise ValueError("Ring inner radius cannot be negative")
+        if self.outer_radius <= self.inner_radius:
+            raise ValueError("Ring outer radius must exceed inner radius")
+
+
+@dataclass(frozen=True, slots=True)
+class HighRecallOcrOptions:
+    center: Point | None = None
+    ring_bands: tuple[RingBand, ...] = ()
+    scales: tuple[int, ...] = (2, 3, 4)
+    rotation_angles: tuple[int, ...] = (0, 90, 180, 270)
+    consensus_confidence: float = 0.85
+
+    def __post_init__(self) -> None:
+        if not self.scales or any(scale < 1 for scale in self.scales):
+            raise ValueError("OCR scales must be positive")
+        if not self.rotation_angles:
+            raise ValueError("OCR rotation angles cannot be empty")
+        if not 0 <= self.consensus_confidence <= 1:
+            raise ValueError("OCR consensus confidence must be between zero and one")
+
+
+@dataclass(frozen=True, slots=True)
+class OcrObservation:
+    source: str
+    angle_degrees: float
+    scale: float
+    confidence: float
+    polygon: Quad
+    text: str
+    view_id: str
+
+    def __post_init__(self) -> None:
+        if not self.source or not self.view_id:
+            raise ValueError("OCR observation source and view ID cannot be empty")
+        if self.scale <= 0:
+            raise ValueError("OCR observation scale must be positive")
+        if not 0 <= self.confidence <= 1:
+            raise ValueError("OCR observation confidence must be between zero and one")
+
+
+@dataclass(frozen=True, slots=True)
+class OcrPreviewStrip:
+    name: str
+    width: int
+    height: int
+    pixels: bytes
+    center: Point
+    ring_band: RingBand
+
+    def __post_init__(self) -> None:
+        if not self.name:
+            raise ValueError("OCR preview strip name cannot be empty")
+        if self.width <= 0 or self.height <= 0:
+            raise ValueError("OCR preview strip dimensions must be positive")
+        if len(self.pixels) != self.width * self.height * 3:
+            raise ValueError("OCR preview strip must contain RGB pixels")
+
+
 @dataclass(frozen=True, slots=True)
 class TextRegion:
     region_id: str
@@ -40,6 +111,9 @@ class TextRegion:
     language_code: str
     model_id: str
     status: TextRegionStatus = TextRegionStatus.OK
+    observations: tuple[OcrObservation, ...] = ()
+    enhanced_only: bool = False
+    auto_process_eligible: bool = True
 
     def __post_init__(self) -> None:
         if not self.region_id:
@@ -60,6 +134,8 @@ class OcrResult:
     language_code: str
     model_id: str
     elapsed_ms: float
+    mode: OcrMode = OcrMode.STANDARD
+    preview_strips: tuple[OcrPreviewStrip, ...] = ()
 
     def __post_init__(self) -> None:
         if self.elapsed_ms < 0:

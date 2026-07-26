@@ -36,6 +36,7 @@ class ImageCanvas(QLabel):
     geometry_edit_requested = Signal(str, object)
     path_edit_requested = Signal(str, object)
     manual_region_selected = Signal(object)
+    point_selected = Signal(object)
 
     def __init__(self) -> None:
         super().__init__()
@@ -59,6 +60,7 @@ class ImageCanvas(QLabel):
         self._drag_original_box: TextBox | None = None
         self._drag_original_path: ArcTextPath | None = None
         self._manual_selection_enabled = False
+        self._point_selection_enabled = False
         self._manual_preview_box: TextBox | None = None
 
     @property
@@ -99,6 +101,7 @@ class ImageCanvas(QLabel):
         self._text_layout = TextLayout(())
         self._selected_region_id = None
         self._manual_selection_enabled = False
+        self._point_selection_enabled = False
         self._manual_preview_box = None
         self.unsetCursor()
         self.update()
@@ -148,6 +151,11 @@ class ImageCanvas(QLabel):
         self._drag_mode = None
         self.setCursor(Qt.CursorShape.CrossCursor) if self._manual_selection_enabled else self.unsetCursor()
         self.update()
+
+    def set_point_selection_enabled(self, enabled: bool) -> None:
+        self._point_selection_enabled = enabled and self._source is not None
+        self._drag_mode = None
+        self.setCursor(Qt.CursorShape.CrossCursor) if self._point_selection_enabled else self.unsetCursor()
 
     def reset_view(self) -> None:
         self._zoom = 1.0
@@ -241,6 +249,14 @@ class ImageCanvas(QLabel):
             return
         view_point = event.position()
         document_point = self.view_to_document(view_point)
+        if self._point_selection_enabled:
+            self._point_selection_enabled = False
+            self.unsetCursor()
+            self.point_selected.emit(
+                _clamp_point(document_point, self._document_size)
+            )
+            event.accept()
+            return
         if self._manual_selection_enabled:
             self._drag_mode = "manual-select"
             self._drag_start_document = _clamp_point(document_point, self._document_size)

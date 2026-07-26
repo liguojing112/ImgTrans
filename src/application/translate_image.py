@@ -13,7 +13,7 @@ from src.domain.image import ImageDocument
 from src.domain.inpainting import RepairOutcome
 from src.domain.job import CancellationToken, ImageJob, ImageStage, JobCancelled
 from src.domain.layout import TextLayout
-from src.domain.ocr import OcrResult
+from src.domain.ocr import HighRecallOcrOptions, OcrMode, OcrResult
 from src.domain.translation import TranslationResult, TranslationSelection
 
 
@@ -54,6 +54,8 @@ class TranslateImage:
         selection: TranslationSelection,
         brand_terms: tuple[str, ...] = (),
         on_stage: Callable[[ImageStage], None] | None = None,
+        ocr_mode: OcrMode = OcrMode.STANDARD,
+        high_recall_options: HighRecallOcrOptions | None = None,
     ) -> TranslateImageResult:
         token = CancellationToken()
         with self._token_lock:
@@ -65,7 +67,12 @@ class TranslateImage:
                 job,
                 token,
                 ImageStage.OCR,
-                lambda: self._recognize.execute(document, ocr_language),
+                lambda: self._recognize.execute(
+                    document,
+                    ocr_language,
+                    ocr_mode,
+                    high_recall_options,
+                ),
                 on_stage,
             )
             translation = self._run_stage(
@@ -109,7 +116,7 @@ class TranslateImage:
                 ),
                 on_stage,
             )
-            rendered = self._repair.restore_review_pixels(
+            rendered = self._repair.restore_automatic_protected_pixels(
                 document,
                 rendered,
                 ocr,
