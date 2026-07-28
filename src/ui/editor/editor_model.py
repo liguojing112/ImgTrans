@@ -24,6 +24,7 @@ class EditorModel(QObject):
     translation_failed = Signal(str)  # error message
     edit_finished = Signal(object)  # CompositionEditResult
     edit_failed = Signal(str)
+    showing_original_changed = Signal(bool)
 
     def __init__(self) -> None:
         super().__init__()
@@ -33,6 +34,8 @@ class EditorModel(QObject):
         self._selected_layer_id: str | None = None
         self._zoom_factor = 1.0
         self._translating = False
+        self._showing_original = False
+        self._layers_visible = True
         self._translation_result: object = None  # TranslateImageResult | None
         self._composition_editor: object = None  # EditComposition | None
         self._rendered_document: ImageDocument | None = None
@@ -138,6 +141,29 @@ class EditorModel(QObject):
     @rendered_document.setter
     def rendered_document(self, value: ImageDocument | None) -> None:
         self._rendered_document = value
+
+    # —— showing_original ——
+
+    @property
+    def showing_original(self) -> bool:
+        return self._showing_original
+
+    @showing_original.setter
+    def showing_original(self, value: bool) -> None:
+        if value == self._showing_original:
+            return
+        self._showing_original = value
+        self.showing_original_changed.emit(value)
+
+    # —— layers_visible ——
+
+    @property
+    def layers_visible(self) -> bool:
+        return self._layers_visible
+
+    @layers_visible.setter
+    def layers_visible(self, value: bool) -> None:
+        self._layers_visible = value
 
     # —— zoom ——
 

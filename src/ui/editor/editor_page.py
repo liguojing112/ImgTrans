@@ -1,7 +1,6 @@
-"""编辑器页面 — 三栏布局容器 + 翻译控制区。
+"""编辑器页面 — 顶部操作栏 + 三栏布局 + 翻译控件 + 导出。
 
-左工具栏 | 中央 QGraphicsView | 右属性面板 + 翻译控件 + 导出。
-连接所有信号/槽，实现双向属性同步和翻译→编辑闭环。
+TopBar | [左工具栏 | 中央 QGraphicsView | 右属性面板+翻译控件+导出]
 """
 
 from __future__ import annotations
@@ -23,6 +22,7 @@ from PySide6.QtWidgets import (
 from src.domain.layout import TextBox, TextLayer, TextLayout
 from src.ui.editor.canvas.scene import EditorScene
 from src.ui.editor.canvas.view import EditorView
+from src.ui.editor.top_bar import TopBar
 from src.ui.editor.translate_controls import TranslateControls
 from src.ui.editor.undo_commands import ReplaceLayerUndoCommand
 from src.ui.editor.property_panel import PropertyPanel
@@ -30,27 +30,30 @@ from src.ui.editor.toolbar import EditorToolBar
 
 
 class EditorPage(QWidget):
-    """图片翻译编辑器页：工具栏 | 画布 | 右侧面板(属性+翻译+导出)。"""
+    """图片翻译编辑器页：TopBar | 工具栏 | 画布 | 右侧面板。"""
 
-    back_requested = Signal()
     import_requested = Signal(object)  # Path
-    translate_requested = Signal(str, str)  # (ocr_language, target_language)
-    export_requested = Signal()
-    fit_requested = Signal()
-    undo_available_changed = Signal(bool)
-    redo_available_changed = Signal(bool)
+    translate_requested = Signal(str, str)
+    export_requested = Signal(object)  # Path
+    back_requested = Signal()
 
-    def __init__(
-        self,
-        undo_stack: QUndoStack,
-        property_change_callback: object = None,
-    ) -> None:
+    ocr_requested = Signal()
+    undo_requested = Signal()
+    redo_requested = Signal()
+    zoom_in_requested = Signal()
+    zoom_out_requested = Signal()
+    fit_requested = Signal()
+    toggle_original_requested = Signal()
+    toggle_layers_requested = Signal()
+
+    def __init__(self, undo_stack: QUndoStack) -> None:
         super().__init__()
         self.setProperty("editorStyle", True)
 
         self._undo_stack = undo_stack
-        self._undo_stack.canUndoChanged.connect(self.undo_available_changed.emit)
-        self._undo_stack.canRedoChanged.connect(self.redo_available_changed.emit)
+
+        # TopBar
+        self.top_bar = TopBar()
 
         # 子组件
         self.toolbar = EditorToolBar()
@@ -60,17 +63,13 @@ class EditorPage(QWidget):
 
         # 翻译控件
         self.translate_controls = TranslateControls()
-        self.translate_controls.translate_requested.connect(
-            lambda ocr, target: self.translate_requested.emit(ocr, target)
-        )
 
         # 导出按钮
         self.export_button = QPushButton("导出图片")
         self.export_button.setObjectName("applyPropertyButton")
         self.export_button.setEnabled(False)
-        self.export_button.clicked.connect(self._on_export_clicked)
 
-        # 右侧面板布局
+        # 右侧面板
         right_panel = QWidget()
         right_layout = QVBoxLayout(right_panel)
         right_layout.setContentsMargins(0, 0, 0, 0)
@@ -79,12 +78,12 @@ class EditorPage(QWidget):
         right_layout.addWidget(self.property_panel, stretch=1)
         right_layout.addWidget(self.export_button)
 
-        # 布局：水平三栏
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-
-        layout.addWidget(self.toolbar)
+        # 中央区域
+        center_widget = QWidget()
+        center_layout = QHBoxLayout(center_widget)
+        center_layout.setContentsMargins(0, 0, 0, 0)
+        center_layout.setSpacing(0)
+        center_layout.addWidget(self.toolbar)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.addWidget(self.view)
@@ -92,18 +91,58 @@ class EditorPage(QWidget):
         splitter.setStretchFactor(0, 1)
         splitter.setStretchFactor(1, 0)
         splitter.setSizes([600, 280])
-        layout.addWidget(splitter, stretch=1)
+        center_layout.addWidget(splitter, stretch=1)
+
+        # 整体布局
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        layout.addWidget(self.top_bar)
+        layout.addWidget(center_widget, stretch=1)
 
         self._connect_signals()
 
     def _connect_signals(self) -> None:
+        # 工具栏
         self.toolbar.import_requested.connect(self._on_import_clicked)
+
+        # 场景
         self.scene.layer_selected.connect(self._on_scene_selection)
         self.scene.selection_cleared.connect(self.property_panel.set_layer)
         self.scene.layer_dropped.connect(self._on_layer_dropped)
+
+        # 属性面板
         self.property_panel.layer_property_changed.connect(self._on_property_changed)
-        self.fit_requested.connect(self.view.fit_to_window)
+
+        # TopBar 信号
+        self.top_bar.import_requested.connect(self._on_import_clicked)
+        self.top_bar.back_requested.connect(self.back_requested.emit)
+        self.top_bar.ocr_requested.connect(self.ocr_requested.emit)
+        self.top_bar.translate_requested.connect(self._on_topbar_translate)
+        self.top_bar.toggle_original_requested.connect(
+            self.toggle_original_requested.emit
+        )
+        self.top_bar.toggle_layers_requested.connect(
+            self.toggle_layers_requested.emit
+        )
+        self.top_bar.zoom_in_requested.connect(self.zoom_in_requested.emit)
+        self.top_bar.zoom_out_requested.connect(self.zoom_out_requested.emit)
+        self.top_bar.fit_requested.connect(self.fit_requested.emit)
+        self.top_bar.undo_requested.connect(self.undo_requested.emit)
+        self.redo_requested = self.top_bar.redo_requested  # 直接引用
+
+        # 导出
+        self.top_bar.export_requested.connect(self._on_export_clicked)
+        self.export_button.clicked.connect(self._on_export_clicked)
+
+        # 视图
         self.view.zoom_changed.connect(self._on_zoom_changed)
+
+    def _on_topbar_translate(self) -> None:
+        """TopBar 翻译按钮 — 使用 translate_controls 当前语言设置。"""
+        ocr = self.translate_controls.selected_ocr_language
+        target = self.translate_controls.selected_target_language
+        self.translate_requested.emit(ocr, target)
 
     # —— 公开方法 ——
 
@@ -128,9 +167,10 @@ class EditorPage(QWidget):
         model.selected_layer_changed.connect(self._on_model_selection_changed)
         model.translation_finished.connect(self._on_model_translation_finished)
         model.edit_finished.connect(self._on_model_edit_finished)
+        model.showing_original_changed.connect(self._on_model_showing_original_changed)
 
-    def set_export_enabled(self, enabled: bool) -> None:
-        self.export_button.setEnabled(enabled)
+    def set_layers_visible(self, visible: bool) -> None:
+        self.scene.set_layers_visible(visible)
 
     # —— 内部槽 ——
 
@@ -182,6 +222,7 @@ class EditorPage(QWidget):
         self._undo_stack.push(cmd)
 
     def _on_zoom_changed(self, zoom: float) -> None:
+        self.top_bar.set_zoom(int(zoom * 100))
         if hasattr(self, "_model") and self._model is not None:
             self._model.zoom_factor = zoom
 
@@ -191,6 +232,8 @@ class EditorPage(QWidget):
 
     def _on_model_layout_changed(self, layout: TextLayout) -> None:
         self.scene.set_text_layout(layout)
+        has_layers = len(layout.layers) > 0
+        self.top_bar.set_has_layers(has_layers)
         if hasattr(self, "_model") and self._model is not None:
             layer = self._model.selected_layer
             if layer is not None:
@@ -205,52 +248,41 @@ class EditorPage(QWidget):
             self.property_panel.set_layer(None)
 
     def _on_model_translation_finished(self, result) -> None:
-        """翻译完成后更新画布和图层。"""
         self.translate_controls.reset_progress()
         self.translate_controls.set_translating(False)
         self.export_button.setEnabled(True)
+        self.top_bar.set_translating(False)
+        self.top_bar.set_has_result(True)
         self.view.fit_to_window()
 
     def _on_model_edit_finished(self, edit_result) -> None:
-        """编辑渲染完成后更新画布。"""
         if hasattr(self, "_model") and self._model is not None:
             self._model.rendered_document = edit_result.document
             self._model.text_layout = edit_result.layout
             self.set_document(edit_result.document)
             self._undo_stack.clear()
 
+    def _on_model_showing_original_changed(self, showing: bool) -> None:
+        pass  # TopBar 由 main_window 直接控制
+
     # —— 字段变更映射 ——
 
     def _apply_field_change(
         self, layer: TextLayer, field: str, value: object
     ) -> TextLayer | None:
-        box = layer.box
-        style = layer.style
-        text = layer.text
-
+        box = layer.box; style = layer.style; text = layer.text
         if field in ("center_x", "center_y", "width", "height", "rotation_degrees"):
-            box_kwargs = {
-                "center_x": box.center_x,
-                "center_y": box.center_y,
-                "width": box.width,
-                "height": box.height,
-                "rotation_degrees": box.rotation_degrees,
-            }
+            box_kwargs = {"center_x": box.center_x, "center_y": box.center_y,
+                          "width": box.width, "height": box.height,
+                          "rotation_degrees": box.rotation_degrees}
             box_kwargs[field] = float(value)
             box = TextBox(**box_kwargs)
-        elif field == "text":
-            text = str(value)
-        elif field == "font_size":
-            style = replace(style, font_size=float(value))
-        elif field == "fill_rgb":
-            style = replace(style, fill_rgb=tuple(value))
+        elif field == "text": text = str(value)
+        elif field == "font_size": style = replace(style, font_size=float(value))
+        elif field == "fill_rgb": style = replace(style, fill_rgb=tuple(value))
         elif field == "font_weight":
             weight = int(value)
-            if weight in (400, 600, 700):
-                style = replace(style, font_weight=weight)
-            else:
-                return None
-        else:
-            return None
-
+            if weight in (400, 600, 700): style = replace(style, font_weight=weight)
+            else: return None
+        else: return None
         return replace(layer, text=text, box=box, style=style)

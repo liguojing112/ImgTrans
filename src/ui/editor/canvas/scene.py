@@ -78,6 +78,11 @@ class EditorScene(QGraphicsScene):
     def scene_size(self) -> tuple[int, int]:
         return self._scene_width, self._scene_height
 
+    def set_layers_visible(self, visible: bool) -> None:
+        """设置所有文字图层可见性。"""
+        for item in self._layer_items.values():
+            item.setVisible(visible)
+
     # —— 鼠标事件 ——
 
     def mousePressEvent(self, event: QGraphicsSceneMouseEvent) -> None:

@@ -1,6 +1,6 @@
 """编辑器主窗口 — QStackedWidget 切换首页 / 编辑器页。
 
-集成 QUndoStack + 翻译流水线 + 编辑合成 + 导出。
+集成 QUndoStack + 翻译流水线 + 编辑合成 + 导出 + TopBar 操作栏。
 """
 
 from __future__ import annotations
@@ -10,13 +10,11 @@ from pathlib import Path
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QUndoStack
 from PySide6.QtWidgets import (
-    QFileDialog,
     QMainWindow,
     QStackedWidget,
     QStatusBar,
 )
 
-from src.application.composition import EditComposition
 from src.application.image_io import ExportImage, ImportImage
 from src.application.translate_image import TranslateImage, TranslateImageResult
 from src.domain.image import ImageDocument
@@ -56,31 +54,23 @@ class EditorMainWindow(QMainWindow):
         self._translate_image = translate_image
         self._create_composition_editor = create_composition_editor
 
-        # 状态中心
         self._model = EditorModel()
-
-        # 撤销栈
         self._undo_stack = QUndoStack(self)
 
-        # 首页 & 编辑器页
         self._home_page = HomePage()
         self._editor_page = EditorPage(self._undo_stack)
 
-        # QStackedWidget 切换
         self._stack = QStackedWidget()
         self._stack.addWidget(self._home_page)
         self._stack.addWidget(self._editor_page)
         self.setCentralWidget(self._stack)
 
-        # 菜单栏 + 状态栏
         self._build_menus()
         self.setStatusBar(QStatusBar(self))
         self.statusBar().showMessage("就绪")
 
-        # 信号连接
         self._connect_signals()
 
-        # 深色主题
         self.setStyleSheet(EDITOR_DARK_THEME)
 
     # —— 菜单栏 ——
@@ -127,24 +117,50 @@ class EditorMainWindow(QMainWindow):
         zoom_in_action = QAction("放大", self)
         zoom_in_action.setShortcut("Ctrl+=")
         zoom_in_action.triggered.connect(
-            lambda: self._editor_page.view._apply_zoom(1.15)
+            lambda: self._editor_page.view.apply_zoom(1.15)
         )
         view_menu.addAction(zoom_in_action)
 
         zoom_out_action = QAction("缩小", self)
         zoom_out_action.setShortcut("Ctrl+-")
         zoom_out_action.triggered.connect(
-            lambda: self._editor_page.view._apply_zoom(1.0 / 1.15)
+            lambda: self._editor_page.view.apply_zoom(1.0 / 1.15)
         )
         view_menu.addAction(zoom_out_action)
 
     # —— 信号连接 ——
 
     def _connect_signals(self) -> None:
+        # 首页
         self._home_page.image_translation_requested.connect(self._enter_editor)
+
+        # EditorPage 核心
         self._editor_page.import_requested.connect(self._on_import)
         self._editor_page.translate_requested.connect(self._on_translate)
         self._editor_page.export_requested.connect(self._on_export)
+        self._editor_page.back_requested.connect(self._go_home)
+
+        # TopBar 操作
+        self._editor_page.ocr_requested.connect(self._on_ocr)
+        self._editor_page.toggle_original_requested.connect(self._on_toggle_original)
+        self._editor_page.toggle_layers_requested.connect(self._on_toggle_layers)
+        self._editor_page.undo_requested.connect(self._undo_stack.undo)
+        self._editor_page.redo_requested.connect(self._undo_stack.redo)
+        self._editor_page.zoom_in_requested.connect(
+            lambda: self._editor_page.view.apply_zoom(1.15)
+        )
+        self._editor_page.zoom_out_requested.connect(
+            lambda: self._editor_page.view.apply_zoom(1.0 / 1.15)
+        )
+        self._editor_page.fit_requested.connect(
+            self._editor_page.view.fit_to_window
+        )
+
+        # QUndoStack 状态
+        self._undo_stack.canUndoChanged.connect(self._editor_page.top_bar.set_can_undo)
+        self._undo_stack.canRedoChanged.connect(self._editor_page.top_bar.set_can_redo)
+
+        # Model
         self._editor_page.set_model(self._model)
 
     # —— 操作 ——
@@ -168,7 +184,6 @@ class EditorMainWindow(QMainWindow):
                 self._on_import_failed,
             )
             return
-
         if self._codec is None:
             self.statusBar().showMessage("图片编解码器不可用")
             return
@@ -190,14 +205,21 @@ class EditorMainWindow(QMainWindow):
         self._model.translation_result = None
         self._model.composition_editor = None
         self._model.rendered_document = None
+        self._model.showing_original = False
         self._editor_page.set_document(document)
         self._editor_page.set_text_layout(self._model.text_layout)
-        self._editor_page.set_export_enabled(True)
         self._editor_page.clear_layer_selection()
         self._editor_page.translate_controls.reset_progress()
-        self._stack.setCurrentWidget(self._editor_page)
 
         asset = document.asset
+        self._editor_page.top_bar.set_file_name(asset.source_path.name)
+        self._editor_page.top_bar.set_has_image(True)
+        self._editor_page.top_bar.set_has_result(False)
+        self._editor_page.top_bar.set_has_layers(False)
+        self._editor_page.top_bar.set_showing_original(False)
+        self._editor_page.top_bar.set_zoom(100)
+
+        self._stack.setCurrentWidget(self._editor_page)
         self.statusBar().showMessage(
             f"已导入：{asset.source_path.name}  {asset.width}×{asset.height}"
         )
@@ -205,6 +227,15 @@ class EditorMainWindow(QMainWindow):
 
     def _on_import_failed(self, error: Exception) -> None:
         self.statusBar().showMessage(f"导入失败：{error}")
+
+    # —— OCR ——
+
+    def _on_ocr(self) -> None:
+        """独立 OCR 识别（不翻译）。"""
+        # 现阶段 OCR 作为一键翻译的子步骤，独立 OCR 按钮复用翻译流程
+        # 但使用 TranslateControls 当前语言设置
+        ctrl = self._editor_page.translate_controls
+        self._on_translate(ctrl.selected_ocr_language, ctrl.selected_target_language)
 
     # —— 翻译 ——
 
@@ -220,6 +251,7 @@ class EditorMainWindow(QMainWindow):
         self._model.translating = True
         self._model.translation_started.emit()
         self._editor_page.translate_controls.set_translating(True)
+        self._editor_page.top_bar.set_translating(True)
         self._undo_stack.clear()
 
         selection = TranslationSelection(
@@ -231,15 +263,13 @@ class EditorMainWindow(QMainWindow):
             self._model.translation_stage_changed.emit(stage)
             self._editor_page.translate_controls.set_stage(stage)
 
-        self.statusBar().showMessage(f"正在翻译（OCR：{ocr_language} → 目标：{target_language}）…")
+        self.statusBar().showMessage(
+            f"正在翻译（OCR：{ocr_language} → 目标：{target_language}）…"
+        )
 
         self._task_runner.submit(
             lambda: self._translate_image.execute(
-                document,
-                ocr_language,
-                selection,
-                (),
-                on_stage,
+                document, ocr_language, selection, (), on_stage
             ),
             self._on_translation_succeeded,
             self._on_translation_failed,
@@ -254,7 +284,6 @@ class EditorMainWindow(QMainWindow):
         self._model.translating = False
         self._model.translation_result = result
 
-        # 初始化 EditComposition
         if self._create_composition_editor is not None:
             editor = self._create_composition_editor.execute(
                 result.repair.result.document,
@@ -263,14 +292,17 @@ class EditorMainWindow(QMainWindow):
             )
             self._model.composition_editor = editor
 
-        # 更新显示
         self._model.text_layout = result.layout
         self._model.rendered_document = result.document
+        self._model.showing_original = False
+
         self._editor_page.set_document(result.document)
         self._editor_page.set_text_layout(result.layout)
-        self._editor_page.set_export_enabled(True)
+        self._editor_page.top_bar.set_has_result(True)
+        self._editor_page.top_bar.set_has_layers(len(result.layout.layers) > 0)
+        self._editor_page.top_bar.set_translating(False)
+        self._editor_page.top_bar.set_showing_original(False)
 
-        # 选中第一个图层
         if result.layout.layers:
             self._model.selected_layer_id = result.layout.layers[0].region_id
 
@@ -288,7 +320,34 @@ class EditorMainWindow(QMainWindow):
         self._model.translation_failed.emit(str(error))
         self._editor_page.translate_controls.reset_progress()
         self._editor_page.translate_controls.set_translating(False)
+        self._editor_page.top_bar.set_translating(False)
         self.statusBar().showMessage(f"翻译失败：{error}")
+
+    # —— 原图/译图切换 ——
+
+    def _on_toggle_original(self) -> None:
+        if self._model.translation_result is None:
+            return
+        showing = not self._model.showing_original
+        self._model.showing_original = showing
+
+        if showing and self._model.source_document is not None:
+            self._editor_page.set_document(self._model.source_document)
+            self._editor_page.set_text_layout(self._model.text_layout)
+        else:
+            rendered = self._model.rendered_document
+            if rendered is not None:
+                self._editor_page.set_document(rendered)
+                self._editor_page.set_text_layout(self._model.text_layout)
+
+        self._editor_page.top_bar.set_showing_original(showing)
+
+    # —— 显示/隐藏文字图层 ——
+
+    def _on_toggle_layers(self) -> None:
+        visible = not self._model.layers_visible
+        self._model.layers_visible = visible
+        self._editor_page.set_layers_visible(visible)
 
     # —— 导出 ——
 

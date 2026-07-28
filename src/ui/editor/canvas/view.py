@@ -51,11 +51,12 @@ class EditorView(QGraphicsView):
         delta = event.angleDelta().y()
         factor = 1.0 + (abs(delta) / 1200.0)
         if delta > 0:
-            self._apply_zoom(factor)
+            self.apply_zoom(factor)
         else:
-            self._apply_zoom(1.0 / factor)
+            self.apply_zoom(1.0 / factor)
 
-    def _apply_zoom(self, factor: float) -> None:
+    def apply_zoom(self, factor: float) -> None:
+        """应用缩放因子 (new_zoom = current * factor)。"""
         new_zoom = self._zoom * factor
         if new_zoom < self._min_zoom or new_zoom > self._max_zoom:
             factor = self._min_zoom / self._zoom if new_zoom < self._min_zoom else self._max_zoom / self._zoom
