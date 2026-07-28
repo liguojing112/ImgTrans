@@ -179,10 +179,20 @@ class EditorPage(QWidget):
         if hasattr(self, "_model") and self._model is not None:
             self._model.rendered_document = edit_result.document
             self._model.text_layout = edit_result.layout
+            self._model.is_dirty = True
             self.set_document(edit_result.document)
             self.top_bar.set_can_undo(edit_result.can_undo)
             self.top_bar.set_can_redo(edit_result.can_redo)
-            # 刷新属性面板保持选中
+            # 同步更新翻译结果中的渲染图
+            if self._model.translation_result is not None:
+                from dataclasses import replace
+                try:
+                    self._model.translation_result = replace(
+                        self._model.translation_result,
+                        document=edit_result.document,
+                    )
+                except Exception:
+                    pass
             if self._model.selected_layer is not None:
                 self.property_panel.set_layer(self._model.selected_layer)
 
