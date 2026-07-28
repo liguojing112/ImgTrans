@@ -45,6 +45,8 @@ class EditorModel(QObject):
         self._is_dirty = False
         self._composition_editor: object = None  # EditComposition | None
         self._rendered_document: ImageDocument | None = None
+        self._ocr_elapsed_ms = 0.0
+        self._translation_elapsed_ms = 0.0
 
     # —— document ——
 
@@ -149,6 +151,24 @@ class EditorModel(QObject):
     @translation_result.setter
     def translation_result(self, value: object | None) -> None:
         self._translation_result = value
+
+    # —— elapsed ——
+
+    @property
+    def ocr_elapsed_ms(self) -> float:
+        return self._ocr_elapsed_ms
+
+    @ocr_elapsed_ms.setter
+    def ocr_elapsed_ms(self, value: float) -> None:
+        self._ocr_elapsed_ms = value
+
+    @property
+    def translation_elapsed_ms(self) -> float:
+        return self._translation_elapsed_ms
+
+    @translation_elapsed_ms.setter
+    def translation_elapsed_ms(self, value: float) -> None:
+        self._translation_elapsed_ms = value
 
     # —— composition ——
 

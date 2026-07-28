@@ -24,6 +24,7 @@ from src.infrastructure.pillow_image_codec import PillowImageCodec
 
 from src.ui.editor.editor_model import EditorModel
 from src.ui.editor.editor_page import EditorPage
+from src.ui.editor.error_handler import classify_error
 from src.ui.editor.home_page import HomePage
 from src.ui.editor.theme import EDITOR_DARK_THEME
 
@@ -164,6 +165,9 @@ class EditorMainWindow(QMainWindow):
         # 属性编辑
         self._editor_page.edit_requested.connect(self._on_edit)
 
+        # 翻译取消
+        self._editor_page.translate_controls.cancel_requested.connect(self._on_cancel_translate)
+
         # QUndoStack 状态
         self._undo_stack.canUndoChanged.connect(self._editor_page.top_bar.set_can_undo)
         self._undo_stack.canRedoChanged.connect(self._editor_page.top_bar.set_can_redo)
@@ -251,7 +255,8 @@ class EditorMainWindow(QMainWindow):
         self._editor_page.view.fit_to_window()
 
     def _on_import_failed(self, error: Exception) -> None:
-        self.statusBar().showMessage(f"导入失败：{error}")
+        title, msg, suggestion = classify_error(error)
+        self.statusBar().showMessage(f"{title}：{msg}。{suggestion}")
 
     # —— OCR ——
 
@@ -286,21 +291,22 @@ class EditorMainWindow(QMainWindow):
 
         result: OcrResult = value
         self._model.ocr_result = result
+        self._model.ocr_elapsed_ms = result.elapsed_ms
         self._editor_page.top_bar.set_translating(False)
 
-        # 显示 OCR 区域在画布上
         self._editor_page.scene.set_regions(result.regions)
         self._editor_page.ocr_result_panel.set_result(result)
 
         region_count = len(result.regions)
         self.statusBar().showMessage(
-            f"OCR 完成：识别到 {region_count} 个文字区域"
+            f"OCR 完成：识别到 {region_count} 个文字区域（{result.elapsed_ms:.0f}ms）"
         )
         self._model.ocr_finished.emit(result)
 
     def _on_ocr_failed(self, error: Exception) -> None:
         self._editor_page.top_bar.set_translating(False)
-        self.statusBar().showMessage(f"OCR 失败：{error}")
+        title, msg, suggestion = classify_error(error)
+        self.statusBar().showMessage(f"{title}：{msg}。{suggestion}")
 
     # —— 翻译 ——
 
@@ -392,8 +398,14 @@ class EditorMainWindow(QMainWindow):
         failed = sum(1 for u in units if u.status.value == "failed")
         overflow = sum(1 for layer in result.layout.layers if layer.overflow)
 
+        ocr_ms = result.ocr.elapsed_ms if result.ocr else 0
+        total_ms = result.translation.elapsed_ms
+        self._model.ocr_elapsed_ms = ocr_ms
+        self._model.translation_elapsed_ms = total_ms
+
         self._editor_page.translate_controls.set_summary(
-            ocr_count, translated, review, skipped, failed, overflow
+            ocr_count, translated, review, skipped, failed, overflow,
+            ocr_ms=ocr_ms, total_ms=total_ms,
         )
         self._model.translation_finished.emit(result)
 
@@ -403,7 +415,8 @@ class EditorMainWindow(QMainWindow):
         self._editor_page.translate_controls.reset_progress()
         self._editor_page.translate_controls.set_translating(False)
         self._editor_page.top_bar.set_translating(False)
-        self.statusBar().showMessage(f"翻译失败：{error}")
+        title, msg, suggestion = classify_error(error)
+        self.statusBar().showMessage(f"{title}：{msg}。{suggestion}")
 
     # —— 原图/译图切换（3 态循环）——
 
@@ -534,6 +547,11 @@ class EditorMainWindow(QMainWindow):
             self._editor_page.apply_edit_result,
             lambda e: self.statusBar().showMessage(f"新增失败：{e}"),
         )
+
+    def _on_cancel_translate(self) -> None:
+        if self._translate_image is not None:
+            self._translate_image.cancel()
+            self.statusBar().showMessage("正在取消翻译…")
 
     # —— 导出 ——
 

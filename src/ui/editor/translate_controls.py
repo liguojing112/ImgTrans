@@ -1,4 +1,4 @@
-"""翻译控制区 — 翻译偏好设置 + 进度 + 摘要。"""
+"""翻译控制区 — 翻译偏好设置 + 进度 + 摘要 + 取消 + 耗时。"""
 
 from __future__ import annotations
 
@@ -39,9 +39,10 @@ _LANGUAGE_DISPLAY = {
 
 
 class TranslateControls(QFrame):
-    """翻译配置控件 — 语言选择 + 品牌词 + 翻译按钮 + 进度 + 摘要。"""
+    """翻译配置控件 — 语言选择 + 品牌词 + 翻译按钮 + 进度 + 摘要 + 取消。"""
 
-    translate_requested = Signal(str, str)  # (ocr_language, target_language)
+    translate_requested = Signal(str, str)
+    cancel_requested = Signal()
 
     def __init__(self) -> None:
         super().__init__()
@@ -79,7 +80,7 @@ class TranslateControls(QFrame):
         mode_row.addWidget(mode_label)
         mode_row.addWidget(self.mode_combo)
 
-        # 源语言（SPECIFIC_LANGUAGE 模式时可用）
+        # 源语言
         src_row = QHBoxLayout()
         src_label = QLabel("源语言")
         src_label.setObjectName("propertyFieldLabel")
@@ -120,6 +121,12 @@ class TranslateControls(QFrame):
         self.translate_button.setObjectName("applyPropertyButton")
         self.translate_button.clicked.connect(self._on_translate)
 
+        # 取消按钮（翻译中可见）
+        self.cancel_button = QPushButton("取消翻译")
+        self.cancel_button.setObjectName("cancelWorkflowButton")
+        self.cancel_button.clicked.connect(self.cancel_requested.emit)
+        self.cancel_button.setVisible(False)
+
         # 进度条
         self.progress = QProgressBar()
         self.progress.setRange(0, 5)
@@ -131,7 +138,7 @@ class TranslateControls(QFrame):
         self.stage_label = QLabel("")
         self.stage_label.setObjectName("propertyFieldLabel")
 
-        # 翻译摘要
+        # 翻译摘要 + 耗时
         self.summary_label = QLabel("")
         self.summary_label.setObjectName("propertyFieldLabel")
         self.summary_label.setWordWrap(True)
@@ -145,6 +152,7 @@ class TranslateControls(QFrame):
         layout.addLayout(tgt_row)
         layout.addLayout(brand_row)
         layout.addWidget(self.translate_button)
+        layout.addWidget(self.cancel_button)
         layout.addWidget(self.progress)
         layout.addWidget(self.stage_label)
         layout.addWidget(self.summary_label)
@@ -173,6 +181,7 @@ class TranslateControls(QFrame):
 
     def set_translating(self, translating: bool) -> None:
         self.translate_button.setEnabled(not translating)
+        self.cancel_button.setVisible(translating)
         self.ocr_language.setEnabled(not translating)
         self.target_language.setEnabled(not translating)
         self.mode_combo.setEnabled(not translating)
@@ -204,8 +213,9 @@ class TranslateControls(QFrame):
         self.stage_label.setText("")
 
     def set_summary(self, ocr_count: int, translated: int, review: int,
-                    skipped: int, failed: int, overflow: int) -> None:
-        """显示翻译完成后的统计摘要。"""
+                    skipped: int, failed: int, overflow: int,
+                    ocr_ms: float = 0, total_ms: float = 0) -> None:
+        """显示翻译完成后的统计摘要和耗时。"""
         parts = [f"识别区域：{ocr_count}"]
         if translated:
             parts.append(f"翻译：{translated}")
@@ -217,6 +227,10 @@ class TranslateControls(QFrame):
             parts.append(f"失败：{failed}")
         if overflow:
             parts.append(f"溢出：{overflow}")
+        if ocr_ms > 0:
+            parts.append(f"OCR：{ocr_ms:.0f}ms")
+        if total_ms > 0:
+            parts.append(f"总计：{total_ms:.0f}ms")
         self.summary_label.setText("  ·  ".join(parts))
         self.summary_label.setVisible(True)
 
