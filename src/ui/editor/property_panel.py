@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QFontComboBox,
     QFormLayout,
     QFrame,
+    QHBoxLayout,
     QLabel,
     QPlainTextEdit,
     QPushButton,
@@ -34,6 +35,8 @@ class PropertyPanel(QFrame):
     """文字图层属性编辑面板。无选中图层时显示占位提示。"""
 
     layer_property_changed = Signal(str, str, object)  # (region_id, field, value)
+    delete_layer_requested = Signal(str)  # region_id
+    duplicate_layer_requested = Signal(str)  # region_id
 
     def __init__(self) -> None:
         super().__init__()
@@ -190,6 +193,18 @@ class PropertyPanel(QFrame):
         layout.addWidget(title)
         layout.addWidget(self._no_selection_label)
         layout.addLayout(form)
+
+        # 图层操作按钮
+        layer_buttons = QHBoxLayout()
+        self.delete_btn = QPushButton("删除图层")
+        self.delete_btn.setObjectName("deleteTextLayerButton")
+        self.delete_btn.clicked.connect(self._on_delete)
+        self.duplicate_btn = QPushButton("复制图层")
+        self.duplicate_btn.setObjectName("applyPropertyButton")
+        self.duplicate_btn.clicked.connect(self._on_duplicate)
+        layer_buttons.addWidget(self.delete_btn)
+        layer_buttons.addWidget(self.duplicate_btn)
+        layout.addLayout(layer_buttons)
         layout.addStretch()
 
         scroll.setWidget(content)
@@ -199,6 +214,16 @@ class PropertyPanel(QFrame):
         outer.addWidget(scroll)
 
         self._set_fields_enabled(False)
+
+    # —— 图层操作 ——
+
+    def _on_delete(self) -> None:
+        if self._region_id is not None:
+            self.delete_layer_requested.emit(self._region_id)
+
+    def _on_duplicate(self) -> None:
+        if self._region_id is not None:
+            self.duplicate_layer_requested.emit(self._region_id)
 
     # —— 公开接口 ——
 

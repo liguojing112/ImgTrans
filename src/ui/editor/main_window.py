@@ -148,6 +148,8 @@ class EditorMainWindow(QMainWindow):
         self._editor_page.toggle_layers_requested.connect(self._on_toggle_layers)
         self._editor_page.undo_requested.connect(self._on_undo)
         self._editor_page.redo_requested.connect(self._on_redo)
+        self._editor_page.delete_requested.connect(self._on_delete_layer)
+        self._editor_page.duplicate_requested.connect(self._on_duplicate_layer)
         self._editor_page.zoom_in_requested.connect(
             lambda: self._editor_page.view.apply_zoom(1.15)
         )
@@ -477,6 +479,34 @@ class EditorMainWindow(QMainWindow):
             op,
             self._editor_page.apply_edit_result,
             lambda e: self.statusBar().showMessage(f"编辑失败：{e}"),
+        )
+
+    # —— 删除 / 复制图层 ——
+
+    def _on_delete_layer(self, region_id: str) -> None:
+        editor = self._model.composition_editor
+        if editor is None or self._task_runner is None:
+            return
+        self.statusBar().showMessage("正在删除图层…")
+        self._task_runner.submit(
+            lambda: editor.delete_layer(region_id),
+            self._editor_page.apply_edit_result,
+            lambda e: self.statusBar().showMessage(f"删除失败：{e}"),
+        )
+
+    def _on_duplicate_layer(self, region_id: str) -> None:
+        editor = self._model.composition_editor
+        if editor is None or self._task_runner is None:
+            return
+        try:
+            layer = self._model.text_layout.layer_by_id(region_id)
+        except KeyError:
+            return
+        self.statusBar().showMessage("正在复制图层…")
+        self._task_runner.submit(
+            lambda: editor.add_layer(layer.text),
+            self._editor_page.apply_edit_result,
+            lambda e: self.statusBar().showMessage(f"复制失败：{e}"),
         )
 
     # —— 导出 ——

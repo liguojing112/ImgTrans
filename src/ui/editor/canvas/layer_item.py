@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from math import atan2, cos, degrees, hypot, radians, sin
 
-from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import (
     QBrush,
     QColor,
@@ -35,6 +35,8 @@ class TextLayerItem(QGraphicsItem):
 
     绘制填充矩形 + 边框，选中时显示手柄。
     """
+
+    box_changed = Signal(object)  # TextBox — 拖动时实时发射
 
     def __init__(self, layer: TextLayer, index: int = 0, status: str = "translated") -> None:
         super().__init__()
@@ -232,6 +234,7 @@ class TextLayerItem(QGraphicsItem):
             )
             self._sync_transform()
         self.update()
+        self.box_changed.emit(self._layer.box)
 
     def mouseReleaseEvent(self, event: QGraphicsSceneMouseEvent) -> None:
         if self._drag_mode == "move":
