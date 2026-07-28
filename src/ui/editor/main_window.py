@@ -552,7 +552,7 @@ class EditorMainWindow(QMainWindow):
                 fmt = ImageFileFormat.from_output_suffix(target.suffix)
                 self._codec.save(document, target, fmt)
                 self._model.is_dirty = False
-                self.statusBar().showMessage(f"已导出：{target.name}")
+                self.statusBar().showMessage(f"已导出：{target}")
             except Exception as exc:
                 self.statusBar().showMessage(f"导出失败：{exc}")
             return
@@ -561,7 +561,7 @@ class EditorMainWindow(QMainWindow):
             self.statusBar().showMessage(f"正在导出 {target.name}…")
             def _on_export_ok(p):
                 self._model.is_dirty = False
-                self.statusBar().showMessage(f"已导出：{Path(p).name}")
+                self.statusBar().showMessage(f"已导出：{Path(p)}")
             self._task_runner.submit(
                 lambda: self._export_usecase.execute(document, target),
                 _on_export_ok,
@@ -572,7 +572,7 @@ class EditorMainWindow(QMainWindow):
         try:
             result = self._export_usecase.execute(document, target)
             self._model.is_dirty = False
-            self.statusBar().showMessage(f"已导出：{result.name}")
+            self.statusBar().showMessage(f"已导出：{result}")
         except Exception as exc:
             self.statusBar().showMessage(f"导出失败：{exc}")
 

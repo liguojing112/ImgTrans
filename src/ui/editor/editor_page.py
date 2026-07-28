@@ -215,8 +215,14 @@ class EditorPage(QWidget):
             self.import_requested.emit(Path(value))
 
     def _on_export_clicked(self) -> None:
+        default_name = ""
+        if hasattr(self, "_model") and self._model is not None:
+            src = self._model.rendered_document or self._model.document
+            if src is not None:
+                stem = src.asset.source_path.stem
+                default_name = str(src.asset.source_path.with_name(f"{stem}_translated.png"))
         value, _ = QFileDialog.getSaveFileName(
-            self, "导出图片", "",
+            self, "导出图片", default_name,
             "PNG (*.png);;JPEG (*.jpg);;WebP (*.webp);;TIFF (*.tiff)",
         )
         if value:
