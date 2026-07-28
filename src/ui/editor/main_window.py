@@ -181,6 +181,18 @@ class EditorMainWindow(QMainWindow):
     # —— 导入 ——
 
     def _on_import(self, source: Path) -> None:
+        # 检查未保存修改
+        if self._model.is_dirty:
+            from PySide6.QtWidgets import QMessageBox
+            reply = QMessageBox.question(
+                self, "未保存的修改",
+                "当前项目有未导出的修改。导入新图片会丢失这些修改。\n\n确定要导入新图片吗？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+
         if self._task_runner is not None:
             self.statusBar().showMessage(f"正在导入 {source.name}…")
             self._task_runner.submit(
@@ -333,6 +345,7 @@ class EditorMainWindow(QMainWindow):
         result: TranslateImageResult = value
         self._model.translating = False
         self._model.translation_result = result
+        self._model.is_dirty = True
 
         if self._create_composition_editor is not None:
             editor = self._create_composition_editor.execute(
@@ -470,6 +483,7 @@ class EditorMainWindow(QMainWindow):
                 from src.domain.image import ImageFileFormat
                 fmt = ImageFileFormat.from_output_suffix(target.suffix)
                 self._codec.save(document, target, fmt)
+                self._model.is_dirty = False
                 self.statusBar().showMessage(f"已导出：{target.name}")
             except Exception as exc:
                 self.statusBar().showMessage(f"导出失败：{exc}")
@@ -477,15 +491,19 @@ class EditorMainWindow(QMainWindow):
 
         if self._task_runner is not None:
             self.statusBar().showMessage(f"正在导出 {target.name}…")
+            def _on_export_ok(p):
+                self._model.is_dirty = False
+                self.statusBar().showMessage(f"已导出：{Path(p).name}")
             self._task_runner.submit(
                 lambda: self._export_usecase.execute(document, target),
-                lambda p: self.statusBar().showMessage(f"已导出：{Path(p).name}"),
+                _on_export_ok,
                 lambda e: self.statusBar().showMessage(f"导出失败：{e}"),
             )
             return
 
         try:
             result = self._export_usecase.execute(document, target)
+            self._model.is_dirty = False
             self.statusBar().showMessage(f"已导出：{result.name}")
         except Exception as exc:
             self.statusBar().showMessage(f"导出失败：{exc}")

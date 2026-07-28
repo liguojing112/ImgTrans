@@ -40,6 +40,7 @@ class EditorModel(QObject):
         self._layers_visible = True
         self._ocr_result: object = None  # OcrResult | None
         self._translation_result: object = None  # TranslateImageResult | None
+        self._is_dirty = False
         self._composition_editor: object = None  # EditComposition | None
         self._rendered_document: ImageDocument | None = None
 
@@ -128,6 +129,16 @@ class EditorModel(QObject):
     @translating.setter
     def translating(self, value: bool) -> None:
         self._translating = value
+
+    # —— dirty ——
+
+    @property
+    def is_dirty(self) -> bool:
+        return self._is_dirty
+
+    @is_dirty.setter
+    def is_dirty(self, value: bool) -> None:
+        self._is_dirty = value
 
     @property
     def translation_result(self) -> object | None:

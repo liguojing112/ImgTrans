@@ -208,6 +208,12 @@ class TopBar(QFrame):
         self.import_btn.setEnabled(not translating)
         self.ocr_btn.setEnabled(self._has_image and not translating)
         self.translate_btn.setEnabled(self._has_image and not translating)
+        if translating:
+            self._saved_file_name = self.file_label.text()
+            self.file_label.setText("正在翻译…")
+        else:
+            if hasattr(self, "_saved_file_name"):
+                self.file_label.setText(self._saved_file_name)
 
     def set_can_undo(self, can: bool) -> None:
         self.undo_btn.setEnabled(can)
