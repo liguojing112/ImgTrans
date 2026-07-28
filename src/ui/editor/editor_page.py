@@ -1,6 +1,8 @@
 """编辑器页面 — 顶部操作栏 + 三栏布局 + 翻译控件 + 导出。
 
 TopBar | [左工具栏 | 中央 QGraphicsView | 右属性面板+翻译控件+导出]
+属性修改通过 edit_requested 信号发射给 MainWindow，由 MainWindow 在后台调用
+EditComposition 重渲染后通过 model.edit_finished 信号回传 CompositionEditResult。
 """
 
 from __future__ import annotations
@@ -19,7 +21,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from src.domain.layout import TextBox, TextLayer, TextLayout
+from src.domain.layout import TextBox, TextLayer, TextLayout, TextStyle
 from src.ui.editor.canvas.scene import EditorScene
 from src.ui.editor.canvas.view import EditorView
 from src.ui.editor.top_bar import TopBar
@@ -45,6 +47,9 @@ class EditorPage(QWidget):
     fit_requested = Signal()
     toggle_original_requested = Signal()
     toggle_layers_requested = Signal()
+
+    # 属性编辑信号 — payload: (region_id, field_kind, value, before_layer)
+    edit_requested = Signal(str, str, object, object)
 
     def __init__(self, undo_stack: QUndoStack) -> None:
         super().__init__()
@@ -103,43 +108,29 @@ class EditorPage(QWidget):
         self._connect_signals()
 
     def _connect_signals(self) -> None:
-        # 工具栏
         self.toolbar.import_requested.connect(self._on_import_clicked)
-
-        # 场景
         self.scene.layer_selected.connect(self._on_scene_selection)
         self.scene.selection_cleared.connect(self.property_panel.set_layer)
         self.scene.layer_dropped.connect(self._on_layer_dropped)
-
-        # 属性面板
         self.property_panel.layer_property_changed.connect(self._on_property_changed)
 
-        # TopBar 信号
         self.top_bar.import_requested.connect(self._on_import_clicked)
         self.top_bar.back_requested.connect(self.back_requested.emit)
         self.top_bar.ocr_requested.connect(self.ocr_requested.emit)
         self.top_bar.translate_requested.connect(self._on_topbar_translate)
-        self.top_bar.toggle_original_requested.connect(
-            self.toggle_original_requested.emit
-        )
-        self.top_bar.toggle_layers_requested.connect(
-            self.toggle_layers_requested.emit
-        )
+        self.top_bar.toggle_original_requested.connect(self.toggle_original_requested.emit)
+        self.top_bar.toggle_layers_requested.connect(self.toggle_layers_requested.emit)
         self.top_bar.zoom_in_requested.connect(self.zoom_in_requested.emit)
         self.top_bar.zoom_out_requested.connect(self.zoom_out_requested.emit)
         self.top_bar.fit_requested.connect(self.fit_requested.emit)
         self.top_bar.undo_requested.connect(self.undo_requested.emit)
-        self.redo_requested = self.top_bar.redo_requested  # 直接引用
+        self.redo_requested = self.top_bar.redo_requested
 
-        # 导出
         self.top_bar.export_requested.connect(self._on_export_clicked)
         self.export_button.clicked.connect(self._on_export_clicked)
-
-        # 视图
         self.view.zoom_changed.connect(self._on_zoom_changed)
 
     def _on_topbar_translate(self) -> None:
-        """TopBar 翻译按钮 — 使用 translate_controls 当前语言设置。"""
         ocr = self.translate_controls.selected_ocr_language
         target = self.translate_controls.selected_target_language
         self.translate_requested.emit(ocr, target)
@@ -172,6 +163,20 @@ class EditorPage(QWidget):
     def set_layers_visible(self, visible: bool) -> None:
         self.scene.set_layers_visible(visible)
 
+    # —— 应用编辑结果（由 MainWindow 在后台线程完成后回调）——
+
+    def apply_edit_result(self, edit_result: object) -> None:
+        """接收 CompositionEditResult，更新画布和图层。"""
+        if hasattr(self, "_model") and self._model is not None:
+            self._model.rendered_document = edit_result.document
+            self._model.text_layout = edit_result.layout
+            self.set_document(edit_result.document)
+            self.top_bar.set_can_undo(edit_result.can_undo)
+            self.top_bar.set_can_redo(edit_result.can_redo)
+            # 刷新属性面板保持选中
+            if self._model.selected_layer is not None:
+                self.property_panel.set_layer(self._model.selected_layer)
+
     # —— 内部槽 ——
 
     def _on_import_clicked(self) -> None:
@@ -183,9 +188,7 @@ class EditorPage(QWidget):
 
     def _on_export_clicked(self) -> None:
         value, _ = QFileDialog.getSaveFileName(
-            self,
-            "导出图片",
-            "",
+            self, "导出图片", "",
             "PNG (*.png);;JPEG (*.jpg);;WebP (*.webp);;TIFF (*.tiff)",
         )
         if value:
@@ -196,6 +199,7 @@ class EditorPage(QWidget):
             self._model.selected_layer_id = region_id
 
     def _on_layer_dropped(self, region_id: str, box: TextBox) -> None:
+        """拖动画布图层后发射 edit_requested。"""
         if not hasattr(self, "_model") or self._model is None:
             return
         try:
@@ -205,10 +209,10 @@ class EditorPage(QWidget):
         after = replace(before, box=box)
         if after == before:
             return
-        cmd = ReplaceLayerUndoCommand(self._model, before, after)
-        self._undo_stack.push(cmd)
+        self.edit_requested.emit(region_id, "box", after, before)
 
     def _on_property_changed(self, region_id: str, field: str, value: object) -> None:
+        """属性面板变更 → 映射到字段组 → 发射 edit_requested。"""
         if not hasattr(self, "_model") or self._model is None:
             return
         try:
@@ -218,8 +222,16 @@ class EditorPage(QWidget):
         after = self._apply_field_change(before, field, value)
         if after is None or after == before:
             return
-        cmd = ReplaceLayerUndoCommand(self._model, before, after)
-        self._undo_stack.push(cmd)
+
+        # 分类字段组
+        if field == "text":
+            kind = "text"
+        elif field in ("font_size", "fill_rgb", "font_weight"):
+            kind = "style"
+        else:
+            kind = "box"
+
+        self.edit_requested.emit(region_id, kind, after, before)
 
     def _on_zoom_changed(self, zoom: float) -> None:
         self.top_bar.set_zoom(int(zoom * 100))
@@ -256,14 +268,10 @@ class EditorPage(QWidget):
         self.view.fit_to_window()
 
     def _on_model_edit_finished(self, edit_result) -> None:
-        if hasattr(self, "_model") and self._model is not None:
-            self._model.rendered_document = edit_result.document
-            self._model.text_layout = edit_result.layout
-            self.set_document(edit_result.document)
-            self._undo_stack.clear()
+        self.apply_edit_result(edit_result)
 
     def _on_model_showing_original_changed(self, showing: bool) -> None:
-        pass  # TopBar 由 main_window 直接控制
+        pass
 
     # —— 字段变更映射 ——
 

@@ -146,8 +146,8 @@ class EditorMainWindow(QMainWindow):
         self._editor_page.ocr_requested.connect(self._on_ocr)
         self._editor_page.toggle_original_requested.connect(self._on_toggle_original)
         self._editor_page.toggle_layers_requested.connect(self._on_toggle_layers)
-        self._editor_page.undo_requested.connect(self._undo_stack.undo)
-        self._editor_page.redo_requested.connect(self._undo_stack.redo)
+        self._editor_page.undo_requested.connect(self._on_undo)
+        self._editor_page.redo_requested.connect(self._on_redo)
         self._editor_page.zoom_in_requested.connect(
             lambda: self._editor_page.view.apply_zoom(1.15)
         )
@@ -157,6 +157,9 @@ class EditorMainWindow(QMainWindow):
         self._editor_page.fit_requested.connect(
             self._editor_page.view.fit_to_window
         )
+
+        # 属性编辑
+        self._editor_page.edit_requested.connect(self._on_edit)
 
         # QUndoStack 状态
         self._undo_stack.canUndoChanged.connect(self._editor_page.top_bar.set_can_undo)
@@ -392,6 +395,56 @@ class EditorMainWindow(QMainWindow):
         visible = not self._model.layers_visible
         self._model.layers_visible = visible
         self._editor_page.set_layers_visible(visible)
+
+    # —— 撤销/重做（桥接 EditComposition）——
+
+    def _on_undo(self) -> None:
+        editor = self._model.composition_editor
+        if editor is None or self._task_runner is None:
+            return
+        self.statusBar().showMessage("正在撤销…")
+        self._task_runner.submit(
+            editor.undo,
+            self._editor_page.apply_edit_result,
+            lambda e: self.statusBar().showMessage(f"撤销失败：{e}"),
+        )
+
+    def _on_redo(self) -> None:
+        editor = self._model.composition_editor
+        if editor is None or self._task_runner is None:
+            return
+        self.statusBar().showMessage("正在重做…")
+        self._task_runner.submit(
+            editor.redo,
+            self._editor_page.apply_edit_result,
+            lambda e: self.statusBar().showMessage(f"重做失败：{e}"),
+        )
+
+    # —— 属性编辑（分发到 EditComposition）——
+
+    def _on_edit(self, region_id: str, kind: str, after_layer: object, before_layer: object) -> None:
+        """属性面板编辑 → 按字段组分发到 EditComposition 后台渲染。"""
+        editor = self._model.composition_editor
+        if editor is None or self._task_runner is None:
+            return
+        self.statusBar().showMessage("正在应用编辑…")
+
+        if kind == "text":
+            op = lambda: editor.replace_text(region_id, after_layer.text)
+        elif kind == "box":
+            op = lambda: editor.replace_box(region_id, after_layer.box)
+        elif kind == "style":
+            op = lambda: editor.replace_style(
+                region_id, after_layer.style, after_layer.box.rotation_degrees
+            )
+        else:
+            return
+
+        self._task_runner.submit(
+            op,
+            self._editor_page.apply_edit_result,
+            lambda e: self.statusBar().showMessage(f"编辑失败：{e}"),
+        )
 
     # —— 导出 ——
 

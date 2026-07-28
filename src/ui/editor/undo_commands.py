@@ -1,58 +1,65 @@
-"""QUndoCommand 子类 — 将 TextLayer 操作适配为 Qt 撤销命令。
+"""QUndoCommand 子类 — 桥接 QUndoStack 与 EditComposition。
 
-这些命令直接操作 EditorModel.text_layout（前端状态）。
-EditComposition 在后台线程处理渲染，成功后通过 CompositionEditResult 更新画布。
+undo/redo 通过回调触发 composition_editor 重渲染，不再直接操作 TextLayout。
+EditComposition 的 CompositionSession 是唯一的撤销源。
 """
 
 from __future__ import annotations
 
-from PySide6.QtGui import QUndoCommand
+from collections.abc import Callable
 
-from src.domain.layout import TextLayer
-from src.ui.editor.editor_model import EditorModel
+from PySide6.QtGui import QUndoCommand
 
 
 class ReplaceLayerUndoCommand(QUndoCommand):
-    """替换文字图层 — 文本、位置、尺寸、样式变更。"""
+    """替换文字图层 — undo/redo 通过回调触发 EditComposition 重渲染。"""
 
-    def __init__(self, model: EditorModel, before: TextLayer, after: TextLayer) -> None:
-        super().__init__("修改文字图层")
-        self._model = model
-        self._before = before
-        self._after = after
+    def __init__(
+        self,
+        text: str = "修改文字图层",
+    ) -> None:
+        super().__init__(text)
+        self._redo_op: Callable[[], object] | None = None  # → CompositionEditResult
+        self._undo_op: Callable[[], object] | None = None
 
-    def redo(self) -> None:
-        self._model.replace_layer(self._before, self._after)
+    def set_operations(
+        self,
+        redo_op: Callable[[], object],
+        undo_op: Callable[[], object],
+    ) -> None:
+        self._redo_op = redo_op
+        self._undo_op = undo_op
 
-    def undo(self) -> None:
-        self._model.replace_layer(self._after, self._before)
+    def redo(self) -> object | None:
+        if self._redo_op is not None:
+            return self._redo_op()
+        return None
 
-
-class AddLayerUndoCommand(QUndoCommand):
-    """新增文字图层。"""
-
-    def __init__(self, model: EditorModel, layer: TextLayer) -> None:
-        super().__init__("新增文字图层")
-        self._model = model
-        self._layer = layer
-
-    def redo(self) -> None:
-        self._model.add_layer(self._layer)
-
-    def undo(self) -> None:
-        self._model.remove_layer(self._layer.region_id)
+    def undo(self) -> object | None:
+        if self._undo_op is not None:
+            return self._undo_op()
+        return None
 
 
-class DeleteLayerUndoCommand(QUndoCommand):
-    """删除文字图层。"""
+class EditUndoCommand(QUndoCommand):
+    """通用编辑命令 — 直接调用 composition_editor.undo()/redo()。"""
 
-    def __init__(self, model: EditorModel, layer: TextLayer) -> None:
-        super().__init__("删除文字图层")
-        self._model = model
-        self._layer = layer
+    def __init__(
+        self,
+        editor: object,
+        is_redo: bool,
+        text: str = "编辑",
+    ) -> None:
+        super().__init__(text)
+        self._editor = editor
+        self._is_redo = is_redo
 
-    def redo(self) -> None:
-        self._model.remove_layer(self._layer.region_id)
+    def redo(self) -> object | None:
+        if self._is_redo:
+            return self._editor.redo()
+        return self._editor.undo()
 
-    def undo(self) -> None:
-        self._model.add_layer(self._layer)
+    def undo(self) -> object | None:
+        if self._is_redo:
+            return self._editor.undo()
+        return self._editor.redo()
