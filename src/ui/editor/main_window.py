@@ -215,6 +215,7 @@ class EditorMainWindow(QMainWindow):
         self._model.showing_original = False
         self._undo_stack.clear()
         self._editor_page.scene.clear_regions()
+        self._editor_page.ocr_result_panel.clear_result()
         self._editor_page.set_document(document)
         self._editor_page.set_text_layout(self._model.text_layout)
         self._editor_page.clear_layer_selection()
