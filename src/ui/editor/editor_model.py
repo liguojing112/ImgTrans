@@ -25,6 +25,7 @@ class EditorModel(QObject):
     edit_finished = Signal(object)  # CompositionEditResult
     edit_failed = Signal(str)
     showing_original_changed = Signal(bool)
+    preview_mode_changed = Signal(str)
     ocr_started = Signal()
     ocr_finished = Signal(object)  # OcrResult
 
@@ -37,6 +38,7 @@ class EditorModel(QObject):
         self._zoom_factor = 1.0
         self._translating = False
         self._showing_original = False
+        self._preview_mode = "layers"
         self._layers_visible = True
         self._ocr_result: object = None  # OcrResult | None
         self._translation_result: object = None  # TranslateImageResult | None
@@ -178,6 +180,19 @@ class EditorModel(QObject):
             return
         self._showing_original = value
         self.showing_original_changed.emit(value)
+
+    # —— preview_mode ——
+
+    @property
+    def preview_mode(self) -> str:
+        return self._preview_mode
+
+    @preview_mode.setter
+    def preview_mode(self, value: str) -> None:
+        if value == self._preview_mode:
+            return
+        self._preview_mode = value
+        self.preview_mode_changed.emit(value)
 
     # —— layers_visible ——
 

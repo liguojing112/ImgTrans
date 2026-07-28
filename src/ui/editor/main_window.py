@@ -376,6 +376,7 @@ class EditorMainWindow(QMainWindow):
         self._editor_page.top_bar.set_has_layers(len(result.layout.layers) > 0)
         self._editor_page.top_bar.set_translating(False)
         self._editor_page.top_bar.set_showing_original(False)
+        self._apply_preview_mode("layers")
 
         if result.layout.layers:
             self._model.selected_layer_id = result.layout.layers[0].region_id
@@ -404,26 +405,39 @@ class EditorMainWindow(QMainWindow):
         self._editor_page.top_bar.set_translating(False)
         self.statusBar().showMessage(f"翻译失败：{error}")
 
-    # —— 原图/译图切换 ——
+    # —— 原图/译图切换（3 态循环）——
 
     def _on_toggle_original(self) -> None:
         if self._model.translation_result is None:
             return
-        showing = not self._model.showing_original
-        self._model.showing_original = showing
+        cycle = {"original": "translated", "translated": "layers", "layers": "original"}
+        next_mode = cycle.get(self._model.preview_mode, "original")
+        self._apply_preview_mode(next_mode)
 
-        if showing and self._model.source_document is not None:
-            self._editor_page.set_document(self._model.source_document)
+    def _apply_preview_mode(self, mode: str) -> None:
+        self._model.preview_mode = mode
+        if mode == "original":
+            src = self._model.source_document
+            if src is not None:
+                self._editor_page.set_document(src)
             self._editor_page.scene.set_mask_visible(False)
             self._editor_page.set_layers_visible(False)
-        else:
+            self._editor_page.property_panel.setEnabled(False)
+        elif mode == "translated":
             rendered = self._model.rendered_document
             if rendered is not None:
                 self._editor_page.set_document(rendered)
-                self._editor_page.scene.set_mask_visible(True)
-                self._editor_page.set_layers_visible(True)
-
-        self._editor_page.top_bar.set_showing_original(showing)
+            self._editor_page.scene.set_mask_visible(False)
+            self._editor_page.set_layers_visible(False)
+            self._editor_page.property_panel.setEnabled(True)
+        else:  # "layers"
+            rendered = self._model.rendered_document
+            if rendered is not None:
+                self._editor_page.set_document(rendered)
+            self._editor_page.scene.set_mask_visible(True)
+            self._editor_page.set_layers_visible(True)
+            self._editor_page.property_panel.setEnabled(True)
+        self._editor_page.top_bar.set_preview_mode(mode)
 
     # —— 显示/隐藏文字图层 ——
 

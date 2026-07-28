@@ -91,11 +91,11 @@ class TopBar(QFrame):
         # 分隔
         layout.addWidget(_separator())
 
-        # 6. 原图/译图切换
+        # 6. 预览切换（3 态循环）
         self.toggle_original_btn = _make_tool_button(
-            QStyle.StandardPixmap.SP_BrowserReload, "切换原图/译图"
+            QStyle.StandardPixmap.SP_BrowserReload, "预览：译图"  # updated by set_preview_mode
         )
-        self.toggle_original_btn.setCheckable(True)
+        self.toggle_original_btn.setCheckable(False)
         self.toggle_original_btn.clicked.connect(self.toggle_original_requested.emit)
 
         # 7. 显示/隐藏文字图层
@@ -223,6 +223,12 @@ class TopBar(QFrame):
 
     def set_showing_original(self, showing: bool) -> None:
         self.toggle_original_btn.setChecked(showing)
+
+    def set_preview_mode(self, mode: str) -> None:
+        labels = {"original": "原图", "translated": "译图", "layers": "译图+图层"}
+        label = labels.get(mode, mode)
+        self.toggle_original_btn.setToolTip(f"预览：{label}")
+        self._preview_mode = mode
 
     def _reset_state(self) -> None:
         self._translating = False
