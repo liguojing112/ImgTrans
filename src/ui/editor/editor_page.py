@@ -157,7 +157,9 @@ class EditorPage(QWidget):
 
     def select_layer(self, layer: TextLayer) -> None:
         self.scene.select_layer(layer.region_id)
-        self.property_panel.set_layer(layer)
+        ocr_region = self._find_ocr_region(layer.region_id)
+        translation_unit = self._find_translation_unit(layer.region_id)
+        self.property_panel.set_layer(layer, ocr_region, translation_unit)
 
     def clear_layer_selection(self) -> None:
         self.scene.clear_selection()
@@ -287,7 +289,9 @@ class EditorPage(QWidget):
     def _on_model_selection_changed(self, layer: TextLayer | None) -> None:
         if layer is not None:
             self.scene.select_layer(layer.region_id)
-            self.property_panel.set_layer(layer)
+            ocr_region = self._find_ocr_region(layer.region_id)
+            translation_unit = self._find_translation_unit(layer.region_id)
+            self.property_panel.set_layer(layer, ocr_region, translation_unit)
         else:
             self.scene.clear_selection()
             self.property_panel.set_layer(None)
@@ -344,5 +348,35 @@ class EditorPage(QWidget):
         elif field == "shadow_opacity": style = replace(style, shadow_opacity=float(value) / 100.0)
         elif field == "shadow_offset_x": style = replace(style, shadow_offset_x=float(value))
         elif field == "shadow_offset_y": style = replace(style, shadow_offset_y=float(value))
+        elif field == "font_stretch": style = replace(style, font_stretch=int(value))
         else: return None
         return replace(layer, text=text, box=box, style=style)
+
+    # —— OCR / Translation 查找辅助 ——
+
+    def _find_ocr_region(self, region_id: str) -> object | None:
+        if not hasattr(self, "_model") or self._model is None:
+            return None
+        ocr = self._model.ocr_result
+        if ocr is None:
+            return None
+        for r in ocr.regions:
+            if r.region_id == region_id:
+                return r
+        result = self._model.translation_result
+        if result is not None and result.ocr is not None:
+            for r in result.ocr.regions:
+                if r.region_id == region_id:
+                    return r
+        return None
+
+    def _find_translation_unit(self, region_id: str) -> object | None:
+        if not hasattr(self, "_model") or self._model is None:
+            return None
+        result = self._model.translation_result
+        if result is None:
+            return None
+        for u in result.translation.units:
+            if u.region_id == region_id:
+                return u
+        return None
