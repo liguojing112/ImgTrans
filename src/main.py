@@ -62,6 +62,7 @@ from src.platform.paths import PlatformPaths, discover_model_target
 from src.platform.credentials import create_platform_credential_store
 from src.platform.qt_runtime import QtRuntimeMonitor, configure_qt_runtime
 from src.ui.main_window import MainWindow
+from src.ui.editor.main_window import EditorMainWindow
 from src.ui.qt_task_runner import QtTaskRunner
 
 
@@ -235,12 +236,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         action="store_true",
         help="create the main window and exit automatically",
     )
+    parser.add_argument(
+        "--editor",
+        action="store_true",
+        help="launch the new editor UI (under development)",
+    )
     args = parser.parse_args(list(argv) if argv is not None else None)
     configure_qt_runtime()
     application = QApplication.instance() or QApplication(["imgtrans"])
     application.setApplicationName("ImgTrans")
     application.setApplicationVersion(__version__)
-    window = create_main_window()
+    if args.editor:
+        window = _create_editor_window()
+    else:
+        window = create_main_window()
     runtime_monitor = QtRuntimeMonitor(application)
     runtime_monitor.recovery_requested.connect(window.request_runtime_recovery)
     window._runtime_monitor = runtime_monitor
@@ -255,3 +264,16 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main(sys.argv[1:]))
+
+
+def _create_editor_window() -> EditorMainWindow:
+    """构建编辑器窗口的最小依赖集。"""
+    codec = PillowImageCodec()
+    image_limits = ImageLimits()
+    import_image = ImportImage(codec, image_limits)
+    task_runner = QtTaskRunner()
+    return EditorMainWindow(
+        import_image=import_image,
+        codec=codec,
+        task_runner=task_runner,
+    )
