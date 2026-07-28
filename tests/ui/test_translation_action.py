@@ -158,7 +158,7 @@ def test_panel_shows_review_required_without_counting_it_as_failure() -> None:
     review = panel.results.topLevelItem(0)
     assert review.text(0) == "LOW"
     assert review.text(1) == "LOW"
-    assert review.text(2) == "\u5f85\u590d\u6838\uff1aOCR \u7f6e\u4fe1\u5ea6\u8f83\u4f4e"
+    assert review.text(2) == "\u5f85\u590d\u6838\uff1a\u81ea\u52a8\u5904\u7406\u53ef\u9760\u6027\u4e0d\u8db3"
     assert review.toolTip(2) == "\u8be5\u533a\u57df\u672a\u81ea\u52a8\u7ffb\u8bd1\uff0c\u539f\u56fe\u4fdd\u6301\u4e0d\u53d8"
     assert panel.results.topLevelItem(2).text(2) == "\u5931\u8d25\uff1a\u4fdd\u7559\u539f\u6587"
     assert (

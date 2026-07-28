@@ -103,6 +103,25 @@ class OcrPreviewStrip:
 
 
 @dataclass(frozen=True, slots=True)
+class OcrCleanupSummary:
+    raw_candidate_count: int
+    unique_candidate_count: int
+    auto_confirmed_count: int
+    review_required_count: int
+    deleted_candidate_count: int
+
+    def __post_init__(self) -> None:
+        if min(
+            self.raw_candidate_count,
+            self.unique_candidate_count,
+            self.auto_confirmed_count,
+            self.review_required_count,
+            self.deleted_candidate_count,
+        ) < 0:
+            raise ValueError("OCR cleanup counts cannot be negative")
+
+
+@dataclass(frozen=True, slots=True)
 class TextRegion:
     region_id: str
     polygon: Quad
@@ -136,6 +155,8 @@ class OcrResult:
     elapsed_ms: float
     mode: OcrMode = OcrMode.STANDARD
     preview_strips: tuple[OcrPreviewStrip, ...] = ()
+    cleanup_summary: OcrCleanupSummary | None = None
+    raw_observations: tuple[OcrObservation, ...] = ()
 
     def __post_init__(self) -> None:
         if self.elapsed_ms < 0:

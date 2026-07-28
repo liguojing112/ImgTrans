@@ -16,6 +16,7 @@ import numpy as np
 from src.domain.image import ImageDocument
 from src.domain.ocr import (
     HighRecallOcrOptions,
+    OcrCleanupSummary,
     OcrError,
     OcrMode,
     OcrObservation,
@@ -178,6 +179,25 @@ class RapidOcrAdapter:
             profile.profile_id,
             self._confidence_threshold,
             options.consensus_confidence,
+            (
+                options.center.x,
+                options.center.y,
+            )
+            if options.center is not None
+            else (image.shape[1] / 2, image.shape[0] / 2),
+            (image.shape[1], image.shape[0]),
+        )
+        raw_candidate_count = len(standard.regions) + len(observations)
+        cleanup_summary = OcrCleanupSummary(
+            raw_candidate_count=raw_candidate_count,
+            unique_candidate_count=len(regions),
+            auto_confirmed_count=sum(
+                region.auto_process_eligible for region in regions
+            ),
+            review_required_count=sum(
+                not region.auto_process_eligible for region in regions
+            ),
+            deleted_candidate_count=max(0, raw_candidate_count - len(regions)),
         )
         return OcrResult(
             regions,
@@ -186,6 +206,8 @@ class RapidOcrAdapter:
             (perf_counter() - started) * 1000,
             OcrMode.HIGH_RECALL,
             preview_strips,
+            cleanup_summary,
+            tuple(sorted(observations, key=_observation_sort_key)),
         )
 
     def _get_engine(self, profile: OcrProfile) -> Any:
@@ -645,6 +667,8 @@ def _merge_high_recall_regions(
     model_id: str,
     confidence_threshold: float,
     consensus_confidence: float,
+    center: tuple[float, float] = (0.0, 0.0),
+    image_size: tuple[int, int] | None = None,
 ) -> tuple[TextRegion, ...]:
     standard_with_evidence = [
         TextRegion(
@@ -672,12 +696,32 @@ def _merge_high_recall_regions(
         for region in standard_regions
     ]
     unmatched: list[OcrObservation] = []
-    for observation in sorted(enhanced_observations, key=_observation_sort_key):
+    valid_observations = tuple(
+        observation
+        for observation in enhanced_observations
+        if _valid_enhanced_observation(
+            observation,
+            center,
+            image_size,
+        )
+    )
+    ring_groups = _cluster_observations_by_ring(valid_observations, center)
+    ring_by_observation = {
+        id(observation): ring_index
+        for ring_index, group in enumerate(ring_groups)
+        for observation in group
+    }
+    ring_band_limits = _ring_band_limits(ring_groups, center)
+    for observation in sorted(valid_observations, key=_observation_sort_key):
         match_index = next(
             (
                 index
                 for index, region in enumerate(standard_with_evidence)
-                if _observation_matches_region(observation, region)
+                if _observation_matches_region(
+                    observation,
+                    region,
+                    center,
+                )
             ),
             None,
         )
@@ -698,20 +742,50 @@ def _merge_high_recall_regions(
             True,
         )
 
-    clusters: list[list[OcrObservation]] = []
-    for observation in unmatched:
-        cluster = next(
-            (
-                candidate
-                for candidate in clusters
-                if any(_observations_match(observation, item) for item in candidate)
-            ),
-            None,
+    standard_with_evidence = [
+        TextRegion(
+            region.region_id,
+            region.polygon,
+            region.text,
+            region.confidence,
+            region.language_code,
+            region.model_id,
+            region.status,
+            region.observations,
+            False,
+            True,
         )
-        if cluster is None:
-            clusters.append([observation])
-        else:
-            cluster.append(observation)
+        for region in standard_with_evidence
+    ]
+
+    clusters: list[list[OcrObservation]] = []
+    for ring_index, ring in enumerate(ring_groups):
+        ring_observations = tuple(
+            observation
+            for observation in unmatched
+            if ring_by_observation[id(observation)] == ring_index
+        )
+        for observation in ring_observations:
+            cluster = next(
+                (
+                    candidate
+                    for candidate in clusters
+                    if ring_by_observation[id(candidate[0])] == ring_index
+                    and any(
+                        _observations_match(
+                            observation,
+                            item,
+                            center,
+                        )
+                        for item in candidate
+                    )
+                ),
+                None,
+            )
+            if cluster is None:
+                clusters.append([observation])
+            else:
+                cluster.append(observation)
 
     enhanced_regions: list[TextRegion] = []
     for cluster_index, cluster in enumerate(clusters, start=1):
@@ -739,12 +813,38 @@ def _merge_high_recall_regions(
             if item.confidence >= consensus_confidence
             and _text_similarity(item.text, representative.text) >= 0.82
         )
-        eligible = len({item.view_id for item in agreeing}) >= 2
-        confidence = max(item.confidence for item in ordered)
+        evidence = agreeing or supported
+        stable = _mapping_is_stable(agreeing, center) if agreeing else False
+        independent_agreement = _independent_view_agreement(
+            agreeing,
+            representative.text,
+        )
+        eligible = (
+            independent_agreement >= 2
+            and stable
+        )
+        confidence = float(
+            np.mean(
+                tuple(
+                    item.confidence
+                    for item in (agreeing or supported)
+                )
+            )
+        )
+        mapping_representative = _mapping_medoid(
+            agreeing or supported,
+            center,
+        )
+        ring_index = ring_by_observation[id(cluster[0])]
+        polygon = _limit_polygon_to_ring(
+            mapping_representative.polygon,
+            center,
+            ring_band_limits[ring_index],
+        )
         enhanced_regions.append(
             TextRegion(
                 f"enhanced-pending-{cluster_index:04d}",
-                representative.polygon,
+                polygon,
                 representative.text,
                 confidence,
                 language_code,
@@ -760,6 +860,10 @@ def _merge_high_recall_regions(
             )
         )
 
+    enhanced_regions = _prune_conflicting_regions(
+        enhanced_regions,
+        center,
+    )
     combined = [*standard_with_evidence, *enhanced_regions]
     combined.sort(key=_region_sort_key)
     return tuple(
@@ -782,7 +886,24 @@ def _merge_high_recall_regions(
 def _observation_matches_region(
     observation: OcrObservation,
     region: TextRegion,
+    center: tuple[float, float] | None = None,
 ) -> bool:
+    if center is not None:
+        observation_geometry = _polar_geometry(observation.polygon, center)
+        region_geometry = _polar_geometry(region.polygon, center)
+        if (
+            _radial_overlap_ratio(
+                observation_geometry,
+                region_geometry,
+            )
+            < 0.25
+            or _angular_overlap_ratio(
+                observation_geometry,
+                region_geometry,
+            )
+            < 0.2
+        ):
+            return False
     return (
         _quad_iou(observation.polygon, region.polygon) >= 0.2
         or (
@@ -800,9 +921,18 @@ def _observation_matches_region(
 def _observations_match(
     first: OcrObservation,
     second: OcrObservation,
+    center: tuple[float, float] | None = None,
 ) -> bool:
     if _text_similarity(first.text, second.text) < 0.72:
         return False
+    if center is not None:
+        first_geometry = _polar_geometry(first.polygon, center)
+        second_geometry = _polar_geometry(second.polygon, center)
+        if (
+            _angular_overlap_ratio(first_geometry, second_geometry) < 0.3
+            or _radial_overlap_ratio(first_geometry, second_geometry) < 0.35
+        ):
+            return False
     iou = _quad_iou(first.polygon, second.polygon)
     center_distance = _quad_center_distance(first.polygon, second.polygon)
     extent = max(_quad_extent(first.polygon), _quad_extent(second.polygon))
@@ -811,6 +941,472 @@ def _observations_match(
         _quad_array(second.polygon),
     )
     return iou >= 0.18 or (center_distance <= extent * 0.65 and overlap >= 0.28)
+
+
+@dataclass(frozen=True, slots=True)
+class _PolarGeometry:
+    mean_radius: float
+    radial_start: float
+    radial_end: float
+    angle_start: float
+    angle_end: float
+    center_angle: float
+    band_width: float
+    tangent_degrees: float
+    center_x: float
+    center_y: float
+
+    @property
+    def angular_span(self) -> float:
+        return self.angle_end - self.angle_start
+
+
+def _polar_geometry(
+    polygon,
+    center: tuple[float, float],
+) -> _PolarGeometry:
+    points = _quad_array(polygon).astype(float)
+    deltas = points - np.asarray(center, dtype=float)
+    radii = np.linalg.norm(deltas, axis=1)
+    polygon_center = points.mean(axis=0)
+    center_delta = polygon_center - np.asarray(center, dtype=float)
+    center_angle = atan2(float(center_delta[1]), float(center_delta[0]))
+    raw_angles = np.arctan2(deltas[:, 1], deltas[:, 0])
+    unwrapped = np.asarray(
+        tuple(
+            center_angle + _normalized_radians(float(angle) - center_angle)
+            for angle in raw_angles
+        ),
+        dtype=float,
+    )
+    mean_radius = float(radii.mean())
+    tangent = degrees(center_angle + pi / 2)
+    return _PolarGeometry(
+        mean_radius=mean_radius,
+        radial_start=float(radii.min()),
+        radial_end=float(radii.max()),
+        angle_start=float(unwrapped.min()),
+        angle_end=float(unwrapped.max()),
+        center_angle=center_angle,
+        band_width=float(radii.max() - radii.min()),
+        tangent_degrees=_normalized_degrees(tangent),
+        center_x=float(polygon_center[0]),
+        center_y=float(polygon_center[1]),
+    )
+
+
+def _cluster_observations_by_ring(
+    observations: tuple[OcrObservation, ...],
+    center: tuple[float, float],
+) -> tuple[tuple[OcrObservation, ...], ...]:
+    if not observations:
+        return ()
+    geometries = {
+        id(observation): _polar_geometry(observation.polygon, center)
+        for observation in observations
+    }
+    band_widths = tuple(
+        geometry.band_width for geometry in geometries.values()
+    )
+    radius_tolerance = max(
+        3.0,
+        min(7.0, float(np.median(band_widths)) * 0.4),
+    )
+    groups: list[list[OcrObservation]] = []
+    means: list[float] = []
+    for observation in sorted(
+        observations,
+        key=lambda item: (
+            geometries[id(item)].mean_radius,
+            *_observation_sort_key(item),
+        ),
+    ):
+        radius = geometries[id(observation)].mean_radius
+        nearest = min(
+            range(len(means)),
+            key=lambda index: abs(means[index] - radius),
+            default=None,
+        )
+        if nearest is None or abs(means[nearest] - radius) > radius_tolerance:
+            groups.append([observation])
+            means.append(radius)
+            continue
+        groups[nearest].append(observation)
+        means[nearest] = float(
+            np.mean(
+                tuple(
+                    geometries[id(item)].mean_radius
+                    for item in groups[nearest]
+                )
+            )
+        )
+    return tuple(
+        tuple(sorted(group, key=_observation_sort_key))
+        for _, group in sorted(
+            zip(means, groups, strict=True),
+            key=lambda item: item[0],
+        )
+    )
+
+
+def _ring_band_limits(
+    groups: tuple[tuple[OcrObservation, ...], ...],
+    center: tuple[float, float],
+) -> tuple[float, ...]:
+    means = tuple(
+        float(
+            np.median(
+                tuple(
+                    _polar_geometry(observation.polygon, center).mean_radius
+                    for observation in group
+                )
+            )
+        )
+        for group in groups
+    )
+    limits: list[float] = []
+    for index, group in enumerate(groups):
+        original_width = float(
+            np.median(
+                tuple(
+                    _polar_geometry(observation.polygon, center).band_width
+                    for observation in group
+                )
+            )
+        )
+        neighbor_gaps = tuple(
+            abs(means[index] - means[neighbor])
+            for neighbor in (index - 1, index + 1)
+            if 0 <= neighbor < len(means)
+        )
+        if not neighbor_gaps:
+            limits.append(original_width)
+            continue
+        limits.append(
+            min(
+                original_width,
+                max(4.0, min(neighbor_gaps) * 0.7),
+            )
+        )
+    return tuple(limits)
+
+
+def _limit_polygon_to_ring(
+    polygon,
+    center: tuple[float, float],
+    maximum_band_width: float,
+):
+    geometry = _polar_geometry(polygon, center)
+    band_width = min(geometry.band_width, maximum_band_width)
+    radial_start = max(0.0, geometry.mean_radius - band_width / 2)
+    radial_end = geometry.mean_radius + band_width / 2
+    points = (
+        (
+            center[0] + radial_start * cos(geometry.angle_start),
+            center[1] + radial_start * sin(geometry.angle_start),
+        ),
+        (
+            center[0] + radial_end * cos(geometry.angle_start),
+            center[1] + radial_end * sin(geometry.angle_start),
+        ),
+        (
+            center[0] + radial_end * cos(geometry.angle_end),
+            center[1] + radial_end * sin(geometry.angle_end),
+        ),
+        (
+            center[0] + radial_start * cos(geometry.angle_end),
+            center[1] + radial_start * sin(geometry.angle_end),
+        ),
+    )
+    return order_quad(points)
+
+
+def _valid_enhanced_observation(
+    observation: OcrObservation,
+    center: tuple[float, float],
+    image_size: tuple[int, int] | None,
+) -> bool:
+    normalized = "".join(
+        character for character in observation.text if character.isalnum()
+    )
+    if len(normalized) < 2 or "\ufffd" in observation.text:
+        return False
+    points = _quad_array(observation.polygon).astype(float)
+    area = abs(float(cv2.contourArea(points.astype(np.float32))))
+    if area < 3:
+        return False
+    if image_size is not None:
+        width, height = image_size
+        if (
+            np.any(points[:, 0] < 0)
+            or np.any(points[:, 1] < 0)
+            or np.any(points[:, 0] > width - 1)
+            or np.any(points[:, 1] > height - 1)
+            or area > width * height * 0.035
+        ):
+            return False
+    geometry = _polar_geometry(observation.polygon, center)
+    if (
+        geometry.mean_radius <= 1
+        or geometry.band_width > max(20.0, geometry.mean_radius * 0.12)
+        or geometry.angular_span <= 0
+        or geometry.angular_span > pi * 0.45
+    ):
+        return False
+    tangent_error = abs(
+        _normalized_axis_degrees(
+            observation.angle_degrees - geometry.tangent_degrees
+        )
+    )
+    if tangent_error > 32:
+        return False
+    arc_width = geometry.mean_radius * geometry.angular_span
+    width_per_character = arc_width / max(1, len(normalized))
+    return 1.0 <= width_per_character <= 42.0
+
+
+def _independent_view_key(observation: OcrObservation) -> str:
+    if observation.source in {"polar", "polar-segment"}:
+        return observation.view_id
+    if observation.source == "rotation" and observation.angle_degrees % 360 == 0:
+        return "standard"
+    return observation.view_id
+
+
+def _normalized_candidate_text(value: str) -> str:
+    return "".join(character.casefold() for character in value if character.isalnum())
+
+
+def _independent_view_agreement(
+    observations: tuple[OcrObservation, ...],
+    representative_text: str,
+) -> int:
+    expected = _normalized_candidate_text(representative_text)
+    return len(
+        {
+            _independent_view_key(observation)
+            for observation in observations
+            if _normalized_candidate_text(observation.text) == expected
+        }
+    )
+
+
+def _candidate_is_auto_confirmed(
+    observations: tuple[OcrObservation, ...],
+    representative_text: str,
+    confidence_threshold: float,
+    center: tuple[float, float],
+) -> bool:
+    agreeing = tuple(
+        observation
+        for observation in observations
+        if observation.confidence >= confidence_threshold
+        and _normalized_candidate_text(observation.text)
+        == _normalized_candidate_text(representative_text)
+    )
+    return (
+        _independent_view_agreement(agreeing, representative_text) >= 2
+        and _mapping_is_stable(agreeing, center)
+    )
+
+
+def _mapping_medoid(
+    observations: tuple[OcrObservation, ...],
+    center: tuple[float, float],
+) -> OcrObservation:
+    geometries = {
+        id(observation): _polar_geometry(observation.polygon, center)
+        for observation in observations
+    }
+
+    def distance(first: OcrObservation, second: OcrObservation) -> float:
+        first_geometry = geometries[id(first)]
+        second_geometry = geometries[id(second)]
+        mean_radius = max(
+            1.0,
+            (first_geometry.mean_radius + second_geometry.mean_radius) / 2,
+        )
+        return (
+            abs(first_geometry.mean_radius - second_geometry.mean_radius)
+            + abs(
+                _normalized_radians(
+                    first_geometry.center_angle - second_geometry.center_angle
+                )
+            )
+            * mean_radius
+            + abs(first_geometry.band_width - second_geometry.band_width) * 0.25
+        )
+
+    return min(
+        observations,
+        key=lambda candidate: (
+            sum(distance(candidate, other) for other in observations),
+            -candidate.confidence,
+            _observation_sort_key(candidate),
+        ),
+    )
+
+
+def _mapping_is_stable(
+    observations: tuple[OcrObservation, ...],
+    center: tuple[float, float],
+) -> bool:
+    if len({observation.view_id for observation in observations}) < 2:
+        return False
+    geometries = tuple(
+        _polar_geometry(observation.polygon, center)
+        for observation in observations
+    )
+    radii = tuple(geometry.mean_radius for geometry in geometries)
+    band_width = max(
+        1.0,
+        float(np.median(tuple(geometry.band_width for geometry in geometries))),
+    )
+    if max(radii) - min(radii) > max(3.0, band_width * 0.35):
+        return False
+    reference_angle = geometries[0].center_angle
+    angular_offsets = tuple(
+        _normalized_radians(geometry.center_angle - reference_angle)
+        for geometry in geometries
+    )
+    mean_radius = float(np.mean(radii))
+    if (max(angular_offsets) - min(angular_offsets)) * mean_radius > 8.0:
+        return False
+    tangent_offsets = tuple(
+        _normalized_axis_degrees(
+            geometry.tangent_degrees - geometries[0].tangent_degrees
+        )
+        for geometry in geometries
+    )
+    if max(tangent_offsets) - min(tangent_offsets) > 12:
+        return False
+    centers = np.asarray(
+        tuple((geometry.center_x, geometry.center_y) for geometry in geometries),
+        dtype=float,
+    )
+    center_spread = max(
+        float(np.linalg.norm(first - second))
+        for first in centers
+        for second in centers
+    )
+    return center_spread <= max(
+        8.0,
+        float(np.median(tuple(_quad_extent(item.polygon) for item in observations)))
+        * 0.3,
+    )
+
+
+def _prune_conflicting_regions(
+    regions: list[TextRegion],
+    center: tuple[float, float],
+) -> list[TextRegion]:
+    ordered = sorted(
+        regions,
+        key=lambda region: (
+            -_region_consensus_score(region, center),
+            *_region_sort_key(region),
+        ),
+    )
+    selected: list[TextRegion] = []
+    for region in ordered:
+        geometry = _polar_geometry(region.polygon, center)
+        conflict = any(
+            _candidate_conflict(
+                geometry,
+                _polar_geometry(existing.polygon, center),
+                region,
+                existing,
+            )
+            for existing in selected
+        )
+        if not conflict:
+            selected.append(region)
+    return sorted(selected, key=_region_sort_key)
+
+
+def _candidate_conflict(
+    first_geometry: _PolarGeometry,
+    second_geometry: _PolarGeometry,
+    first: TextRegion,
+    second: TextRegion,
+) -> bool:
+    if abs(first_geometry.mean_radius - second_geometry.mean_radius) > 7:
+        return False
+    angular_overlap = _angular_overlap_ratio(first_geometry, second_geometry)
+    radial_overlap = _radial_overlap_ratio(first_geometry, second_geometry)
+    if angular_overlap < 0.68 or radial_overlap < 0.55:
+        return False
+    distance = _quad_center_distance(first.polygon, second.polygon)
+    return distance <= 0.55 * max(
+        _quad_extent(first.polygon),
+        _quad_extent(second.polygon),
+    )
+
+
+def _region_consensus_score(
+    region: TextRegion,
+    center: tuple[float, float],
+) -> float:
+    observations = region.observations
+    view_count = len({item.view_id for item in observations})
+    average_confidence = float(
+        np.mean(tuple(item.confidence for item in observations))
+    )
+    representative = region.text
+    agreement = float(
+        np.mean(
+            tuple(
+                _text_similarity(representative, item.text)
+                for item in observations
+            )
+        )
+    )
+    stability = 1.0 if _mapping_is_stable(observations, center) else 0.0
+    return view_count * 2 + average_confidence + agreement + stability
+
+
+def _angular_overlap_ratio(
+    first: _PolarGeometry,
+    second: _PolarGeometry,
+) -> float:
+    overlap = 0.0
+    for shift in (-2 * pi, 0.0, 2 * pi):
+        start = max(first.angle_start, second.angle_start + shift)
+        end = min(first.angle_end, second.angle_end + shift)
+        overlap = max(overlap, max(0.0, end - start))
+    return overlap / max(
+        1e-6,
+        min(first.angular_span, second.angular_span),
+    )
+
+
+def _radial_overlap_ratio(
+    first: _PolarGeometry,
+    second: _PolarGeometry,
+) -> float:
+    overlap = max(
+        0.0,
+        min(first.radial_end, second.radial_end)
+        - max(first.radial_start, second.radial_start),
+    )
+    return overlap / max(1e-6, min(first.band_width, second.band_width))
+
+
+def _normalized_radians(value: float) -> float:
+    return (value + pi) % (2 * pi) - pi
+
+
+def _normalized_degrees(value: float) -> float:
+    return (value + 180) % 360 - 180
+
+
+def _normalized_axis_degrees(value: float) -> float:
+    normalized = _normalized_degrees(value)
+    if normalized > 90:
+        normalized -= 180
+    elif normalized < -90:
+        normalized += 180
+    return normalized
 
 
 def _text_similarity(first: str, second: str) -> float:

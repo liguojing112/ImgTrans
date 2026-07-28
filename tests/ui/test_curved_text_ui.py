@@ -1,4 +1,5 @@
 import os
+from dataclasses import replace
 from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -10,6 +11,8 @@ from PySide6.QtWidgets import QApplication
 from src.domain.image import ImageAsset, ImageDocument, ImageFileFormat
 from src.domain.layout import (
     ArtisticPreset,
+    CircularTextPath,
+    PathPoint,
     TextBox,
     TextLayer,
     TextLayout,
@@ -88,3 +91,20 @@ def test_curve_panel_and_artistic_preset_expose_editable_parameters() -> None:
     assert style.effect_preset is ArtisticPreset.POSTER
     assert style.stroke_width >= 3
     assert style.shadow_opacity == 0.55
+
+
+def test_curve_panel_edits_exact_circular_geometry() -> None:
+    QApplication.instance() or QApplication(["circular-panel-ui"])
+    layer = _layer()
+    circular = CircularTextPath(PathPoint(100, 120), 70, -130, -50)
+    panel = CurvedTextPanel()
+    panel.set_layer(replace(layer, path=circular))
+    assert panel.path_mode.currentData() == "circular"
+    panel.circle_radius.setValue(75)
+    panel.circle_end_angle.setValue(-40)
+    edited = panel.edited_path
+    assert isinstance(edited, CircularTextPath)
+    assert edited.center == PathPoint(100, 120)
+    assert edited.radius == 75
+    assert edited.start_angle_degrees == -130
+    assert edited.end_angle_degrees == -40

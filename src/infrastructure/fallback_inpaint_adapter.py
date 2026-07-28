@@ -31,6 +31,21 @@ class FallbackInpaintAdapter:
         started = perf_counter()
         if self._cancelled.is_set():
             raise RuntimeError("修复任务已取消")
+        if _has_transparent_background(request):
+            return InpaintingResult(
+                _clear_transparent_text(request),
+                "transparent-text-clear",
+                (perf_counter() - started) * 1000,
+            )
+        if (
+            _has_light_neutral_mask_background(request)
+            or _is_text_shaped_mask(request)
+        ):
+            return InpaintingResult(
+                _fill_text_mask(request),
+                "opencv-text-fill",
+                (perf_counter() - started) * 1000,
+            )
         try:
             result = self._primary.inpaint(request)
         except Exception as error:
@@ -104,6 +119,146 @@ def _effective_mask(request: InpaintingRequest) -> np.ndarray:
         ).reshape(height, width) > 0
         mask &= ~protected
     return mask
+
+
+def _is_text_shaped_mask(request: InpaintingRequest) -> bool:
+    mask = _effective_mask(request)
+    area = int(np.count_nonzero(mask))
+    if not area or area / mask.size > 0.25:
+        return False
+    component_count, _, stats, _ = cv2.connectedComponentsWithStats(
+        mask.astype(np.uint8),
+        8,
+    )
+    if component_count <= 3:
+        return False
+    extents = tuple(
+        float(row[cv2.CC_STAT_AREA])
+        / float(row[cv2.CC_STAT_WIDTH] * row[cv2.CC_STAT_HEIGHT])
+        for row in stats[1:]
+        if row[cv2.CC_STAT_WIDTH] and row[cv2.CC_STAT_HEIGHT]
+    )
+    return bool(extents) and float(np.median(extents)) < 0.93
+
+
+def _has_transparent_background(request: InpaintingRequest) -> bool:
+    if request.document.mode != "RGBA":
+        return False
+    alpha = np.frombuffer(request.document.pixels, dtype=np.uint8).reshape(
+        request.document.asset.height,
+        request.document.asset.width,
+        4,
+    )[:, :, 3]
+    return float(np.count_nonzero(alpha <= 8)) / float(alpha.size) >= 0.15
+
+
+def _has_light_neutral_mask_background(
+    request: InpaintingRequest,
+) -> bool:
+    mask = _effective_mask(request)
+    area_ratio = float(np.count_nonzero(mask)) / float(mask.size)
+    if not 0 < area_ratio <= _MAX_GLOBAL_FALLBACK_AREA_RATIO:
+        return False
+    document = request.document
+    channels = 4 if document.mode == "RGBA" else 3
+    pixels = np.frombuffer(document.pixels, dtype=np.uint8).reshape(
+        document.asset.height,
+        document.asset.width,
+        channels,
+    )[:, :, :3]
+    border = (
+        cv2.dilate(
+            mask.astype(np.uint8),
+            np.ones((9, 9), dtype=np.uint8),
+        )
+        > 0
+    ) & ~mask
+    samples = pixels[border]
+    if len(samples) < 32:
+        return False
+    minimum = samples.min(axis=1)
+    chroma = (
+        samples.max(axis=1).astype(np.int16)
+        - minimum.astype(np.int16)
+    )
+    light_neutral = (minimum >= 210) & (chroma <= 30)
+    return (
+        float(np.count_nonzero(light_neutral)) / float(len(samples))
+        >= 0.65
+    )
+
+
+def _clear_transparent_text(request: InpaintingRequest) -> ImageDocument:
+    document = request.document
+    pixels = np.frombuffer(document.pixels, dtype=np.uint8).reshape(
+        document.asset.height,
+        document.asset.width,
+        4,
+    ).copy()
+    pixels[_effective_mask(request)] = 0
+    return ImageDocument(document.asset, document.mode, pixels.tobytes())
+
+
+def _fill_text_mask(request: InpaintingRequest) -> ImageDocument:
+    document = request.document
+    height = document.asset.height
+    width = document.asset.width
+    channels = 4 if document.mode == "RGBA" else 3
+    source = np.frombuffer(document.pixels, dtype=np.uint8).reshape(
+        height,
+        width,
+        channels,
+    )
+    mask = _effective_mask(request)
+    _, labels = cv2.distanceTransformWithLabels(
+        mask.astype(np.uint8),
+        cv2.DIST_L2,
+        5,
+        labelType=cv2.DIST_LABEL_PIXEL,
+    )
+    background_positions = np.argwhere(~mask)
+    nearest = background_positions[labels[mask] - 1]
+    output = source.copy()
+    output[mask, :3] = source[nearest[:, 0], nearest[:, 1], :3]
+    solid_fill = np.zeros(mask.shape, dtype=bool)
+    component_count, component_labels = cv2.connectedComponents(
+        mask.astype(np.uint8),
+        8,
+    )
+    for component_id in range(1, component_count):
+        component = component_labels == component_id
+        ring = (
+            cv2.dilate(
+                component.astype(np.uint8),
+                np.ones((7, 7), dtype=np.uint8),
+            )
+            > 0
+        ) & ~mask
+        background = _dominant_background_color(source[:, :, :3][ring])
+        if background is None:
+            continue
+        output[component, :3] = background
+        solid_fill |= component
+    for _ in range(4):
+        smoothed = cv2.GaussianBlur(output[:, :, :3], (0, 0), 2.0)
+        smooth_mask = mask & ~solid_fill
+        output[smooth_mask, :3] = smoothed[smooth_mask]
+    return ImageDocument(document.asset, document.mode, output.tobytes())
+
+
+def _dominant_background_color(
+    samples: np.ndarray,
+) -> np.ndarray | None:
+    if len(samples) < 8:
+        return None
+    values = samples.astype(np.uint8)
+    quantized = values // 16
+    bins, counts = np.unique(quantized, axis=0, return_counts=True)
+    best = bins[int(np.argmax(counts))]
+    selected = np.all(quantized == best, axis=1)
+    if np.count_nonzero(selected) / len(values) < 0.28:
+        return None
+    return np.median(values[selected], axis=0).astype(np.uint8)
 
 
 def _smooth_background_artifact_mask(

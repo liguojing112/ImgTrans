@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from uuid import uuid4
 
 from src.application.ocr import RecognizeText
@@ -131,13 +132,19 @@ class ProcessManualRegion:
         text_layout = self._layout.layout(source, ocr_result, translation)
         if len(text_layout.layers) != 1:
             raise ManualRegionError("manual_layout_failed", "手动区域没有生成唯一译文图层")
+        layer = text_layout.layers[0]
+        if spec.circular_path is not None:
+            layer = self._layout.reflow(
+                replace(layer, path=spec.circular_path),
+                layer.text,
+            )
         return ManualRegionResult(
             region_id,
             source_text,
             translated_text,
             erase_mask,
             repaired,
-            text_layout.layers[0],
+            layer,
         )
 
     def cancel(self) -> None:

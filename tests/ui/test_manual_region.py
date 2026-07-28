@@ -14,7 +14,7 @@ from src.application.ocr import RecognizeText
 from src.application.translation import TranslateRegions
 from src.domain.image import ImageAsset, ImageDocument, ImageFileFormat
 from src.domain.inpainting import InpaintingRequest, InpaintingResult
-from src.domain.layout import TextBox
+from src.domain.layout import CircularTextPath, TextBox
 from src.domain.manual_region import ManualInputMode
 from src.domain.ocr import OcrResult
 from src.domain.product import ProductInfo
@@ -145,11 +145,21 @@ def test_window_applies_direct_translation_and_undoes_repair_and_layer(tmp_path:
         panel.mode_combo.findData(ManualInputMode.TRANSLATED_TEXT.value)
     )
     panel.translated_text.setPlainText("人工译文")
+    panel.circular_enabled.setChecked(True)
+    panel.circle_center_x.setValue(60)
+    panel.circle_center_y.setValue(80)
+    panel.circle_radius.setValue(40)
+    panel.circle_start_angle.setValue(-120)
+    panel.circle_end_angle.setValue(-60)
     window.request_manual_region()
     application.processEvents()
     assert window._composition_editor is not None
     assert len(window._composition_editor.layout.layers) == 1
     assert window._composition_editor.layout.layers[0].text == "人工译文"
+    assert isinstance(
+        window._composition_editor.layout.layers[0].path,
+        CircularTextPath,
+    )
     assert window.current_document is not None
     assert window.current_document.pixels != document.pixels
     assert window.text_edit_panel.undo_button.isEnabled()

@@ -23,9 +23,11 @@ from src.domain.image import ImageDocument
 from src.domain.inpainting import EraseMask
 from src.domain.layout import (
     ArcTextPath,
+    CircularTextPath,
     PathPoint,
     TextBox,
     TextLayout,
+    TextPath,
     transform_arc_path,
 )
 from src.domain.ocr import TextRegion
@@ -58,7 +60,7 @@ class ImageCanvas(QLabel):
         self._drag_start_document = QPointF()
         self._drag_start_pan = QPointF()
         self._drag_original_box: TextBox | None = None
-        self._drag_original_path: ArcTextPath | None = None
+        self._drag_original_path: TextPath | None = None
         self._manual_selection_enabled = False
         self._point_selection_enabled = False
         self._manual_preview_box: TextBox | None = None
@@ -316,7 +318,22 @@ class ImageCanvas(QLabel):
                 self.view_to_document(event.position()), self._document_size
             )
             replacement = PathPoint(point.x(), point.y())
-            if self._drag_mode == "path-start":
+            if isinstance(path, CircularTextPath):
+                if self._drag_mode == "path-control":
+                    candidate = replace(path, center=replacement)
+                else:
+                    angle = degrees(
+                        atan2(
+                            replacement.y - path.center.y,
+                            replacement.x - path.center.x,
+                        )
+                    )
+                    candidate = (
+                        replace(path, start_angle_degrees=angle)
+                        if self._drag_mode == "path-start"
+                        else replace(path, end_angle_degrees=angle)
+                    )
+            elif self._drag_mode == "path-start":
                 candidate = replace(path, start=replacement)
             elif self._drag_mode == "path-control":
                 candidate = replace(path, control=replacement)
@@ -452,7 +469,7 @@ class ImageCanvas(QLabel):
         )
         self.update()
 
-    def _set_preview_path(self, path: ArcTextPath) -> None:
+    def _set_preview_path(self, path: TextPath) -> None:
         selected = self._selected_layer()
         if selected is None:
             return
@@ -463,16 +480,25 @@ class ImageCanvas(QLabel):
 
     def _path_handle_at(
         self,
-        path: ArcTextPath | None,
+        path: TextPath | None,
         view_point: QPointF,
     ) -> str | None:
         if path is None:
             return None
-        for name, point in (
-            ("start", path.start),
-            ("control", path.control),
-            ("end", path.end),
-        ):
+        handles = (
+            (
+                ("start", path.start),
+                ("control", path.center),
+                ("end", path.end),
+            )
+            if isinstance(path, CircularTextPath)
+            else (
+                ("start", path.start),
+                ("control", path.control),
+                ("end", path.end),
+            )
+        )
+        for name, point in handles:
             if _distance(view_point, self.document_to_view(point)) <= 11:
                 return name
         return None
@@ -512,9 +538,34 @@ class ImageCanvas(QLabel):
     def _paint_text_path(
         self,
         painter: QPainter,
-        path: ArcTextPath,
+        path: TextPath,
         selected: bool,
     ) -> None:
+        if isinstance(path, CircularTextPath):
+            points = QPolygonF(
+                [
+                    self.document_to_view(path.point_at(index / 64))
+                    for index in range(65)
+                ]
+            )
+            pen = QPen(QColor("#20a464" if selected else "#63a1ff"), 2)
+            pen.setCosmetic(True)
+            painter.setPen(pen)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawPolyline(points)
+            if selected:
+                guide = QPen(QColor("#20a464"), 1, Qt.PenStyle.DashLine)
+                guide.setCosmetic(True)
+                painter.setPen(guide)
+                center = self.document_to_view(path.center)
+                start = self.document_to_view(path.start)
+                end = self.document_to_view(path.end)
+                painter.drawLine(center, start)
+                painter.drawLine(center, end)
+                painter.setBrush(QColor("#ffffff"))
+                for point in (start, center, end):
+                    painter.drawEllipse(point, 5, 5)
+            return
         start = self.document_to_view(path.start)
         control = self.document_to_view(path.control)
         end = self.document_to_view(path.end)

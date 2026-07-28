@@ -99,11 +99,25 @@ class TranslateImage:
             overflow_region_ids = frozenset(
                 layer.region_id for layer in layout.layers if layer.overflow
             )
+            protected_conflict_region_ids = (
+                self._repair.translated_protection_conflicts(
+                    document,
+                    ocr,
+                    translation,
+                )
+            )
+            preserved_region_ids = (
+                overflow_region_ids | protected_conflict_region_ids
+            )
             renderable_layout = (
                 TextLayout(
-                    tuple(layer for layer in layout.layers if not layer.overflow)
+                    tuple(
+                        layer
+                        for layer in layout.layers
+                        if layer.region_id not in preserved_region_ids
+                    )
                 )
-                if overflow_region_ids
+                if preserved_region_ids
                 else layout
             )
             rendered = self._run_stage(
@@ -126,7 +140,7 @@ class TranslateImage:
                 document,
                 rendered,
                 ocr,
-                overflow_region_ids,
+                preserved_region_ids,
             )
             job.complete()
             return TranslateImageResult(rendered, ocr, translation, repair, layout, job)

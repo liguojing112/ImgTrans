@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from src.application.inpainting import BuildEraseMask, RepairTranslatedRegions
@@ -10,7 +11,7 @@ from src.domain.inpainting import (
     InpaintingRequest,
     InpaintingResult,
 )
-from src.domain.ocr import OcrResult, TextRegion, order_quad
+from src.domain.ocr import OcrMode, OcrResult, TextRegion, order_quad
 from src.domain.translation import (
     TranslationMode,
     TranslationResult,
@@ -82,6 +83,344 @@ def test_builder_only_rasterizes_regions_marked_for_erasure() -> None:
     assert mask.pixels[20 * mask.width + 65] == 0
 
 
+def test_confirmed_enhanced_region_expands_glyph_mask_without_erasing_background() -> None:
+    pixels = np.full((50, 100, 3), 255, dtype=np.uint8)
+    pixels[20:30, 45:49] = 0
+    document = ImageDocument(
+        ImageAsset(
+            Path("enhanced-ring.png"),
+            100,
+            50,
+            1,
+            ImageFileFormat.PNG,
+            False,
+            False,
+        ),
+        "RGB",
+        pixels.tobytes(),
+    )
+    region = TextRegion(
+        "enhanced",
+        order_quad(((30, 15), (70, 15), (70, 35), (30, 35))),
+        "Sales",
+        0.95,
+        "en",
+        "fixture",
+        enhanced_only=True,
+        auto_process_eligible=True,
+    )
+    translation = TranslationResult(
+        (
+            TranslationUnit(
+                "enhanced",
+                "Sales",
+                "en",
+                "zh-Hans",
+                "销售",
+                TranslationStatus.TRANSLATED,
+            ),
+        ),
+        TranslationSelection(TranslationMode.ALL, "zh-Hans"),
+        "fixture",
+        1,
+    )
+
+    mask = BuildEraseMask(PillowMaskRasterizer(), expansion=0).execute(
+        document,
+        OcrResult((region,), "en", "fixture", 1),
+        translation,
+    )
+
+    assert mask.pixels[16 * mask.width + 31] == 0
+    assert mask.pixels[20 * mask.width + 44] == 255
+    assert mask.pixels[25 * mask.width + 47] == 255
+    assert mask.pixels[10 * mask.width + 20] == 0
+
+
+def test_high_recall_smooth_background_uses_complete_region_mask() -> None:
+    pixels = np.full((50, 100, 3), 255, dtype=np.uint8)
+    pixels[20:30, 45:49] = 0
+    document = ImageDocument(
+        ImageAsset(
+            Path("high-recall-ring.png"),
+            100,
+            50,
+            1,
+            ImageFileFormat.PNG,
+            False,
+            False,
+        ),
+        "RGB",
+        pixels.tobytes(),
+    )
+    region = TextRegion(
+        "confirmed",
+        order_quad(((30, 15), (70, 15), (70, 35), (30, 35))),
+        "Sales",
+        0.95,
+        "en",
+        "fixture",
+        enhanced_only=True,
+        auto_process_eligible=True,
+    )
+    translation = TranslationResult(
+        (
+            TranslationUnit(
+                "confirmed",
+                "Sales",
+                "en",
+                "zh-Hans",
+                "销售",
+                TranslationStatus.TRANSLATED,
+            ),
+        ),
+        TranslationSelection(TranslationMode.ALL, "zh-Hans"),
+        "fixture",
+        1,
+    )
+
+    mask = BuildEraseMask(PillowMaskRasterizer(), expansion=0).execute(
+        document,
+        OcrResult(
+            (region,),
+            "en",
+            "fixture",
+            1,
+            OcrMode.HIGH_RECALL,
+        ),
+        translation,
+    )
+
+    assert mask.pixels[16 * mask.width + 31] == 255
+    assert mask.pixels[25 * mask.width + 50] == 255
+
+
+def test_high_recall_stronger_confirmed_duplicate_is_preserved_as_one_region() -> None:
+    document = _document()
+    confirmed = TextRegion(
+        "confirmed",
+        order_quad(((10, 10), (50, 10), (50, 30), (10, 30))),
+        "Global",
+        0.95,
+        "en",
+        "fixture",
+        enhanced_only=True,
+        auto_process_eligible=True,
+    )
+    protected = TextRegion(
+        "protected",
+        order_quad(((11, 10), (49, 10), (49, 30), (11, 30))),
+        "G1al",
+        0.60,
+        "en",
+        "fixture",
+    )
+    selection = TranslationSelection(TranslationMode.ALL, "zh-Hans")
+    translation = TranslationResult(
+        (
+            TranslationUnit(
+                "confirmed",
+                "Global",
+                "en",
+                "zh-Hans",
+                "全球",
+                TranslationStatus.TRANSLATED,
+            ),
+            TranslationUnit(
+                "protected",
+                "G1al",
+                "en",
+                "zh-Hans",
+                "G1al",
+                TranslationStatus.SKIPPED_PROTECTED,
+            ),
+        ),
+        selection,
+        "fixture",
+        1,
+    )
+
+    conflicts = BuildEraseMask(
+        PillowMaskRasterizer(),
+        expansion=0,
+    ).translated_protection_conflicts(
+        document,
+        OcrResult(
+            (confirmed, protected),
+            "en",
+            "fixture",
+            1,
+            OcrMode.HIGH_RECALL,
+        ),
+        translation,
+    )
+
+    assert conflicts == frozenset({"confirmed"})
+
+
+def test_color_aware_mask_erases_light_text_without_erasing_label_background() -> None:
+    pixels = np.full((50, 100, 3), (178, 38, 24), dtype=np.uint8)
+    pixels[16:34, 15:22] = (245, 235, 228)
+    pixels[16:34, 35:42] = (245, 235, 228)
+    pixels[16:34, 55:62] = (245, 235, 228)
+    document = ImageDocument(
+        ImageAsset(
+            Path("solid-label.png"),
+            100,
+            50,
+            1,
+            ImageFileFormat.PNG,
+            False,
+            False,
+        ),
+        "RGB",
+        pixels.tobytes(),
+    )
+
+    mask = PillowMaskRasterizer().rasterize_text(
+        document,
+        (((5, 5), (95, 5), (95, 45), (5, 45)),),
+        0,
+    )
+
+    assert mask.pixels[20 * 100 + 18] == 255
+    assert mask.pixels[20 * 100 + 38] == 255
+    assert mask.pixels[20 * 100 + 58] == 255
+    assert mask.pixels[10 * 100 + 10] == 0
+    assert mask.pixels[25 * 100 + 75] == 0
+
+
+def test_color_aware_mask_preserves_multiple_saturated_label_colors() -> None:
+    pixels = np.full((50, 100, 3), (174, 38, 24), dtype=np.uint8)
+    pixels[:, :35] = (3, 145, 126)
+    pixels[16:34, 18:25] = (240, 232, 225)
+    pixels[16:34, 48:55] = (240, 232, 225)
+    document = ImageDocument(
+        ImageAsset(
+            Path("split-label.png"),
+            100,
+            50,
+            1,
+            ImageFileFormat.PNG,
+            False,
+            False,
+        ),
+        "RGB",
+        pixels.tobytes(),
+    )
+
+    mask = PillowMaskRasterizer().rasterize_text(
+        document,
+        (((5, 5), (95, 5), (95, 45), (5, 45)),),
+        0,
+    )
+
+    assert mask.pixels[20 * 100 + 20] == 255
+    assert mask.pixels[20 * 100 + 50] == 255
+    assert mask.pixels[25 * 100 + 10] == 0
+    assert mask.pixels[25 * 100 + 80] == 0
+
+
+@pytest.mark.parametrize(
+    ("background", "foreground"),
+    (
+        ((139, 91, 155), (248, 248, 248)),
+        ((151, 195, 55), (35, 35, 35)),
+    ),
+)
+def test_vertical_colored_label_mask_erases_glyphs_without_erasing_background(
+    background,
+    foreground,
+) -> None:
+    pixels = np.full((120, 100, 3), (245, 245, 245), dtype=np.uint8)
+    pixels[15:105, 40:60] = background
+    for top in (25, 45, 65, 85):
+        pixels[top : top + 10, 46:54] = foreground
+    document = ImageDocument(
+        ImageAsset(
+            Path("vertical-label.png"),
+            100,
+            120,
+            1,
+            ImageFileFormat.PNG,
+            False,
+            False,
+        ),
+        "RGB",
+        pixels.tobytes(),
+    )
+
+    mask = PillowMaskRasterizer().rasterize_text(
+        document,
+        (((38, 13), (62, 13), (62, 107), (38, 107)),),
+        2,
+    )
+
+    assert mask.pixels[30 * 100 + 50] == 255
+    assert mask.pixels[40 * 100 + 42] == 0
+    assert mask.pixels[10 * 100 + 50] == 0
+
+
+def test_color_aware_mask_erases_colored_text_on_neutral_background() -> None:
+    pixels = np.full((50, 100, 3), (238, 238, 238), dtype=np.uint8)
+    pixels[16:34, 18:25] = (30, 165, 180)
+    pixels[16:34, 48:55] = (30, 165, 180)
+    document = ImageDocument(
+        ImageAsset(
+            Path("colored-text.png"),
+            100,
+            50,
+            1,
+            ImageFileFormat.PNG,
+            False,
+            False,
+        ),
+        "RGB",
+        pixels.tobytes(),
+    )
+
+    mask = PillowMaskRasterizer().rasterize_text(
+        document,
+        (((5, 5), (95, 5), (95, 45), (5, 45)),),
+        0,
+    )
+
+    assert mask.pixels[20 * 100 + 20] == 255
+    assert mask.pixels[20 * 100 + 50] == 255
+    assert mask.pixels[25 * 100 + 10] == 0
+    assert mask.pixels[25 * 100 + 80] == 0
+
+
+def test_transparent_mask_uses_alpha_to_select_text_pixels() -> None:
+    pixels = np.zeros((50, 100, 4), dtype=np.uint8)
+    pixels[16:34, 18:25] = (30, 165, 180, 255)
+    pixels[16:34, 48:55] = (220, 60, 95, 255)
+    document = ImageDocument(
+        ImageAsset(
+            Path("transparent-text.png"),
+            100,
+            50,
+            1,
+            ImageFileFormat.PNG,
+            True,
+            False,
+        ),
+        "RGBA",
+        pixels.tobytes(),
+    )
+
+    mask = PillowMaskRasterizer().rasterize_text(
+        document,
+        (((5, 5), (95, 5), (95, 45), (5, 45)),),
+        0,
+    )
+
+    assert mask.pixels[20 * 100 + 20] == 255
+    assert mask.pixels[20 * 100 + 50] == 255
+    assert mask.pixels[25 * 100 + 10] == 0
+    assert mask.pixels[25 * 100 + 80] == 0
+
+
 def test_builder_rejects_result_without_erasable_regions() -> None:
     document = _document()
     region = _region("protected", 10)
@@ -99,6 +438,36 @@ def test_builder_rejects_result_without_erasable_regions() -> None:
     with pytest.raises(InpaintingError) as error:
         BuildEraseMask(PillowMaskRasterizer()).execute(document, ocr, translation)
     assert error.value.code == "no_erase_regions"
+
+
+def test_repair_preserves_original_when_all_regions_require_review() -> None:
+    document = _document()
+    region = _region("review", 10)
+    ocr = OcrResult((region,), "en", "fixture", 1)
+    translation = TranslationResult(
+        (
+            TranslationUnit(
+                "review",
+                "label",
+                "en",
+                "zh-Hans",
+                "label",
+                TranslationStatus.REVIEW_REQUIRED,
+            ),
+        ),
+        TranslationSelection(TranslationMode.ALL, "zh-Hans"),
+        "fixture",
+        1,
+    )
+    repair = RepairTranslatedRegions(
+        BuildEraseMask(PillowMaskRasterizer()),
+        RecordingInpaintAdapter(),
+    ).execute(document, ocr, translation)
+
+    assert repair.erase_mask.is_empty
+    assert repair.result.document is document
+    assert repair.result.backend_id == "original-preserved"
+
 
 class RecordingRasterizer:
     def __init__(self) -> None:
@@ -177,6 +546,51 @@ def test_review_mask_is_subtracted_from_adjacent_expanded_erase_mask() -> None:
             strict=True,
         )
     )
+
+
+def test_language_skipped_region_is_protected_from_adjacent_erase_mask() -> None:
+    document = _document()
+    ocr = OcrResult(
+        (_region("translated", 10), _region("existing-target-text", 31)),
+        "en",
+        "fixture",
+        1,
+    )
+    translation = TranslationResult(
+        (
+            TranslationUnit(
+                "translated",
+                "促销",
+                "zh-Hans",
+                "en",
+                "Sale",
+                TranslationStatus.TRANSLATED,
+            ),
+            TranslationUnit(
+                "existing-target-text",
+                "MIANXIAOFEI",
+                "en",
+                "en",
+                "MIANXIAOFEI",
+                TranslationStatus.SKIPPED_LANGUAGE,
+            ),
+        ),
+        TranslationSelection(TranslationMode.ALL, "en"),
+        "fixture",
+        1,
+    )
+
+    plan = BuildEraseMask(
+        PillowMaskRasterizer(),
+        expansion=2,
+    ).build_plan(document, ocr, translation)
+
+    overlap = 20 * 100 + 31
+    skipped_center = 20 * 100 + 40
+    assert plan.protect_mask is not None
+    assert plan.protect_mask.pixels[overlap] == 255
+    assert plan.erase_mask.pixels[overlap] == 0
+    assert plan.protect_mask.pixels[skipped_center] == 255
 
 
 def test_no_review_keeps_original_erase_mask_and_no_protection() -> None:

@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from math import degrees
+
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QCheckBox,
+    QComboBox,
     QDoubleSpinBox,
     QFormLayout,
     QFrame,
@@ -13,7 +16,15 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from src.domain.layout import ArcTextPath, PathPoint, TextLayer, default_arc_path
+from src.domain.layout import (
+    ArcTextPath,
+    CircularTextPath,
+    PathPoint,
+    TextLayer,
+    TextPath,
+    default_arc_path,
+    ensure_bottom_inward_circular_path,
+)
 
 
 class CurvedTextPanel(QFrame):
@@ -38,6 +49,13 @@ class CurvedTextPanel(QFrame):
         layout.addWidget(hint)
         layout.addWidget(self.selected_label)
 
+        self.path_mode = QComboBox()
+        self.path_mode.setObjectName("textPathMode")
+        self.path_mode.addItem("自由弧线", "bezier")
+        self.path_mode.addItem("精确圆环", "circular")
+        self.path_mode.currentIndexChanged.connect(self._path_mode_changed)
+        layout.addWidget(self.path_mode)
+
         form = QFormLayout()
         self.start = _PointFields()
         self.control = _PointFields()
@@ -48,6 +66,22 @@ class CurvedTextPanel(QFrame):
         form.addRow("终点 X/Y", self.end)
         form.addRow("", self.reverse)
         layout.addLayout(form)
+
+        circle_form = QFormLayout()
+        self.circle_center = _PointFields()
+        self.circle_radius = _coordinate_spin()
+        self.circle_radius.setMinimum(0.1)
+        self.circle_start_angle = _angle_spin()
+        self.circle_end_angle = _angle_spin()
+        angle_row = QWidget()
+        angle_layout = QHBoxLayout(angle_row)
+        angle_layout.setContentsMargins(0, 0, 0, 0)
+        angle_layout.addWidget(self.circle_start_angle)
+        angle_layout.addWidget(self.circle_end_angle)
+        circle_form.addRow("圆心 X/Y", self.circle_center)
+        circle_form.addRow("半径", self.circle_radius)
+        circle_form.addRow("起止角度", angle_row)
+        layout.addLayout(circle_form)
 
         self.default_button = QPushButton("生成默认上弧路径")
         self.default_button.setObjectName("defaultCurveButton")
@@ -75,7 +109,17 @@ class CurvedTextPanel(QFrame):
         return self._layer.region_id if self._layer else None
 
     @property
-    def edited_path(self) -> ArcTextPath:
+    def edited_path(self) -> TextPath:
+        if self.path_mode.currentData() == "circular":
+            return ensure_bottom_inward_circular_path(
+                CircularTextPath(
+                    self.circle_center.point,
+                    self.circle_radius.value(),
+                    self.circle_start_angle.value(),
+                    self.circle_end_angle.value(),
+                    self.reverse.isChecked(),
+                )
+            )
         return ArcTextPath(
             self.start.point,
             self.control.point,
@@ -107,7 +151,18 @@ class CurvedTextPanel(QFrame):
             enabled and self._layer is not None and self._layer.path is not None
         )
 
-    def _set_path(self, path: ArcTextPath) -> None:
+    def _set_path(self, path: TextPath) -> None:
+        if isinstance(path, CircularTextPath):
+            self.path_mode.setCurrentIndex(
+                self.path_mode.findData("circular")
+            )
+            self.circle_center.set_point(path.center)
+            self.circle_radius.setValue(path.radius)
+            self.circle_start_angle.setValue(path.start_angle_degrees)
+            self.circle_end_angle.setValue(path.end_angle_degrees)
+            self.reverse.setChecked(path.reverse)
+            return
+        self.path_mode.setCurrentIndex(self.path_mode.findData("bezier"))
         self.start.set_point(path.start)
         self.control.set_point(path.control)
         self.end.set_point(path.end)
@@ -118,6 +173,27 @@ class CurvedTextPanel(QFrame):
             return
         self._set_path(default_arc_path(self._layer.box))
         self.apply_requested.emit()
+
+    def _path_mode_changed(self) -> None:
+        if (
+            self._layer is None
+            or self.path_mode.currentData() != "circular"
+            or self.circle_start_angle.value() != self.circle_end_angle.value()
+        ):
+            return
+        box = self._layer.box
+        radius = max(box.width, box.height * 2)
+        midpoint = box.rotation_degrees - 90
+        half_span = min(75.0, max(1.0, degrees(box.width / (2 * radius))))
+        self.circle_center.set_point(
+            PathPoint(
+                box.center_x,
+                box.center_y + radius,
+            )
+        )
+        self.circle_radius.setValue(radius)
+        self.circle_start_angle.setValue(midpoint - half_span)
+        self.circle_end_angle.setValue(midpoint + half_span)
 
 
 class _PointFields(QWidget):
@@ -145,4 +221,12 @@ def _coordinate_spin() -> QDoubleSpinBox:
     control.setRange(-100000, 100000)
     control.setDecimals(1)
     control.setSuffix(" px")
+    return control
+
+
+def _angle_spin() -> QDoubleSpinBox:
+    control = QDoubleSpinBox()
+    control.setRange(-720, 720)
+    control.setDecimals(1)
+    control.setSuffix("°")
     return control

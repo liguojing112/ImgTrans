@@ -208,11 +208,7 @@ def test_server_detection_filters_mixed_language_regions_after_ocr(monkeypatch) 
     )
     result = TranslateRegions(adapter, ProtectionEngine()).execute(
         OcrResult(regions, "zh-Hans", "fixture", 0),
-        TranslationSelection(
-            TranslationMode.SPECIFIC_LANGUAGE,
-            "en",
-            source_language="zh-Hans",
-        ),
+        TranslationSelection(TranslationMode.ALL, "en"),
     )
 
     assert captured["body"]["source_language"] is None

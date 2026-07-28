@@ -171,25 +171,30 @@ class OcrPanel(QFrame):
         self.results.clear()
         for region in result.regions:
             confidence = f"{region.confidence * 100:.1f}%"
+            requires_review = (
+                result.mode is OcrMode.HIGH_RECALL
+                and region.enhanced_only
+                and not region.auto_process_eligible
+            )
             state = (
                 "待确认"
-                if region.enhanced_only and not region.auto_process_eligible
+                if requires_review
                 else ("增强已确认" if region.enhanced_only else "标准")
             )
             item = QTreeWidgetItem(
                 [region.text, confidence, region.language_code, state]
             )
-            if region.enhanced_only:
+            if result.mode is OcrMode.HIGH_RECALL:
                 item.setData(0, Qt.ItemDataRole.UserRole, region.region_id)
                 item.setFlags(item.flags() | Qt.ItemFlag.ItemIsEditable)
                 item.setToolTip(
                     0,
-                    "增强 OCR 候选；修改文字后点击“确认选中识别结果”才允许后续自动处理。",
+                    "高召回 OCR 候选；修改文字后点击“确认选中识别结果”才允许后续自动处理。",
                 )
             if region.status is TextRegionStatus.LOW_CONFIDENCE:
                 item.setToolTip(0, "低置信度结果，请人工检查")
                 item.setForeground(1, Qt.GlobalColor.darkYellow)
-            if region.enhanced_only and not region.auto_process_eligible:
+            if requires_review:
                 item.setForeground(3, Qt.GlobalColor.darkYellow)
             self.results.addTopLevelItem(item)
         self.preview_strips_button.setEnabled(bool(result.preview_strips))

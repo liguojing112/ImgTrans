@@ -113,6 +113,87 @@ class ArcTextPath:
 
 
 @dataclass(frozen=True, slots=True)
+class CircularTextPath:
+    center: PathPoint
+    radius: float
+    start_angle_degrees: float
+    end_angle_degrees: float
+    reverse: bool = False
+
+    def __post_init__(self) -> None:
+        values = (
+            self.radius,
+            self.start_angle_degrees,
+            self.end_angle_degrees,
+        )
+        if not all(isfinite(value) for value in values):
+            raise ValueError("Circular text path values must be finite")
+        if self.radius <= 0:
+            raise ValueError("Circular text path radius must be positive")
+        if abs(self.end_angle_degrees - self.start_angle_degrees) < 1e-6:
+            raise ValueError("Circular text path angles must differ")
+        if abs(self.end_angle_degrees - self.start_angle_degrees) > 360:
+            raise ValueError("Circular text path cannot exceed one revolution")
+
+    @property
+    def start(self) -> PathPoint:
+        return self.point_at(0)
+
+    @property
+    def end(self) -> PathPoint:
+        return self.point_at(1)
+
+    def point_at(self, position: float) -> PathPoint:
+        if not 0 <= position <= 1:
+            raise ValueError("Text path position must be between zero and one")
+        angle = radians(
+            self.start_angle_degrees
+            + (self.end_angle_degrees - self.start_angle_degrees) * position
+        )
+        return PathPoint(
+            self.center.x + self.radius * cos(angle),
+            self.center.y + self.radius * sin(angle),
+        )
+
+    def tangent_at(self, position: float) -> PathPoint:
+        if not 0 <= position <= 1:
+            raise ValueError("Text path position must be between zero and one")
+        angle = radians(
+            self.start_angle_degrees
+            + (self.end_angle_degrees - self.start_angle_degrees) * position
+        )
+        direction = 1 if self.end_angle_degrees > self.start_angle_degrees else -1
+        return PathPoint(
+            -direction * self.radius * sin(angle),
+            direction * self.radius * cos(angle),
+        )
+
+    def approximate_length(self, segments: int = 96) -> float:
+        if segments <= 0:
+            raise ValueError("Text path segments must be positive")
+        return self.radius * radians(
+            abs(self.end_angle_degrees - self.start_angle_degrees)
+        )
+
+
+TextPath = ArcTextPath | CircularTextPath
+
+
+def ensure_bottom_inward_circular_path(
+    path: CircularTextPath,
+) -> CircularTextPath:
+    if path.end_angle_degrees > path.start_angle_degrees:
+        return path
+    return CircularTextPath(
+        path.center,
+        path.radius,
+        path.end_angle_degrees,
+        path.start_angle_degrees,
+        path.reverse,
+    )
+
+
+@dataclass(frozen=True, slots=True)
 class TextStyle:
     font_family: str
     font_size: float
@@ -158,7 +239,7 @@ class TextLayer:
     box: TextBox
     style: TextStyle
     overflow: bool = False
-    path: ArcTextPath | None = None
+    path: TextPath | None = None
 
     def __post_init__(self) -> None:
         if not self.region_id:
@@ -242,10 +323,10 @@ def default_arc_path(box: TextBox, bend: float = 0.35) -> ArcTextPath:
 
 
 def transform_arc_path(
-    path: ArcTextPath,
+    path: TextPath,
     source_box: TextBox,
     target_box: TextBox,
-) -> ArcTextPath:
+) -> TextPath:
     source_angle = radians(source_box.rotation_degrees)
     target_angle = radians(target_box.rotation_degrees)
 
@@ -265,6 +346,18 @@ def transform_arc_path(
             + scaled_y * cos(target_angle),
         )
 
+    if isinstance(path, CircularTextPath):
+        center = transformed(path.center)
+        scale_x = target_box.width / source_box.width
+        scale_y = target_box.height / source_box.height
+        rotation_delta = target_box.rotation_degrees - source_box.rotation_degrees
+        return CircularTextPath(
+            center,
+            path.radius * (scale_x * scale_y) ** 0.5,
+            path.start_angle_degrees + rotation_delta,
+            path.end_angle_degrees + rotation_delta,
+            path.reverse,
+        )
     return ArcTextPath(
         transformed(path.start),
         transformed(path.control),

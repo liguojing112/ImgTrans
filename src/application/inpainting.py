@@ -7,10 +7,11 @@ from src.domain.image import ImageDocument
 from src.domain.inpainting import (
     EraseMask,
     InpaintingError,
+    InpaintingResult,
     InpaintingRequest,
     RepairOutcome,
 )
-from src.domain.ocr import OcrResult
+from src.domain.ocr import OcrMode, OcrResult
 from src.domain.translation import TranslationResult, TranslationStatus
 
 
@@ -46,22 +47,88 @@ class BuildEraseMask:
             for unit in translation_result.units
             if unit.should_erase_source
         }
-        polygons = tuple(
-            tuple((point.x, point.y) for point in region.polygon)
+        translated_regions = tuple(
+            region
             for region in ocr_result.regions
             if region.region_id in translated
         )
-        if not polygons:
+        if not translated_regions:
             raise InpaintingError("no_erase_regions", "没有需要擦除的已翻译文字区域")
-        mask = self._rasterizer.rasterize(
-            document.asset.width,
-            document.asset.height,
-            polygons,
-            self._expansion,
+        rasterize_text = getattr(self._rasterizer, "rasterize_text", None)
+        high_recall = ocr_result.mode is OcrMode.HIGH_RECALL
+        regular_polygons = tuple(
+            tuple((point.x, point.y) for point in region.polygon)
+            for region in translated_regions
+            if not high_recall and not region.enhanced_only
         )
+        enhanced_polygons = tuple(
+            tuple((point.x, point.y) for point in region.polygon)
+            for region in translated_regions
+            if high_recall or region.enhanced_only
+        )
+        masks: list[EraseMask] = []
+        if regular_polygons:
+            masks.append(
+                rasterize_text(document, regular_polygons, self._expansion)
+                if rasterize_text is not None
+                else self._rasterizer.rasterize(
+                    document.asset.width,
+                    document.asset.height,
+                    regular_polygons,
+                    self._expansion,
+                )
+            )
+        if enhanced_polygons:
+            rasterize_mapped_text = (
+                getattr(
+                    self._rasterizer,
+                    "rasterize_high_recall_text",
+                    None,
+                )
+                if high_recall
+                else None
+            ) or getattr(
+                self._rasterizer,
+                "rasterize_mapped_text",
+                None,
+            )
+            masks.append(
+                rasterize_mapped_text(
+                    document,
+                    enhanced_polygons,
+                    max(1, self._expansion),
+                )
+                if rasterize_mapped_text is not None
+                else rasterize_text(
+                    document,
+                    enhanced_polygons,
+                    self._expansion + 1,
+                )
+                if rasterize_text is not None
+                else self._rasterizer.rasterize(
+                    document.asset.width,
+                    document.asset.height,
+                    enhanced_polygons,
+                    self._expansion,
+                )
+            )
+        mask = masks[0]
+        for additional in masks[1:]:
+            mask = EraseMask(
+                mask.width,
+                mask.height,
+                bytes(
+                    max(existing, value)
+                    for existing, value in zip(
+                        mask.pixels,
+                        additional.pixels,
+                        strict=True,
+                    )
+                ),
+            )
         if mask.is_empty:
             raise InpaintingError("empty_erase_mask", "擦除蒙版为空，请检查文字区域")
-        protect_mask = self.build_review_protect_mask(
+        protect_mask = self.build_automatic_protect_mask(
             document,
             ocr_result,
             translation_result,
@@ -101,6 +168,28 @@ class BuildEraseMask:
             review_required,
         )
 
+    def build_automatic_protect_mask(
+        self,
+        document: ImageDocument,
+        ocr_result: OcrResult,
+        translation_result: TranslationResult,
+    ) -> EraseMask | None:
+        protected = {
+            unit.region_id
+            for unit in translation_result.units
+            if unit.status
+            in {
+                TranslationStatus.REVIEW_REQUIRED,
+                TranslationStatus.SKIPPED_LANGUAGE,
+                TranslationStatus.SKIPPED_PROTECTED,
+            }
+        }
+        return self.build_region_protect_mask(
+            document,
+            ocr_result,
+            protected,
+        )
+
     def build_region_protect_mask(
         self,
         document: ImageDocument,
@@ -124,6 +213,79 @@ class BuildEraseMask:
         )
         return protect_mask
 
+    def translated_protection_conflicts(
+        self,
+        document: ImageDocument,
+        ocr_result: OcrResult,
+        translation_result: TranslationResult,
+        minimum_overlap_ratio: float = 0.6,
+    ) -> frozenset[str]:
+        if ocr_result.mode is not OcrMode.HIGH_RECALL:
+            return frozenset()
+        protected_ids = {
+            unit.region_id
+            for unit in translation_result.units
+            if unit.status
+            in {
+                TranslationStatus.REVIEW_REQUIRED,
+                TranslationStatus.SKIPPED_LANGUAGE,
+                TranslationStatus.SKIPPED_PROTECTED,
+            }
+        }
+        translated_ids = {
+            unit.region_id
+            for unit in translation_result.units
+            if unit.should_erase_source
+        }
+        regions = {region.region_id: region for region in ocr_result.regions}
+        protected_masks = tuple(
+            (
+                regions[region_id],
+                self._single_region_mask(document, regions[region_id]),
+            )
+            for region_id in protected_ids
+            if region_id in regions
+        )
+        conflicts = set()
+        for region_id in translated_ids:
+            region = regions.get(region_id)
+            if region is None or not region.enhanced_only:
+                continue
+            translated_mask = self._single_region_mask(document, region)
+            translated_area = sum(value > 0 for value in translated_mask.pixels)
+            if not translated_area:
+                continue
+            for protected_region, protected_mask in protected_masks:
+                if region.confidence < protected_region.confidence + 0.15:
+                    continue
+                protected_area = sum(value > 0 for value in protected_mask.pixels)
+                overlap = sum(
+                    translated > 0 and protected > 0
+                    for translated, protected in zip(
+                        translated_mask.pixels,
+                        protected_mask.pixels,
+                        strict=True,
+                    )
+                )
+                if overlap / max(1, min(translated_area, protected_area)) >= minimum_overlap_ratio:
+                    conflicts.add(region_id)
+                    break
+        return frozenset(conflicts)
+
+    def _single_region_mask(
+        self,
+        document: ImageDocument,
+        region,
+    ) -> EraseMask:
+        return self._rasterizer.rasterize(
+            document.asset.width,
+            document.asset.height,
+            (
+                tuple((point.x, point.y) for point in region.polygon),
+            ),
+            0,
+        )
+
 
 class RepairTranslatedRegions:
     def __init__(
@@ -145,6 +307,21 @@ class RepairTranslatedRegions:
         reset_cancel = getattr(self._inpainting, "reset_cancel", None)
         if reset_cancel is not None:
             reset_cancel()
+        if not any(unit.should_erase_source for unit in translation_result.units):
+            empty_mask = EraseMask(
+                document.asset.width,
+                document.asset.height,
+                bytes(document.asset.width * document.asset.height),
+            )
+            return RepairOutcome(
+                empty_mask,
+                InpaintingResult(
+                    document,
+                    "original-preserved",
+                    0,
+                    "没有可靠的自动修改区域，已保留原图并等待人工复核",
+                ),
+            )
         plan = self._mask_builder.build_plan(document, ocr_result, translation_result)
         result = self._inpainting.inpaint(
             InpaintingRequest(
@@ -169,6 +346,32 @@ class RepairTranslatedRegions:
             translation_result,
         )
         return self._restore_protected_pixels(original, rendered, protect_mask)
+
+    def restore_automatic_protected_pixels(
+        self,
+        original: ImageDocument,
+        rendered: ImageDocument,
+        ocr_result: OcrResult,
+        translation_result: TranslationResult,
+    ) -> ImageDocument:
+        protect_mask = self._mask_builder.build_automatic_protect_mask(
+            original,
+            ocr_result,
+            translation_result,
+        )
+        return self._restore_protected_pixels(original, rendered, protect_mask)
+
+    def translated_protection_conflicts(
+        self,
+        document: ImageDocument,
+        ocr_result: OcrResult,
+        translation_result: TranslationResult,
+    ) -> frozenset[str]:
+        return self._mask_builder.translated_protection_conflicts(
+            document,
+            ocr_result,
+            translation_result,
+        )
 
     def restore_region_pixels(
         self,

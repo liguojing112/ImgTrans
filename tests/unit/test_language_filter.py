@@ -3,7 +3,13 @@ from dataclasses import replace
 from math import cos, radians, sin
 
 from src.application.translation import TranslateRegions
-from src.domain.ocr import OcrResult, TextRegion, order_quad
+from src.domain.ocr import (
+    OcrMode,
+    OcrObservation,
+    OcrResult,
+    TextRegion,
+    order_quad,
+)
 from src.domain.protection import ProtectionEngine, ProtectionKind
 from src.domain.terminology import TerminologyCatalog, TerminologyEntry
 from src.domain.translation import (
@@ -32,6 +38,35 @@ def _region(
     )
 
 
+def _enhanced_region(
+    region_id: str,
+    text: str,
+    y: float,
+    confidence: float,
+    *,
+    auto_process_eligible: bool,
+) -> TextRegion:
+    region = _region(region_id, text, "en", y, confidence)
+    observations = tuple(
+        OcrObservation(
+            "polar",
+            0,
+            scale,
+            confidence,
+            region.polygon,
+            text,
+            f"view-{region_id}-{scale}",
+        )
+        for scale in (2, 3)
+    )
+    return replace(
+        region,
+        enhanced_only=True,
+        auto_process_eligible=auto_process_eligible,
+        observations=observations,
+    )
+
+
 class _RecordingAdapter:
     adapter_id = "recording-fixture"
 
@@ -42,6 +77,21 @@ class _RecordingAdapter:
         self.calls.append((texts, source_language, target_language))
         return tuple(
             TranslationAdapterItem(translated_text=f"translated:{text}")
+            for text in texts
+        )
+
+
+class _ChineseRecordingAdapter(_RecordingAdapter):
+    def __init__(self, translations: dict[str, str]) -> None:
+        super().__init__()
+        self._translations = translations
+
+    def translate(self, texts, source_language, target_language):
+        self.calls.append((texts, source_language, target_language))
+        return tuple(
+            TranslationAdapterItem(
+                translated_text=self._translations.get(text, text)
+            )
             for text in texts
         )
 
@@ -150,6 +200,364 @@ def test_unconfirmed_enhanced_region_never_calls_adapter_until_manual_confirmati
     )
     assert confirmed.units[0].status is TranslationStatus.TRANSLATED
     assert adapter.calls == [(("ROTATED",), None, "zh-Hans")]
+
+
+def test_standard_candidate_in_high_recall_mode_uses_normal_confidence_gate() -> None:
+    adapter = _RecordingAdapter()
+    use_case = TranslateRegions(adapter, ProtectionEngine())
+    candidate = replace(
+        _region("standard", "ROTATED", "en", 0, 0.99),
+        auto_process_eligible=False,
+    )
+    ocr = OcrResult(
+        (candidate,),
+        "en",
+        "fixture-model",
+        1,
+        OcrMode.HIGH_RECALL,
+    )
+
+    result = use_case.execute(
+        ocr,
+        TranslationSelection(TranslationMode.ALL, "zh-Hans"),
+    )
+
+    assert result.units[0].status is TranslationStatus.TRANSLATED
+    assert result.units[0].should_erase_source
+    assert adapter.calls == [(("ROTATED",), None, "zh-Hans")]
+
+
+def test_high_recall_enhanced_candidate_preserves_source_when_chinese_is_missing() -> None:
+    adapter = _RecordingAdapter()
+    candidate = replace(
+        _region("enhanced", "NETWORKING", "en", 0, 0.96),
+        enhanced_only=True,
+        auto_process_eligible=True,
+    )
+
+    result = TranslateRegions(adapter, ProtectionEngine()).execute(
+        OcrResult(
+            (candidate,),
+            "en",
+            "fixture-model",
+            1,
+            OcrMode.HIGH_RECALL,
+        ),
+        TranslationSelection(TranslationMode.ALL, "zh-Hans"),
+    )
+
+    unit = result.units[0]
+    assert unit.status is TranslationStatus.REVIEW_REQUIRED
+    assert unit.translated_text == unit.source_text
+    assert not unit.should_erase_source
+    assert adapter.calls == [(("NETWORKING",), None, "zh-Hans")]
+
+
+def test_high_recall_repeated_candidate_uses_existing_translation_without_extra_call() -> None:
+    adapter = _ChineseRecordingAdapter({"Sales": "销售"})
+    result = TranslateRegions(adapter, ProtectionEngine()).execute(
+        OcrResult(
+            (
+                _enhanced_region(
+                    "reference",
+                    "Sales",
+                    0,
+                    0.93,
+                    auto_process_eligible=True,
+                ),
+                _enhanced_region(
+                    "recovered",
+                    "Sates",
+                    40,
+                    0.84,
+                    auto_process_eligible=False,
+                ),
+            ),
+            "en",
+            "fixture-model",
+            1,
+            OcrMode.HIGH_RECALL,
+        ),
+        TranslationSelection(
+            TranslationMode.SPECIFIC_LANGUAGE,
+            "zh-Hans",
+            source_language="en",
+        ),
+    )
+
+    assert [unit.region_id for unit in result.units] == [
+        "reference",
+        "recovered",
+    ]
+    assert [unit.status for unit in result.units] == [
+        TranslationStatus.TRANSLATED,
+        TranslationStatus.TRANSLATED,
+    ]
+    assert result.units[1].translated_text == "销售"
+    assert adapter.calls == [(("Sales",), "en", "zh-Hans")]
+
+
+def test_high_recall_target_script_failure_can_reuse_repeated_translation() -> None:
+    adapter = _ChineseRecordingAdapter(
+        {
+            "Import": "进口",
+            "imgort": "imgort",
+        }
+    )
+    result = TranslateRegions(adapter, ProtectionEngine()).execute(
+        OcrResult(
+            (
+                _enhanced_region(
+                    "reference",
+                    "Import",
+                    0,
+                    0.93,
+                    auto_process_eligible=True,
+                ),
+                _enhanced_region(
+                    "recovered",
+                    "imgort",
+                    40,
+                    0.88,
+                    auto_process_eligible=True,
+                ),
+            ),
+            "en",
+            "fixture-model",
+            1,
+            OcrMode.HIGH_RECALL,
+        ),
+        TranslationSelection(
+            TranslationMode.SPECIFIC_LANGUAGE,
+            "zh-Hans",
+            source_language="en",
+        ),
+    )
+
+    assert [unit.status for unit in result.units] == [
+        TranslationStatus.TRANSLATED,
+        TranslationStatus.TRANSLATED,
+    ]
+    assert result.units[1].translated_text == "进口"
+    assert adapter.calls == [
+        (("Import", "imgort"), "en", "zh-Hans"),
+    ]
+
+
+def test_high_recall_unmatched_candidate_remains_review_required() -> None:
+    adapter = _ChineseRecordingAdapter({"Sales": "销售"})
+    result = TranslateRegions(adapter, ProtectionEngine()).execute(
+        OcrResult(
+            (
+                _enhanced_region(
+                    "reference",
+                    "Sales",
+                    0,
+                    0.93,
+                    auto_process_eligible=True,
+                ),
+                _enhanced_region(
+                    "unmatched",
+                    "Prei",
+                    40,
+                    0.88,
+                    auto_process_eligible=False,
+                ),
+            ),
+            "en",
+            "fixture-model",
+            1,
+            OcrMode.HIGH_RECALL,
+        ),
+        TranslationSelection(
+            TranslationMode.SPECIFIC_LANGUAGE,
+            "zh-Hans",
+            source_language="en",
+        ),
+    )
+
+    assert result.units[1].status is TranslationStatus.REVIEW_REQUIRED
+    assert result.units[1].translated_text == "Prei"
+    assert not result.units[1].should_erase_source
+    assert adapter.calls == [(("Sales",), "en", "zh-Hans")]
+
+
+def test_high_recall_candidate_prefers_closest_repeated_spelling() -> None:
+    adapter = _ChineseRecordingAdapter(
+        {
+            "Export": "出口",
+            "Eport": "体育",
+        }
+    )
+    result = TranslateRegions(adapter, ProtectionEngine()).execute(
+        OcrResult(
+            (
+                _enhanced_region(
+                    "export-reference",
+                    "Export",
+                    0,
+                    0.93,
+                    auto_process_eligible=True,
+                ),
+                _enhanced_region(
+                    "eport-reference",
+                    "Eport",
+                    40,
+                    0.94,
+                    auto_process_eligible=True,
+                ),
+                _enhanced_region(
+                    "ambiguous",
+                    "Expert",
+                    80,
+                    0.88,
+                    auto_process_eligible=False,
+                ),
+            ),
+            "en",
+            "fixture-model",
+            1,
+            OcrMode.HIGH_RECALL,
+        ),
+        TranslationSelection(
+            TranslationMode.SPECIFIC_LANGUAGE,
+            "zh-Hans",
+            source_language="en",
+        ),
+    )
+
+    assert result.units[2].status is TranslationStatus.TRANSLATED
+    assert result.units[2].translated_text == "出口"
+    assert adapter.calls == [
+        (("Export", "Eport"), "en", "zh-Hans"),
+    ]
+
+
+def test_high_recall_repeated_majority_recovers_noisy_spelling() -> None:
+    adapter = _ChineseRecordingAdapter({"Success": "成功"})
+    result = TranslateRegions(adapter, ProtectionEngine()).execute(
+        OcrResult(
+            (
+                _enhanced_region(
+                    "reference-1",
+                    "Success",
+                    0,
+                    0.93,
+                    auto_process_eligible=True,
+                ),
+                _enhanced_region(
+                    "reference-2",
+                    "Success",
+                    40,
+                    0.94,
+                    auto_process_eligible=True,
+                ),
+                _enhanced_region(
+                    "recovered",
+                    "saccezs",
+                    80,
+                    0.95,
+                    auto_process_eligible=True,
+                ),
+            ),
+            "en",
+            "fixture-model",
+            1,
+            OcrMode.HIGH_RECALL,
+        ),
+        TranslationSelection(
+            TranslationMode.SPECIFIC_LANGUAGE,
+            "zh-Hans",
+            source_language="en",
+        ),
+    )
+
+    assert result.units[2].status is TranslationStatus.TRANSLATED
+    assert result.units[2].translated_text == "成功"
+    assert adapter.calls == [
+        (("Success", "Success", "saccezs"), "en", "zh-Hans"),
+    ]
+
+
+def test_high_recall_unanimous_long_candidate_can_translate() -> None:
+    adapter = _ChineseRecordingAdapter({"Opportunnty": "机会"})
+    candidate = _enhanced_region(
+        "stable",
+        "Opportunnty",
+        0,
+        0.8204,
+        auto_process_eligible=False,
+    )
+    candidate = replace(
+        candidate,
+        observations=candidate.observations
+        + (
+            replace(
+                candidate.observations[0],
+                scale=4,
+                view_id="view-stable-4",
+            ),
+        ),
+    )
+
+    result = TranslateRegions(adapter, ProtectionEngine()).execute(
+        OcrResult(
+            (candidate,),
+            "en",
+            "fixture-model",
+            1,
+            OcrMode.HIGH_RECALL,
+        ),
+        TranslationSelection(
+            TranslationMode.SPECIFIC_LANGUAGE,
+            "zh-Hans",
+            source_language="en",
+        ),
+    )
+
+    assert result.units[0].status is TranslationStatus.TRANSLATED
+    assert result.units[0].translated_text == "机会"
+    assert adapter.calls == [(("Opportunnty",), "en", "zh-Hans")]
+
+
+def test_high_recall_short_or_disagreed_candidate_stays_review_required() -> None:
+    adapter = _ChineseRecordingAdapter({"kgort": "未知"})
+    candidate = _enhanced_region(
+        "short",
+        "kgort",
+        0,
+        0.88,
+        auto_process_eligible=False,
+    )
+    candidate = replace(
+        candidate,
+        observations=candidate.observations
+        + (
+            replace(
+                candidate.observations[0],
+                scale=4,
+                view_id="view-short-4",
+            ),
+        ),
+    )
+
+    result = TranslateRegions(adapter, ProtectionEngine()).execute(
+        OcrResult(
+            (candidate,),
+            "en",
+            "fixture-model",
+            1,
+            OcrMode.HIGH_RECALL,
+        ),
+        TranslationSelection(
+            TranslationMode.SPECIFIC_LANGUAGE,
+            "zh-Hans",
+            source_language="en",
+        ),
+    )
+
+    assert result.units[0].status is TranslationStatus.REVIEW_REQUIRED
+    assert adapter.calls == []
 
 
 def test_repeated_high_confidence_region_corroborates_borderline_curved_label() -> None:
@@ -574,6 +982,63 @@ def test_low_confidence_region_does_not_trigger_remote_language_detection() -> N
 
     assert result.units[0].status is TranslationStatus.REVIEW_REQUIRED
     assert adapter.calls == []
+
+
+def test_specific_source_language_is_authoritative_for_detecting_adapter() -> None:
+    class _DetectingAdapter(_RecordingAdapter):
+        reports_source_language = True
+
+        def translate(self, texts, source_language, target_language):
+            self.calls.append((texts, source_language, target_language))
+            return tuple(
+                TranslationAdapterItem(
+                    translated_text=f"translated:{text}",
+                    source_language=source_language,
+                )
+                for text in texts
+            )
+
+    adapter = _DetectingAdapter()
+    result = TranslateRegions(adapter, ProtectionEngine()).execute(
+        OcrResult(
+            (
+                _region("english", "SALES", "en", 0),
+                _region("other-language", "VENTES", "fr", 40),
+            ),
+            "en",
+            "fixture-model",
+            1,
+        ),
+        TranslationSelection(
+            TranslationMode.SPECIFIC_LANGUAGE,
+            "zh-Hans",
+            source_language="en",
+        ),
+    )
+
+    assert [unit.status for unit in result.units] == [
+        TranslationStatus.TRANSLATED,
+        TranslationStatus.SKIPPED_LANGUAGE,
+    ]
+    assert adapter.calls == [(("SALES",), "en", "zh-Hans")]
+
+
+def test_all_language_mode_still_requests_remote_auto_detection() -> None:
+    class _DetectingAdapter(_RecordingAdapter):
+        reports_source_language = True
+
+    adapter = _DetectingAdapter()
+    TranslateRegions(adapter, ProtectionEngine()).execute(
+        OcrResult(
+            (_region("english", "SALES", "en", 0),),
+            "en",
+            "fixture-model",
+            1,
+        ),
+        TranslationSelection(TranslationMode.ALL, "zh-Hans"),
+    )
+
+    assert adapter.calls == [(("SALES",), None, "zh-Hans")]
 
 
 def test_specific_language_filter_and_protection_statuses() -> None:

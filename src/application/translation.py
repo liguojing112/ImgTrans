@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from dataclasses import replace
 from difflib import SequenceMatcher
-from math import atan2, degrees
+from math import atan2, degrees, hypot
 from time import perf_counter
 
 from src.application.ports import TranslationAdapter
 from src.domain.language import SUPPORTED_LANGUAGE_CODES
-from src.domain.ocr import OcrResult, TextRegion
+from src.domain.ocr import OcrMode, OcrResult, TextRegion
 from src.domain.protection import (
     ProtectedText,
     ProtectionEngine,
@@ -68,11 +68,15 @@ class TranslateRegions:
         started = perf_counter()
         units: list[TranslationUnit | None] = [None] * len(ocr_result.regions)
         prepared: list[tuple[int, TextRegion, ProtectedText]] = []
+        repeated_review_candidates: list[
+            tuple[int, TextRegion, ProtectedText]
+        ] = []
         reports_source_language = bool(
             getattr(self._adapter, "reports_source_language", False)
         )
         complex_layout_review = (
             not allow_low_confidence
+            and ocr_result.mode is not OcrMode.HIGH_RECALL
             and _requires_rotated_layout_review(ocr_result)
         )
         corroborated_regions = _corroborated_low_confidence_regions(
@@ -82,7 +86,6 @@ class TranslateRegions:
         for index, region in enumerate(ocr_result.regions):
             if (
                 selection.source_language is not None
-                and not reports_source_language
                 and region.language_code != selection.source_language
             ):
                 units[index] = self._skipped_unit(
@@ -109,16 +112,26 @@ class TranslateRegions:
                 and region.enhanced_only
                 and not region.auto_process_eligible
             ):
-                units[index] = TranslationUnit(
-                    region.region_id,
-                    region.text,
-                    region.language_code,
-                    selection.target_language,
-                    region.text,
-                    TranslationStatus.REVIEW_REQUIRED,
-                    protected.spans,
-                )
-                continue
+                if _can_recover_repeated_high_recall_region(
+                    ocr_result,
+                    region,
+                    protected,
+                ):
+                    repeated_review_candidates.append(
+                        (index, region, protected)
+                    )
+                    continue
+                if not _is_unanimous_long_high_recall_region(
+                    ocr_result,
+                    region,
+                    protected,
+                ):
+                    units[index] = _review_required_unit(
+                        region,
+                        selection.target_language,
+                        protected,
+                    )
+                    continue
             if (
                 complex_layout_review
                 and region.confidence < max(
@@ -176,9 +189,7 @@ class TranslateRegions:
                 continue
             prepared.append((index, region, protected))
         if prepared:
-            source_language = (
-                None if reports_source_language else selection.source_language
-            )
+            source_language = selection.source_language
             try:
                 translated = self._adapter.translate(
                     tuple(item[2].masked for item in prepared),
@@ -222,9 +233,6 @@ class TranslateRegions:
                     )
                     continue
                 if (
-                    selection.source_language is not None
-                    and detected_source != selection.source_language
-                ) or (
                     selection.source_language is None
                     and detected_source == selection.target_language
                 ):
@@ -250,6 +258,19 @@ class TranslateRegions:
                         str(error),
                     )
                     continue
+                if (
+                    ocr_result.mode is OcrMode.HIGH_RECALL
+                    and region.enhanced_only
+                    and not _translation_matches_target_script(
+                        region.text,
+                        restored,
+                        selection.target_language,
+                    )
+                ):
+                    repeated_review_candidates.append(
+                        (index, region, protected)
+                    )
+                    continue
                 units[index] = TranslationUnit(
                     region.region_id,
                     region.text,
@@ -259,6 +280,12 @@ class TranslateRegions:
                     TranslationStatus.TRANSLATED,
                     protected.spans,
                 )
+        _recover_repeated_high_recall_regions(
+            ocr_result,
+            selection,
+            repeated_review_candidates,
+            units,
+        )
         completed = tuple(unit for unit in units if unit is not None)
         return TranslationResult(
             completed,
@@ -345,6 +372,325 @@ def _obvious_script_language(text: str, fallback: str) -> str | None:
     ):
         return fallback if fallback in {"zh-Hans", "zh-Hant", "ja"} else "zh-Hans"
     return None
+
+
+def _translation_matches_target_script(
+    source_text: str,
+    translated_text: str,
+    target_language: str,
+) -> bool:
+    if target_language not in {"zh-Hans", "zh-Hant"}:
+        return True
+    if not _contains_latin(source_text):
+        return True
+    return any(
+        "\u3400" <= character <= "\u9fff"
+        or "\uf900" <= character <= "\ufaff"
+        for character in translated_text
+    )
+
+
+def _contains_latin(text: str) -> bool:
+    return any(
+        "A" <= character <= "Z" or "a" <= character <= "z"
+        for character in text
+    )
+
+
+def _review_required_unit(
+    region: TextRegion,
+    target_language: str,
+    protected: ProtectedText,
+) -> TranslationUnit:
+    return TranslationUnit(
+        region.region_id,
+        region.text,
+        region.language_code,
+        target_language,
+        region.text,
+        TranslationStatus.REVIEW_REQUIRED,
+        protected.spans,
+    )
+
+
+def _can_recover_repeated_high_recall_region(
+    ocr_result: OcrResult,
+    region: TextRegion,
+    protected: ProtectedText,
+) -> bool:
+    if (
+        ocr_result.mode is not OcrMode.HIGH_RECALL
+        or not region.enhanced_only
+        or region.confidence < 0.82
+        or protected.spans
+        or not _normalized_latin_token(region.text)
+    ):
+        return False
+    supported = tuple(
+        observation
+        for observation in region.observations
+        if observation.confidence >= 0.8
+    )
+    if len({observation.view_id for observation in supported}) < 2:
+        return False
+    centers = tuple(
+        (
+            sum(point.x for point in observation.polygon) / 4,
+            sum(point.y for point in observation.polygon) / 4,
+        )
+        for observation in supported
+    )
+    stable_mapping = all(
+        hypot(first[0] - second[0], first[1] - second[1]) <= 4
+        for first in centers
+        for second in centers
+    )
+    return stable_mapping and _has_repeated_high_recall_reference(
+        ocr_result,
+        region,
+    )
+
+
+def _has_repeated_high_recall_reference(
+    ocr_result: OcrResult,
+    region: TextRegion,
+) -> bool:
+    token = _normalized_latin_token(region.text)
+    if token is None:
+        return False
+    for reference in ocr_result.regions:
+        if (
+            reference.region_id == region.region_id
+            or not reference.auto_process_eligible
+        ):
+            continue
+        reference_token = _normalized_latin_token(reference.text)
+        if reference_token is None:
+            continue
+        edits = _edit_distance(token, reference_token)
+        maximum_edits = (
+            1 if max(len(token), len(reference_token)) <= 5 else 2
+        )
+        if (
+            edits <= maximum_edits
+            and SequenceMatcher(None, token, reference_token).ratio() >= 0.70
+        ):
+            return True
+    return False
+
+
+def _is_unanimous_long_high_recall_region(
+    ocr_result: OcrResult,
+    region: TextRegion,
+    protected: ProtectedText,
+) -> bool:
+    token = _normalized_latin_token(region.text)
+    if (
+        ocr_result.mode is not OcrMode.HIGH_RECALL
+        or not region.enhanced_only
+        or region.confidence < 0.82
+        or protected.spans
+        or token is None
+        or len(token) < 8
+    ):
+        return False
+    supported = tuple(
+        observation
+        for observation in region.observations
+        if observation.confidence >= 0.80
+    )
+    if len({observation.view_id for observation in supported}) < 3:
+        return False
+    if {
+        _normalized_latin_token(observation.text)
+        for observation in supported
+    } != {token}:
+        return False
+    centers = tuple(
+        (
+            sum(point.x for point in observation.polygon) / 4,
+            sum(point.y for point in observation.polygon) / 4,
+        )
+        for observation in supported
+    )
+    if any(
+        hypot(first[0] - second[0], first[1] - second[1]) > 0.5
+        for first in centers
+        for second in centers
+    ):
+        return False
+    angles = tuple(
+        degrees(
+            atan2(
+                observation.polygon[1].y - observation.polygon[0].y,
+                observation.polygon[1].x - observation.polygon[0].x,
+            )
+        )
+        for observation in supported
+    )
+    return all(
+        min(abs(first - second) % 180, 180 - abs(first - second) % 180)
+        <= 0.5
+        for first in angles
+        for second in angles
+    )
+
+
+def _recover_repeated_high_recall_regions(
+    ocr_result: OcrResult,
+    selection: TranslationSelection,
+    candidates: list[tuple[int, TextRegion, ProtectedText]],
+    units: list[TranslationUnit | None],
+) -> None:
+    if not candidates:
+        return
+    regions = {region.region_id: region for region in ocr_result.regions}
+    references = []
+    for unit in units:
+        if (
+            unit is None
+            or unit.status is not TranslationStatus.TRANSLATED
+            or not _translation_matches_target_script(
+                unit.source_text,
+                unit.translated_text,
+                selection.target_language,
+            )
+        ):
+            continue
+        region = regions.get(unit.region_id)
+        token = _normalized_latin_token(unit.source_text)
+        if (
+            region is None
+            or not region.auto_process_eligible
+            or token is None
+        ):
+            continue
+        references.append((token, region.confidence, unit))
+    groups: dict[str, list[tuple[float, TranslationUnit]]] = {}
+    for token, confidence, unit in references:
+        groups.setdefault(token, []).append((confidence, unit))
+    for index, region, protected in candidates:
+        token = _normalized_latin_token(region.text)
+        match = (
+            _select_repeated_translation(region.text, token, groups)
+            if token is not None
+            else None
+        )
+        if match is None:
+            units[index] = _review_required_unit(
+                region,
+                selection.target_language,
+                protected,
+            )
+            continue
+        translated_text, source_language = match
+        units[index] = TranslationUnit(
+            region.region_id,
+            region.text,
+            source_language,
+            selection.target_language,
+            translated_text,
+            TranslationStatus.TRANSLATED,
+            protected.spans,
+        )
+
+
+def _select_repeated_translation(
+    source_text: str,
+    token: str,
+    groups: dict[str, list[tuple[float, TranslationUnit]]],
+) -> tuple[str, str] | None:
+    neighbours = []
+    for reference_token, values in groups.items():
+        edits = _edit_distance(token, reference_token)
+        similarity = SequenceMatcher(None, token, reference_token).ratio()
+        maximum_edits = 1 if max(len(token), len(reference_token)) <= 5 else 2
+        minimum_similarity = 0.70 if len(values) >= 2 else 0.72
+        if edits <= maximum_edits and similarity >= minimum_similarity:
+            neighbours.append(
+                (
+                    reference_token,
+                    values,
+                    len(values),
+                    edits,
+                    similarity,
+                )
+            )
+    if not neighbours:
+        return None
+    exact = next(
+        (neighbour for neighbour in neighbours if neighbour[0] == token),
+        None,
+    )
+    if exact is not None:
+        stronger = tuple(
+            neighbour
+            for neighbour in neighbours
+            if neighbour[0] != token
+            and neighbour[2] >= exact[2] + 2
+        )
+        selected = (
+            max(stronger, key=lambda value: (value[2], -value[3], value[4]))
+            if stronger
+            else exact
+        )
+    else:
+        neighbours.sort(
+            key=lambda value: (-value[2], value[3], -value[4], value[0])
+        )
+        selected = neighbours[0]
+        if (
+            len(neighbours) > 1
+            and neighbours[1][2] == selected[2]
+            and neighbours[1][3] == selected[3]
+        ):
+            return None
+    values = selected[1]
+    exact_spelling = tuple(
+        value for value in values if value[1].source_text == source_text
+    )
+    eligible_values = exact_spelling or tuple(values)
+    translation_counts: dict[str, int] = {}
+    for _, unit in eligible_values:
+        translation_counts[unit.translated_text] = (
+            translation_counts.get(unit.translated_text, 0) + 1
+        )
+    confidence, unit = max(
+        eligible_values,
+        key=lambda value: (
+            translation_counts[value[1].translated_text],
+            value[0],
+        ),
+    )
+    return unit.translated_text, unit.source_language
+
+
+def _normalized_latin_token(text: str) -> str | None:
+    value = "".join(
+        character.casefold()
+        for character in text
+        if character.isalpha()
+    )
+    if len(value) < 4 or not all("a" <= character <= "z" for character in value):
+        return None
+    return value
+
+
+def _edit_distance(first: str, second: str) -> int:
+    previous = tuple(range(len(second) + 1))
+    for first_index, first_character in enumerate(first, start=1):
+        current = [first_index]
+        for second_index, second_character in enumerate(second, start=1):
+            current.append(
+                min(
+                    current[-1] + 1,
+                    previous[second_index] + 1,
+                    previous[second_index - 1]
+                    + (first_character != second_character),
+                )
+            )
+        previous = tuple(current)
+    return previous[-1]
 
 
 def _requires_rotated_layout_review(ocr_result: OcrResult) -> bool:

@@ -32,7 +32,7 @@ _STATUS_LABELS = {
     TranslationStatus.TRANSLATED: "已翻译",
     TranslationStatus.SKIPPED_LANGUAGE: "跳过：非指定语言",
     TranslationStatus.SKIPPED_PROTECTED: "跳过：全部受保护",
-    TranslationStatus.REVIEW_REQUIRED: "待复核：OCR 置信度较低",
+    TranslationStatus.REVIEW_REQUIRED: "待复核：自动处理可靠性不足",
     TranslationStatus.FAILED: "失败：保留原文",
 }
 

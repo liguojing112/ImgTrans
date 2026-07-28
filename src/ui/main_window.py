@@ -49,7 +49,7 @@ from src.application.translate_image import TranslateImage, TranslateImageResult
 from src.domain.image import ImageDocument
 from src.domain.batch import BatchItemStatus, BatchSnapshot, BatchStatus
 from src.domain.job import ImageStage, JobCancelled
-from src.domain.layout import ArcTextPath, TextBox, TextLayout
+from src.domain.layout import ArcTextPath, CircularTextPath, TextBox, TextLayout
 from src.domain.language import SUPPORTED_LANGUAGE_CODES
 from src.domain.manual_region import ManualRegionResult
 from src.domain.ocr import OcrResult, Point
@@ -821,7 +821,7 @@ class MainWindow(QMainWindow):
 
     def request_path_edit(self, region_id: str, value: object) -> None:
         if (
-            not isinstance(value, ArcTextPath)
+            not isinstance(value, (ArcTextPath, CircularTextPath))
             or self._composition_editor is None
             or self._task_runner is None
         ):
@@ -883,6 +883,17 @@ class MainWindow(QMainWindow):
             return
         self.manual_region_panel.status_label.setText("请在画布上拖动框选文字区域")
         self.image_canvas.set_manual_selection_enabled(True)
+
+    def _manual_selection_completed(self, box: TextBox) -> None:
+        self.manual_region_panel.set_selection(box)
+        center = self.ocr_panel.high_recall_options.center
+        if center is None and self._source_document is not None:
+            center = Point(
+                self._source_document.asset.width / 2,
+                self._source_document.asset.height / 2,
+            )
+        if center is not None:
+            self.manual_region_panel.set_circle_center(center.x, center.y)
 
     def request_manual_region(self) -> None:
         if (
@@ -1104,7 +1115,7 @@ class MainWindow(QMainWindow):
         self.manual_region_panel.select_requested.connect(self.request_manual_selection)
         self.manual_region_panel.process_requested.connect(self.request_manual_region)
         self.image_canvas.manual_region_selected.connect(
-            self.manual_region_panel.set_selection
+            self._manual_selection_completed
         )
         self.batch_panel = BatchPanel()
         self.batch_panel.add_requested.connect(self._choose_batch_images)

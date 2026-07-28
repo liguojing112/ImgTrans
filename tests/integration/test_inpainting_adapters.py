@@ -236,6 +236,169 @@ def test_fallback_keeps_primary_for_large_edge_touching_mask() -> None:
     assert result.warning is None
 
 
+def test_fallback_uses_smooth_local_fill_for_sparse_text_mask() -> None:
+    width, height = 120, 50
+    pixels = np.full((height, width, 4), (174, 38, 24, 127), dtype=np.uint8)
+    mask = np.zeros((height, width), dtype=np.uint8)
+    for left in (15, 35, 55, 75):
+        mask[15:35, left : left + 4] = 255
+        mask[31:35, left : left + 12] = 255
+        pixels[mask > 0, :3] = (245, 235, 228)
+    request = InpaintingRequest(
+        ImageDocument(
+            ImageAsset(
+                Path("text-mask.png"),
+                width,
+                height,
+                1,
+                ImageFileFormat.PNG,
+                True,
+                False,
+            ),
+            "RGBA",
+            pixels.tobytes(),
+        ),
+        EraseMask(width, height, mask.tobytes()),
+    )
+
+    result = FallbackInpaintAdapter(
+        _UnavailableAdapter(),
+        _UnavailableAdapter(),
+    ).inpaint(request)
+    repaired = np.frombuffer(result.document.pixels, dtype=np.uint8).reshape(
+        height,
+        width,
+        4,
+    )
+
+    assert result.backend_id == "opencv-text-fill"
+    assert np.max(
+        np.abs(
+            repaired[mask > 0, :3].astype(np.int16)
+            - np.asarray((174, 38, 24), dtype=np.int16)
+        )
+    ) <= 1
+    assert np.all(repaired[:, :, 3] == 127)
+
+
+def test_sparse_text_fill_uses_dominant_background_in_dense_word_ring() -> None:
+    width, height = 100, 50
+    pixels = np.full((height, width, 3), 250, dtype=np.uint8)
+    mask = np.zeros((height, width), dtype=np.uint8)
+    for left in (28, 38, 48, 58):
+        mask[20:30, left : left + 3] = 255
+        mask[27:30, left : left + 7] = 255
+        pixels[mask > 0] = 20
+    pixels[17:19, 24:70] = 35
+    pixels[31:33, 24:70] = 55
+    request = InpaintingRequest(
+        ImageDocument(
+            ImageAsset(
+                Path("dense-ring-text.png"),
+                width,
+                height,
+                1,
+                ImageFileFormat.PNG,
+                False,
+                False,
+            ),
+            "RGB",
+            pixels.tobytes(),
+        ),
+        EraseMask(width, height, mask.tobytes()),
+    )
+
+    result = FallbackInpaintAdapter(
+        _UnavailableAdapter(),
+        _UnavailableAdapter(),
+    ).inpaint(request)
+    repaired = np.frombuffer(result.document.pixels, dtype=np.uint8).reshape(
+        height,
+        width,
+        3,
+    )
+
+    assert result.backend_id == "opencv-text-fill"
+    assert np.min(repaired[mask > 0]) >= 240
+
+
+def test_large_mapped_text_mask_uses_clean_light_background_fill() -> None:
+    width, height = 120, 80
+    pixels = np.full((height, width, 4), (246, 246, 250, 173), dtype=np.uint8)
+    mask = np.zeros((height, width), dtype=np.uint8)
+    mask[20:60, 20:100] = 255
+    pixels[30:50, 28:92, :3] = (35, 35, 38)
+    request = InpaintingRequest(
+        ImageDocument(
+            ImageAsset(
+                Path("light-circular-text.png"),
+                width,
+                height,
+                1,
+                ImageFileFormat.PNG,
+                True,
+                False,
+            ),
+            "RGBA",
+            pixels.tobytes(),
+        ),
+        EraseMask(width, height, mask.tobytes()),
+    )
+
+    result = FallbackInpaintAdapter(
+        _UnavailableAdapter(),
+        _UnavailableAdapter(),
+    ).inpaint(request)
+    repaired = np.frombuffer(result.document.pixels, dtype=np.uint8).reshape(
+        height,
+        width,
+        4,
+    )
+
+    assert result.backend_id == "opencv-text-fill"
+    assert np.min(repaired[mask > 0, :3]) >= 240
+    assert np.all(repaired[:, :, 3] == 173)
+    assert np.array_equal(repaired[mask == 0], pixels[mask == 0])
+
+
+def test_fallback_clears_translated_pixels_on_transparent_background() -> None:
+    width, height = 80, 40
+    pixels = np.zeros((height, width, 4), dtype=np.uint8)
+    pixels[12:28, 20:60] = (220, 60, 95, 255)
+    mask = np.zeros((height, width), dtype=np.uint8)
+    mask[14:26, 24:56] = 255
+    request = InpaintingRequest(
+        ImageDocument(
+            ImageAsset(
+                Path("transparent-art-text.png"),
+                width,
+                height,
+                1,
+                ImageFileFormat.PNG,
+                True,
+                False,
+            ),
+            "RGBA",
+            pixels.tobytes(),
+        ),
+        EraseMask(width, height, mask.tobytes()),
+    )
+
+    result = FallbackInpaintAdapter(
+        _UnavailableAdapter(),
+        _UnavailableAdapter(),
+    ).inpaint(request)
+    repaired = np.frombuffer(result.document.pixels, dtype=np.uint8).reshape(
+        height,
+        width,
+        4,
+    )
+
+    assert result.backend_id == "transparent-text-clear"
+    assert np.all(repaired[mask > 0] == 0)
+    assert np.array_equal(repaired[12, 20], pixels[12, 20])
+
+
 def test_process_adapter_returns_structured_model_error(tmp_path: Path) -> None:
     adapter = ProcessLamaAdapter(tmp_path / "missing.onnx", timeout_seconds=15)
     try:

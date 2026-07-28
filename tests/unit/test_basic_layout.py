@@ -13,13 +13,26 @@ from PySide6.QtGui import QFontMetricsF
 
 from src.domain.image import ImageAsset, ImageDocument, ImageFileFormat
 from src.domain.layout import (
+    CircularTextPath,
+    PathPoint,
     TextAlignment,
     TextBox,
     TextLayer,
     TextStyle,
+    default_arc_path,
+    ensure_bottom_inward_circular_path,
     fit_font_size,
+    transform_arc_path,
 )
-from src.domain.ocr import OcrResult, TextRegion, order_quad
+from src.domain.ocr import (
+    OcrObservation,
+    OcrPreviewStrip,
+    OcrResult,
+    Point,
+    RingBand,
+    TextRegion,
+    order_quad,
+)
 from src.domain.translation import (
     TranslationMode,
     TranslationResult,
@@ -30,14 +43,26 @@ from src.domain.translation import (
 from src.infrastructure.text_renderer import (
     QtBasicTextLayoutAdapter,
     QtTextRenderer,
+    _align_panel_title_and_body,
+    _arc_text_lines,
     _estimate_foreground_color,
     _estimate_font_weight,
+    _estimate_arc_text_path,
+    _fit_dense_short_word_overflow,
+    _fit_enhanced_tangent_layer,
     _font_for_layer,
     _font_for_style,
     _font_for_text,
+    _matching_background_run_box,
+    _normalize_repeated_curved_layers,
+    _normalize_repeated_panel_rows,
+    _normalize_repeated_vertical_labels,
     _normalize_visual_group_sizes,
     _text_fits,
     _text_flags,
+    _text_box_for_translation,
+    _bottom_inward_text_angle,
+    _vertical_colored_label_foreground,
 )
 from src.platform.fonts import resolve_system_font
 
@@ -74,10 +99,513 @@ def test_binary_font_fit_returns_largest_fitting_value_and_overflow() -> None:
     assert fit_font_size(6, 30, lambda value: False) == (6, True)
 
 
+def test_circular_text_path_uses_exact_radius_and_tangent() -> None:
+    path = CircularTextPath(PathPoint(100, 100), 50, -90, 0)
+    assert path.start.x == pytest.approx(100)
+    assert path.start.y == pytest.approx(50)
+    assert path.end.x == pytest.approx(150)
+    assert path.end.y == pytest.approx(100)
+    midpoint = path.point_at(0.5)
+    assert midpoint.x == pytest.approx(135.355, abs=0.01)
+    assert midpoint.y == pytest.approx(64.645, abs=0.01)
+    tangent = path.tangent_at(0)
+    assert tangent.x > 0
+    assert tangent.y == pytest.approx(0, abs=0.01)
+    assert path.approximate_length() == pytest.approx(np.pi * 25)
+
+
+def test_circular_text_path_places_the_character_bottom_toward_center() -> None:
+    path = CircularTextPath(PathPoint(100, 100), 50, 90, 150)
+    inward = ensure_bottom_inward_circular_path(path)
+    assert inward.center == path.center
+    assert inward.radius == path.radius
+    assert {inward.start, inward.end} == {path.start, path.end}
+    assert inward.start_angle_degrees == 90
+    assert inward.end_angle_degrees == 150
+
+    reversed_path = CircularTextPath(PathPoint(100, 100), 50, -60, -120)
+    corrected = ensure_bottom_inward_circular_path(reversed_path)
+    assert corrected.start_angle_degrees == -120
+    assert corrected.end_angle_degrees == -60
+
+
+def test_circular_glyph_bottom_faces_the_center_at_every_position() -> None:
+    path = CircularTextPath(PathPoint(100, 100), 50, 30, 150)
+    for position in (0.0, 0.25, 0.5, 0.75, 1.0):
+        tangent = path.tangent_at(position)
+        raw_angle = np.degrees(np.arctan2(tangent.y, tangent.x))
+        angle = _bottom_inward_text_angle(path, position, raw_angle)
+        point = path.point_at(position)
+        inward = np.asarray(
+            (path.center.x - point.x, path.center.y - point.y),
+            dtype=float,
+        )
+        glyph_bottom = np.asarray(
+            (-np.sin(np.radians(angle)), np.cos(np.radians(angle))),
+            dtype=float,
+        )
+        assert float(inward @ glyph_bottom) > 0
+
+
+def test_high_recall_ring_region_creates_true_circular_path() -> None:
+    QApplication.instance() or QApplication(["layout-circular-path-test"])
+    width = height = 240
+    asset = ImageAsset(
+        Path("ring-layout.png"),
+        width,
+        height,
+        1,
+        ImageFileFormat.PNG,
+        False,
+        False,
+    )
+    document = ImageDocument(
+        asset,
+        "RGB",
+        np.full((height, width, 3), 245, dtype=np.uint8).tobytes(),
+    )
+    polygon = order_quad(((90, 24), (150, 24), (150, 36), (90, 36)))
+    observation = OcrObservation(
+        "polar",
+        0,
+        3,
+        0.95,
+        polygon,
+        "Business",
+        "polar:0:scale:3",
+    )
+    region = TextRegion(
+        "ring",
+        polygon,
+        "Business",
+        0.95,
+        "en",
+        "circular",
+        observations=(observation,),
+        enhanced_only=True,
+        auto_process_eligible=True,
+    )
+    ocr_result = OcrResult(
+        (region,),
+        "en",
+        "circular",
+        1,
+        preview_strips=(
+            OcrPreviewStrip(
+                "ring",
+                1,
+                1,
+                b"\xff\xff\xff",
+                Point(120, 120),
+                RingBand(70, 110),
+            ),
+        ),
+    )
+    layer = QtBasicTextLayoutAdapter("Arial").layout(
+        document,
+        ocr_result,
+        _translation("ring", "商业"),
+    ).layers[0]
+    assert isinstance(layer.path, CircularTextPath)
+    assert layer.path.center == PathPoint(120, 120)
+    assert layer.path.radius == pytest.approx(90)
+    midpoint = layer.path.point_at(0.5)
+    assert midpoint.x == pytest.approx(120, abs=0.5)
+    assert midpoint.y == pytest.approx(30, abs=0.5)
+
+
 def test_text_style_defaults_to_regular_and_rejects_unsupported_weights() -> None:
     assert TextStyle("Arial", 12, (0, 0, 0)).font_weight == 400
     with pytest.raises(ValueError, match="Font weight"):
         TextStyle("Arial", 12, (0, 0, 0), font_weight=500)
+
+
+def test_curved_source_glyphs_create_arc_path_but_straight_glyphs_do_not() -> None:
+    width, height = 220, 100
+    curved_pixels = np.full((height, width, 3), 245, dtype=np.uint8)
+    straight_pixels = curved_pixels.copy()
+    x_positions = (25, 55, 85, 115, 145, 175)
+    curved_tops = (24, 34, 43, 43, 34, 24)
+    for x, top in zip(x_positions, curved_tops, strict=True):
+        curved_pixels[top : top + 24, x : x + 16] = 15
+        straight_pixels[34:58, x : x + 16] = 15
+    asset = ImageAsset(
+        Path("arc-source.png"),
+        width,
+        height,
+        1,
+        ImageFileFormat.PNG,
+        False,
+        False,
+    )
+    region = TextRegion(
+        "curve",
+        order_quad(((10, 10), (210, 10), (210, 90), (10, 90))),
+        "\u52a0\u539a\u73cd\u73e0\u7eb9",
+        0.99,
+        "zh-Hans",
+        "fixture",
+    )
+    box = TextBox(110, 50, 200, 80)
+
+    curved_path = _estimate_arc_text_path(
+        ImageDocument(asset, "RGB", curved_pixels.tobytes()),
+        region,
+        box,
+    )
+    straight_path = _estimate_arc_text_path(
+        ImageDocument(asset, "RGB", straight_pixels.tobytes()),
+        region,
+        box,
+    )
+
+    assert curved_path is not None
+    assert curved_path.point_at(0.5).y > curved_path.start.y
+    assert straight_path is None
+
+
+def test_long_arc_translation_uses_two_curved_lines_before_shrinking() -> None:
+    QApplication.instance() or QApplication(["layout-arc-wrap-test"])
+    font_family = resolve_system_font("en")
+    box = TextBox(100, 40, 158, 52, -24)
+    layer = TextLayer(
+        "curved-label",
+        "Soft and moisturizing for both dry and warm use",
+        box,
+        TextStyle(font_family, 6, (20, 20, 20), font_stretch=67),
+        path=default_arc_path(box, 0.3),
+    )
+
+    reflowed = QtBasicTextLayoutAdapter(font_family).reflow(layer, layer.text)
+    lines = _arc_text_lines(
+        reflowed.text,
+        _font_for_layer(reflowed),
+        reflowed.path,
+    )
+
+    assert len(lines) == 2
+    assert reflowed.style.font_size > 8
+    assert not reflowed.overflow
+
+
+def test_spacious_arc_translation_stays_on_one_curve() -> None:
+    QApplication.instance() or QApplication(["layout-arc-single-line-test"])
+    font_family = resolve_system_font("en")
+    box = TextBox(130, 55, 211, 89)
+    layer = TextLayer(
+        "wide-curved-label",
+        "Thickened pearl pattern",
+        box,
+        TextStyle(font_family, 6, (20, 20, 20)),
+        path=default_arc_path(box, -0.45),
+    )
+
+    reflowed = QtBasicTextLayoutAdapter(font_family).reflow(layer, layer.text)
+
+    assert _arc_text_lines(
+        reflowed.text,
+        _font_for_layer(reflowed),
+        reflowed.path,
+    ) == (layer.text,)
+    assert reflowed.style.font_size >= box.height * 0.2
+    assert not reflowed.overflow
+
+
+def test_repeated_curved_labels_use_high_confidence_text_and_curve() -> None:
+    first_box = TextBox(100, 80, 140, 48, -22)
+    second_box = TextBox(300, 220, 130, 44, -20)
+    unrelated_box = TextBox(500, 160, 135, 46, 18)
+    regions = (
+        TextRegion(
+            "first",
+            order_quad(((32, 84), (162, 32), (180, 76), (50, 128))),
+            "柔软亲肤适合使用",
+            0.92,
+            "zh-Hans",
+            "test",
+        ),
+        TextRegion(
+            "second",
+            order_quad(((235, 220), (357, 176), (372, 218), (250, 262))),
+            "柔软近肤适合使甪",
+            0.74,
+            "zh-Hans",
+            "test",
+        ),
+        TextRegion(
+            "unrelated",
+            order_quad(((435, 118), (563, 160), (548, 204), (420, 162))),
+            "品质可靠值得信赖",
+            0.88,
+            "zh-Hans",
+            "test",
+        ),
+    )
+    first_path = default_arc_path(first_box, 0.25)
+    second_original_path = default_arc_path(second_box, -0.45)
+    unrelated_path = default_arc_path(unrelated_box, -0.3)
+    first = TextLayer(
+        "first",
+        "Soft and skin-friendly",
+        first_box,
+        TextStyle("Arial", 15, (20, 20, 20)),
+        path=first_path,
+    )
+    second = TextLayer(
+        "second",
+        "Soft and suitable",
+        second_box,
+        TextStyle("Arial", 13, (20, 20, 20)),
+        path=second_original_path,
+    )
+    unrelated = TextLayer(
+        "unrelated",
+        "Reliable quality",
+        unrelated_box,
+        TextStyle("Arial", 14, (20, 20, 20)),
+        path=unrelated_path,
+    )
+
+    normalized = _normalize_repeated_curved_layers(
+        OcrResult(regions, "zh-Hans", "test", 1),
+        (first, second, unrelated),
+        lambda layer, text: replace(layer, text=text),
+    )
+
+    assert normalized[0] == first
+    assert normalized[1].text == first.text
+    assert normalized[1].path == transform_arc_path(
+        first_path,
+        first.box,
+        second.box,
+    )
+    assert normalized[1].path != second_original_path
+    assert normalized[2] == unrelated
+
+
+def test_vertical_source_box_rotates_latin_translation_without_moving_center() -> None:
+    region = TextRegion(
+        "vertical",
+        order_quad(((20, 10), (40, 10), (40, 90), (20, 90))),
+        "\u5168\u65b0\u5546\u54c1",
+        0.99,
+        "zh-Hans",
+        "fixture",
+    )
+
+    box = _text_box_for_translation(region, "Brand new products")
+
+    assert (box.center_x, box.center_y) == (30, 50)
+    assert (box.width, box.height) == (80, 20)
+    assert box.rotation_degrees == 90
+
+
+def test_enhanced_tangent_box_uses_long_edge_for_non_latin_translation() -> None:
+    region = TextRegion(
+        "circular",
+        order_quad(((96, 40), (104, 40), (104, 100), (96, 100))),
+        "Import",
+        0.93,
+        "en",
+        "fixture",
+        enhanced_only=True,
+        auto_process_eligible=True,
+    )
+
+    box = _text_box_for_translation(region, "进口")
+
+    assert (box.center_x, box.center_y) == (100, 70)
+    assert (box.width, box.height) == (60, 8)
+    assert box.rotation_degrees == 90
+
+
+def test_enhanced_tangent_box_uses_observation_angle_and_projected_extents() -> None:
+    center = np.asarray((100.0, 90.0))
+    angle = np.deg2rad(32)
+    tangent = np.asarray((np.cos(angle), np.sin(angle)))
+    normal = np.asarray((-np.sin(angle), np.cos(angle)))
+    points = tuple(
+        center + tangent * tangent_offset + normal * normal_offset
+        for tangent_offset, normal_offset in (
+            (-30, -5),
+            (30, -5),
+            (30, 5),
+            (-30, 5),
+        )
+    )
+    polygon = order_quad(points)
+    observation = OcrObservation(
+        "polar",
+        32,
+        3,
+        0.96,
+        polygon,
+        "Business",
+        "polar:2:scale:3",
+    )
+    region = TextRegion(
+        "circular",
+        polygon,
+        "Business",
+        0.96,
+        "en",
+        "fixture",
+        observations=(observation,),
+        enhanced_only=True,
+        auto_process_eligible=True,
+    )
+
+    box = _text_box_for_translation(region, "商业")
+
+    assert box.center_x == pytest.approx(100)
+    assert box.center_y == pytest.approx(90)
+    assert box.width == pytest.approx(60)
+    assert box.height == pytest.approx(10)
+    assert box.rotation_degrees == pytest.approx(32)
+
+
+def test_enhanced_short_chinese_uses_available_radial_height_without_moving() -> None:
+    layer = TextLayer(
+        "ring",
+        "全球",
+        TextBox(120, 90, 42, 8, 37),
+        TextStyle("Arial", 6, (40, 40, 40), wrap=False),
+    )
+
+    fitted = _fit_enhanced_tangent_layer(layer)
+
+    assert fitted.box.center_x == layer.box.center_x
+    assert fitted.box.center_y == layer.box.center_y
+    assert fitted.box.rotation_degrees == layer.box.rotation_degrees
+    assert fitted.box.height > layer.box.height
+    assert fitted.style.font_size > layer.style.font_size
+    assert not fitted.overflow
+
+
+def test_enhanced_tangent_translation_is_single_line_and_uses_available_width() -> None:
+    polygon = order_quad(((20, 40), (100, 40), (100, 54), (20, 54)))
+    observation = OcrObservation(
+        "polar",
+        0,
+        3,
+        0.97,
+        polygon,
+        "International",
+        "polar:1:scale:3",
+    )
+    region = TextRegion(
+        "circular",
+        polygon,
+        "International",
+        0.97,
+        "en",
+        "fixture",
+        observations=(observation,),
+        enhanced_only=True,
+        auto_process_eligible=True,
+    )
+    translation = TranslationResult(
+        (
+            TranslationUnit(
+                "circular",
+                "International",
+                "en",
+                "zh-Hans",
+                "国际",
+                TranslationStatus.TRANSLATED,
+            ),
+        ),
+        TranslationSelection(TranslationMode.ALL, "zh-Hans"),
+        "fixture",
+        1,
+    )
+
+    layer = QtBasicTextLayoutAdapter("Arial").layout(
+        _document(),
+        OcrResult((region,), "en", "fixture", 1),
+        translation,
+    ).layers[0]
+
+    assert not layer.style.wrap
+    assert layer.style.font_stretch > 100
+    assert layer.style.font_size >= 6
+    assert not layer.overflow
+
+
+def test_colored_vertical_labels_keep_light_and_dark_source_foregrounds() -> None:
+    pixels = np.full((110, 180, 3), (242, 242, 242), dtype=np.uint8)
+    pixels[15:95, 20:46] = (126, 61, 151)
+    pixels[15:95, 120:146] = (174, 220, 48)
+    for top in (24, 40, 56, 72):
+        pixels[top : top + 8, 28:38] = (248, 248, 248)
+        pixels[top : top + 8, 128:138] = (20, 21, 17)
+    purple = TextRegion(
+        "purple",
+        order_quad(((20, 15), (46, 15), (46, 95), (20, 95))),
+        "全新商品",
+        0.99,
+        "zh-Hans",
+        "fixture",
+    )
+    green = TextRegion(
+        "green",
+        order_quad(((120, 15), (146, 15), (146, 95), (120, 95))),
+        "全新商品",
+        0.99,
+        "zh-Hans",
+        "fixture",
+    )
+
+    assert min(_vertical_colored_label_foreground(pixels, purple)) >= 240
+    assert max(_vertical_colored_label_foreground(pixels, green)) <= 25
+
+
+def test_repeated_vertical_labels_share_geometry_and_style_without_moving() -> None:
+    layers = (
+        TextLayer(
+            "purple",
+            "Brand new products",
+            TextBox(75.5, 195.75, 66.03, 23.02, 87.5),
+            TextStyle(
+                "Segoe UI",
+                11.49,
+                (248, 248, 248),
+                font_stretch=67,
+                font_weight=400,
+            ),
+        ),
+        TextLayer(
+            "green",
+            "Brand new products",
+            TextBox(285.25, 206.25, 64.03, 20.03, 92.86),
+            TextStyle(
+                "Segoe UI",
+                11.5,
+                (20, 21, 17),
+                font_stretch=75,
+                font_weight=700,
+            ),
+        ),
+    )
+
+    normalized = _normalize_repeated_vertical_labels(layers)
+
+    assert [(layer.box.center_x, layer.box.center_y) for layer in normalized] == [
+        (75.5, 195.75),
+        (285.25, 206.25),
+    ]
+    assert {layer.box.rotation_degrees for layer in normalized} == {90}
+    assert len({round(layer.style.font_size, 3) for layer in normalized}) == 1
+    assert {layer.style.font_stretch for layer in normalized} == {67}
+    assert {layer.style.font_weight for layer in normalized} == {700}
+    assert {layer.style.alignment for layer in normalized} == {
+        TextAlignment.CENTER
+    }
+    assert [layer.style.fill_rgb for layer in normalized] == [
+        (248, 248, 248),
+        (20, 21, 17),
+    ]
+    assert not any(layer.overflow for layer in normalized)
 
 
 def test_qfont_uses_text_style_weight() -> None:
@@ -355,6 +883,286 @@ def test_visual_group_keeps_distinct_text_hierarchy() -> None:
     assert normalized == layers
 
 
+def test_repeated_background_panels_keep_heading_and_body_hierarchy_consistent() -> None:
+    QApplication.instance() or QApplication(["layout-repeated-panel-test"])
+    pixels = np.full((130, 1000, 3), (235, 225, 205), dtype=np.uint8)
+    for left in (5, 255, 505, 755):
+        pixels[10:120, left : left + 240] = (250, 241, 210)
+        pixels[25:105, left + 15 : left + 75] = (246, 201, 72)
+    document = ImageDocument(
+        ImageAsset(
+            Path("repeated-panels.png"),
+            1000,
+            130,
+            1,
+            ImageFileFormat.PNG,
+            False,
+            False,
+        ),
+        "RGB",
+        pixels.tobytes(),
+    )
+    titles = (
+        "Larger and thicker",
+        "Suitable for both dry and wet use",
+        "Pearl pattern design",
+        "Gentle and non-irritating",
+    )
+    bodies = (
+        "Thicker and more durable",
+        "Wash face and remove makeup",
+        "Soft touch, double cleanliness",
+        "No lint or shedding",
+    )
+    layers = tuple(
+        layer
+        for index, left in enumerate((5, 255, 505, 755))
+        for layer in (
+            TextLayer(
+                f"title-{index}",
+                titles[index],
+                TextBox(
+                    left + 155,
+                    43,
+                    110,
+                    32,
+                    (0.2, -1.1, 0.3, -0.2)[index],
+                ),
+                TextStyle("Arial", 12 + index, (24, 20, 12)),
+            ),
+            TextLayer(
+                f"body-{index}",
+                bodies[index],
+                TextBox(
+                    left + 155,
+                    82,
+                    115,
+                    24,
+                    (-0.3, 0.8, -0.1, 0.4)[index],
+                ),
+                TextStyle("Arial", 8 + index, (28, 24, 16)),
+            ),
+        )
+    )
+
+    normalized = _normalize_repeated_panel_rows(document, layers)
+    normalized_titles = tuple(
+        layer for layer in normalized if layer.region_id.startswith("title-")
+    )
+    normalized_bodies = tuple(
+        layer for layer in normalized if layer.region_id.startswith("body-")
+    )
+
+    assert len({round(layer.style.font_size, 3) for layer in normalized_titles}) == 1
+    assert len({round(layer.style.font_size, 3) for layer in normalized_bodies}) == 1
+    assert normalized_titles[0].style.font_size > normalized_bodies[0].style.font_size
+    assert all(layer.style.alignment is TextAlignment.LEFT for layer in normalized)
+    assert all(layer.box.rotation_degrees == 0 for layer in normalized)
+    assert all(layer.box.width > 110 for layer in normalized_titles)
+    assert not any(layer.overflow for layer in normalized)
+
+
+def test_three_icon_captions_share_larger_centered_readable_boxes() -> None:
+    QApplication.instance() or QApplication(["layout-icon-caption-test"])
+    document = ImageDocument(
+        ImageAsset(
+            Path("icon-captions.png"),
+            520,
+            100,
+            1,
+            ImageFileFormat.PNG,
+            False,
+            False,
+        ),
+        "RGB",
+        np.full((100, 520, 3), (246, 244, 239), dtype=np.uint8).tobytes(),
+    )
+    layers = tuple(
+        TextLayer(
+            f"caption-{index}",
+            text,
+            TextBox(center_x, 50, width, height),
+            TextStyle("Segoe UI", 10.5, (20, 18, 15)),
+        )
+        for index, (text, center_x, width, height) in enumerate(
+            (
+                ("Suitable for both dry and wet use", 100, 90, 29),
+                ("Mother and infant are usable", 265, 89, 28),
+                ("Does not easily shed cotton", 418, 92, 31),
+            )
+        )
+    )
+
+    normalized = _normalize_repeated_panel_rows(document, layers)
+
+    assert all(layer.box.width >= 135 for layer in normalized)
+    assert all(layer.box.height >= 36 for layer in normalized)
+    assert {layer.style.alignment for layer in normalized} == {
+        TextAlignment.CENTER
+    }
+    assert len({round(layer.style.font_size, 3) for layer in normalized}) == 1
+    assert normalized[0].style.font_size > 10.5
+    assert not any(layer.overflow for layer in normalized)
+
+
+def test_panel_title_and_body_share_left_edge_without_changing_size() -> None:
+    title = TextLayer(
+        "title",
+        "Gentle and non-irritating",
+        TextBox(1153, 1142.5, 164, 39),
+        TextStyle(
+            "Segoe UI",
+            23.48,
+            (14, 7, 0),
+            TextAlignment.LEFT,
+            font_stretch=67,
+        ),
+    )
+    body = TextLayer(
+        "body",
+        "No lint or shedding hair",
+        TextBox(1134, 1177.25, 202, 32),
+        TextStyle(
+            "Segoe UI",
+            14.49,
+            (36, 28, 1),
+            TextAlignment.LEFT,
+            font_stretch=67,
+        ),
+    )
+
+    normalized = _align_panel_title_and_body((title, body))
+
+    left_edges = {
+        round(layer.box.center_x - layer.box.width / 2, 3)
+        for layer in normalized
+    }
+    assert len(left_edges) == 1
+    assert [layer.box.width for layer in normalized] == [164, 202]
+    assert [layer.style.font_size for layer in normalized] == [23.48, 14.49]
+
+
+def test_colored_panel_run_stops_at_different_background_separator() -> None:
+    pixels = np.full((90, 340, 3), (252, 238, 190), dtype=np.uint8)
+    pixels[:, 198:216] = (254, 240, 162)
+    document = ImageDocument(
+        ImageAsset(
+            Path("panel-separator.png"),
+            340,
+            90,
+            1,
+            ImageFileFormat.PNG,
+            False,
+            False,
+        ),
+        "RGB",
+        pixels.tobytes(),
+    )
+    box = TextBox(145, 45, 105, 30)
+
+    expanded = _matching_background_run_box(
+        document,
+        box,
+        np.asarray((252, 238, 190), dtype=float),
+        0,
+        340,
+    )
+
+    assert expanded.center_x + expanded.width / 2 <= 198
+
+
+def test_similar_horizontal_labels_share_font_style_without_moving_boxes() -> None:
+    QApplication.instance() or QApplication(["layout-horizontal-group-test"])
+    pixels = np.full((120, 360, 3), (65, 70, 75), dtype=np.uint8)
+    pixels[20:90, 5:135] = (165, 45, 30)
+    pixels[20:90, 145:350] = (160, 42, 28)
+    document = ImageDocument(
+        ImageAsset(
+            Path("horizontal-labels.png"),
+            360,
+            120,
+            1,
+            ImageFileFormat.PNG,
+            False,
+            False,
+        ),
+        "RGB",
+        pixels.tobytes(),
+    )
+    layers = (
+        TextLayer(
+            "first",
+            "Dishwasher",
+            TextBox(70, 55, 102, 43, -1.5),
+            TextStyle(
+                "Arial",
+                30,
+                (235, 220, 215),
+                font_stretch=67,
+                font_weight=600,
+            ),
+        ),
+        TextLayer(
+            "second",
+            "Pre-filter",
+            TextBox(245, 56, 158, 39),
+            TextStyle(
+                "Arial",
+                29,
+                (232, 218, 212),
+                font_stretch=100,
+                font_weight=700,
+            ),
+        ),
+    )
+
+    normalized = _normalize_visual_group_sizes(document, layers)
+
+    assert [layer.box for layer in normalized] == [layer.box for layer in layers]
+    assert len({round(layer.style.font_size, 3) for layer in normalized}) == 1
+    assert {layer.style.font_stretch for layer in normalized} == {67}
+    assert {layer.style.font_weight for layer in normalized} == {600}
+    assert not any(layer.overflow for layer in normalized)
+
+
+def test_horizontal_group_does_not_collapse_three_label_boxes() -> None:
+    QApplication.instance() or QApplication(["layout-horizontal-box-test"])
+    pixels = np.full((100, 360, 3), (245, 245, 245), dtype=np.uint8)
+    document = ImageDocument(
+        ImageAsset(
+            Path("horizontal-boxes.png"),
+            360,
+            100,
+            1,
+            ImageFileFormat.PNG,
+            False,
+            False,
+        ),
+        "RGB",
+        pixels.tobytes(),
+    )
+    layers = tuple(
+        TextLayer(
+            f"label-{index}",
+            text,
+            TextBox(center_x, 50, width, 30),
+            TextStyle("Arial", 18, (45, 45, 45)),
+        )
+        for index, (text, center_x, width) in enumerate(
+            (
+                ("Plug * 2", 65, 70),
+                ("Plug * 2", 165, 70),
+                ("Clamp", 260, 55),
+            )
+        )
+    )
+
+    normalized = _normalize_visual_group_sizes(document, layers)
+
+    assert [layer.box for layer in normalized] == [layer.box for layer in layers]
+    assert len({round(layer.style.font_size, 3) for layer in normalized}) == 1
+
+
 def test_qt_layout_preserves_region_geometry_and_estimates_foreground() -> None:
     QApplication.instance() or QApplication(["layout-test"])
     document = _document()
@@ -460,6 +1268,72 @@ def test_long_translation_is_marked_as_overflow_in_tiny_box() -> None:
         _translation("tiny", "这是一段无法放入极小文字框的长译文"),
     )
     assert layout.layers[0].overflow
+
+
+def test_dense_short_word_overflow_uses_compact_readable_font() -> None:
+    QApplication.instance() or QApplication(["layout-dense-word-cloud-test"])
+    regions = tuple(
+        TextRegion(
+            f"region-{index:04d}",
+            order_quad(((0, 0), (18, 0), (18, 9), (0, 9))),
+            "新品",
+            0.9,
+            "zh-Hans",
+            "fixture",
+        )
+        for index in range(1, 41)
+    )
+    ocr_result = OcrResult(regions, "zh-Hans", "fixture", 1)
+    translation_result = TranslationResult(
+        (
+            TranslationUnit(
+                "region-0001",
+                "新品",
+                "zh-Hans",
+                "en",
+                "Featured",
+                TranslationStatus.TRANSLATED,
+            ),
+            TranslationUnit(
+                "region-0002",
+                "新品",
+                "zh-Hans",
+                "en",
+                "New arrival",
+                TranslationStatus.TRANSLATED,
+            ),
+        ),
+        TranslationSelection(TranslationMode.ALL, "en"),
+        "fixture",
+        1,
+    )
+    layers = (
+        TextLayer(
+            "region-0001",
+            "Featured",
+            TextBox(20, 20, 18, 9),
+            TextStyle("Arial", 6, (0, 0, 0)),
+            overflow=True,
+        ),
+        TextLayer(
+            "region-0002",
+            "New arrival",
+            TextBox(50, 20, 18, 9),
+            TextStyle("Arial", 6, (0, 0, 0)),
+            overflow=True,
+        ),
+    )
+
+    fitted = _fit_dense_short_word_overflow(
+        ocr_result,
+        translation_result,
+        layers,
+    )
+
+    assert not fitted[0].overflow
+    assert 4 <= fitted[0].style.font_size <= 6
+    assert fitted[0].style.font_stretch >= 50
+    assert fitted[1] == layers[1]
 
 
 def test_long_latin_translation_uses_limited_condensing_for_readability() -> None:

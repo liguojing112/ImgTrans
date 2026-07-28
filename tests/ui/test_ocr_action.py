@@ -6,7 +6,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PIL import Image
 from PySide6.QtWidgets import QApplication
-from PySide6.QtCore import QPointF
+from PySide6.QtCore import QPointF, Qt
 
 from src.application.bootstrap import StartupSnapshot
 from src.application.image_io import ExportImage, ImportImage
@@ -56,7 +56,16 @@ class FixtureOcrAdapter:
         options: HighRecallOcrOptions,
     ) -> OcrResult:
         self.high_recall_options = options
-        standard = self.recognize(document, language_code).regions[0]
+        original = self.recognize(document, language_code).regions[0]
+        standard = TextRegion(
+            original.region_id,
+            original.polygon,
+            original.text,
+            original.confidence,
+            original.language_code,
+            original.model_id,
+            auto_process_eligible=False,
+        )
         enhanced = TextRegion(
             "region-0002",
             order_quad(((108, 44), (148, 44), (148, 68), (108, 68))),
@@ -138,6 +147,9 @@ def test_window_passes_high_recall_geometry_and_confirms_edited_candidate(
     assert adapter.high_recall_options.center is not None
     assert adapter.high_recall_options.center.x == 100
     assert adapter.high_recall_options.ring_bands[0].outer_radius == 70
+    standard_item = window.ocr_panel.results.topLevelItem(0)
+    assert standard_item.text(3) == "标准"
+    assert standard_item.data(0, Qt.ItemDataRole.UserRole) == "region-0001"
     item = window.ocr_panel.results.topLevelItem(1)
     item.setText(0, "ROTATED EDITED")
     item.setSelected(True)

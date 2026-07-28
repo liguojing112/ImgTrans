@@ -5,7 +5,7 @@ from enum import Enum
 from math import cos, radians, sin
 
 from src.domain.inpainting import EraseMask, InpaintingResult
-from src.domain.layout import TextBox, TextLayer
+from src.domain.layout import CircularTextPath, TextBox, TextLayer
 from src.domain.ocr import Quad, order_quad
 
 
@@ -29,6 +29,7 @@ class ManualRegionSpec:
     text_box: TextBox
     source_text: str = ""
     translated_text: str = ""
+    circular_path: CircularTextPath | None = None
 
     def __post_init__(self) -> None:
         if self.mode is ManualInputMode.SOURCE_TEXT and not self.source_text.strip():

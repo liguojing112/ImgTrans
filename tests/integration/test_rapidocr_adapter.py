@@ -25,6 +25,7 @@ from src.infrastructure.rapidocr_adapter import (
     _map_cartesian_polygon_to_polar_strip,
     _map_polar_strip_polygon,
     _merge_high_recall_regions,
+    _polar_geometry,
     _polar_ring_centers,
     _polar_token_quad,
     _polar_word_intervals,
@@ -287,6 +288,12 @@ def test_high_recall_mode_filters_single_view_rotation_noise() -> None:
     assert result.mode is OcrMode.HIGH_RECALL
     assert [region.text for region in result.regions] == ["One"]
     assert engine.detection_calls == 5
+    assert result.cleanup_summary is not None
+    assert result.cleanup_summary.raw_candidate_count == 2
+    assert result.cleanup_summary.unique_candidate_count == 1
+    assert result.cleanup_summary.auto_confirmed_count == 1
+    assert result.cleanup_summary.review_required_count == 0
+    assert result.cleanup_summary.deleted_candidate_count == 1
 
 
 def test_rotation_expands_canvas_and_inverse_mapping_does_not_crop() -> None:
@@ -362,6 +369,17 @@ def test_multi_view_dedup_is_deterministic_and_controls_eligibility() -> None:
             (4, 0.81, "Strategv"),
         )
     ]
+    observations.append(
+        OcrObservation(
+            "rotation",
+            180,
+            1,
+            0.94,
+            enhanced_polygon,
+            "Strategy",
+            "rotation:180",
+        )
+    )
     first = _merge_high_recall_regions(
         (standard,),
         observations,
@@ -369,6 +387,7 @@ def test_multi_view_dedup_is_deterministic_and_controls_eligibility() -> None:
         "model",
         0.5,
         0.85,
+        (170, 0),
     )
     second = _merge_high_recall_regions(
         (standard,),
@@ -377,6 +396,7 @@ def test_multi_view_dedup_is_deterministic_and_controls_eligibility() -> None:
         "model",
         0.5,
         0.85,
+        (170, 0),
     )
 
     assert [(region.region_id, region.text) for region in first] == [
@@ -385,7 +405,7 @@ def test_multi_view_dedup_is_deterministic_and_controls_eligibility() -> None:
     enhanced = next(region for region in first if region.enhanced_only)
     assert enhanced.text == "Strategy"
     assert enhanced.auto_process_eligible
-    assert len(enhanced.observations) == 3
+    assert len(enhanced.observations) == 4
 
 
 def test_multi_view_borderline_candidate_is_kept_for_review_but_noise_is_dropped() -> None:
@@ -427,12 +447,271 @@ def test_multi_view_borderline_candidate_is_kept_for_review_but_noise_is_dropped
         "model",
         0.5,
         0.85,
+        (110, 0),
     )
 
     assert len(regions) == 1
     assert regions[0].text == "Finance"
     assert regions[0].enhanced_only
     assert not regions[0].auto_process_eligible
+
+
+def test_polar_geometry_reports_ring_angle_width_and_tangent() -> None:
+    polygon = order_quad(((80, 45), (120, 45), (120, 55), (80, 55)))
+    geometry = _polar_geometry(polygon, (100, 100))
+
+    assert 49 <= geometry.mean_radius <= 57
+    assert geometry.radial_start < geometry.radial_end
+    assert geometry.angle_start < geometry.angle_end
+    assert 8 <= geometry.band_width <= 13
+    assert abs(geometry.tangent_degrees) <= 1
+
+
+def test_same_text_on_different_rings_is_never_merged() -> None:
+    center = (100, 100)
+    inner = order_quad(((80, 45), (120, 45), (120, 55), (80, 55)))
+    outer = order_quad(((80, 25), (120, 25), (120, 35), (80, 35)))
+    observations = []
+    for ring, polygon in (("inner", inner), ("outer", outer)):
+        for scale in (2, 3):
+            observations.append(
+                OcrObservation(
+                    "polar",
+                    0,
+                    scale,
+                    0.93,
+                    polygon,
+                    "Sales",
+                    f"polar:{ring}:scale:{scale}",
+                )
+            )
+
+    regions = _merge_high_recall_regions(
+        (),
+        observations,
+        "en",
+        "model",
+        0.5,
+        0.85,
+        center,
+        (200, 200),
+    )
+
+    assert len(regions) == 2
+    assert all(region.auto_process_eligible for region in regions)
+    radii = sorted(
+        round(_polar_geometry(region.polygon, center).mean_radius)
+        for region in regions
+    )
+    assert radii[1] - radii[0] >= 18
+
+
+def test_unstable_mapping_stays_review_and_invalid_candidates_are_deleted() -> None:
+    center = (100, 100)
+    first = order_quad(((70, 45), (110, 45), (110, 55), (70, 55)))
+    shifted = order_quad(((84, 45), (124, 45), (124, 55), (84, 55)))
+    punctuation = order_quad(((140, 45), (160, 45), (160, 55), (140, 55)))
+    observations = (
+        OcrObservation("polar", 0, 2, 0.94, first, "Trade", "polar:0:scale:2"),
+        OcrObservation("polar", 0, 3, 0.95, shifted, "Trade", "polar:0:scale:3"),
+        OcrObservation("polar", 0, 2, 0.99, punctuation, "...", "polar:1:scale:2"),
+        OcrObservation("polar", 0, 3, 0.99, punctuation, "...", "polar:1:scale:3"),
+    )
+
+    regions = _merge_high_recall_regions(
+        (),
+        list(observations),
+        "en",
+        "model",
+        0.5,
+        0.85,
+        center,
+        (200, 200),
+    )
+
+    assert len(regions) == 1
+    assert regions[0].text == "Trade"
+    assert not regions[0].auto_process_eligible
+
+
+def test_matching_stable_scale_views_confirm_without_rotation() -> None:
+    center = (100, 100)
+    polygon = order_quad(((80, 45), (120, 45), (120, 55), (80, 55)))
+    scale_observations = [
+        OcrObservation(
+            "polar",
+            0,
+            scale,
+            0.94,
+            polygon,
+            "Sales",
+            f"polar:0:scale:{scale}",
+        )
+        for scale in (2, 3, 4)
+    ]
+
+    confirmed_by_scales = _merge_high_recall_regions(
+        (),
+        scale_observations,
+        "en",
+        "model",
+        0.5,
+        0.85,
+        center,
+        (200, 200),
+    )
+    confirmed = _merge_high_recall_regions(
+        (),
+        [
+            *scale_observations,
+            OcrObservation(
+                "rotation",
+                0,
+                1,
+                0.96,
+                polygon,
+                "Sales",
+                "rotation:0",
+            ),
+        ],
+        "en",
+        "model",
+        0.5,
+        0.85,
+        center,
+        (200, 200),
+    )
+
+    assert len(confirmed_by_scales) == 1
+    assert confirmed_by_scales[0].auto_process_eligible
+    assert len(confirmed) == 1
+    assert confirmed[0].auto_process_eligible
+
+
+def test_standard_candidate_remains_eligible_in_high_recall_mode() -> None:
+    center = (100, 100)
+    polygon = order_quad(((80, 45), (120, 45), (120, 55), (80, 55)))
+    standard = TextRegion(
+        "standard",
+        polygon,
+        "Sales",
+        0.96,
+        "en",
+        "model",
+    )
+    rotation_zero = OcrObservation(
+        "rotation",
+        0,
+        1,
+        0.96,
+        polygon,
+        "Sales",
+        "rotation:0",
+    )
+    polar = OcrObservation(
+        "polar",
+        0,
+        2,
+        0.94,
+        polygon,
+        "Sales",
+        "polar:0:scale:2",
+    )
+
+    duplicate_view = _merge_high_recall_regions(
+        (standard,),
+        [rotation_zero],
+        "en",
+        "model",
+        0.5,
+        0.85,
+        center,
+        (200, 200),
+    )
+    corroborated = _merge_high_recall_regions(
+        (standard,),
+        [rotation_zero, polar],
+        "en",
+        "model",
+        0.5,
+        0.85,
+        center,
+        (200, 200),
+    )
+
+    assert duplicate_view[0].auto_process_eligible
+    assert corroborated[0].auto_process_eligible
+
+
+def test_cleanup_limits_polygon_width_between_neighboring_rings() -> None:
+    center = (100, 100)
+    inner = order_quad(((75, 42), (125, 42), (125, 58), (75, 58)))
+    outer = order_quad(((75, 30), (125, 30), (125, 46), (75, 46)))
+    observations = []
+    for ring_index, polygon in enumerate((inner, outer)):
+        for scale in (2, 3):
+            observations.append(
+                OcrObservation(
+                    "polar",
+                    0,
+                    scale,
+                    0.93,
+                    polygon,
+                    f"Ring{ring_index}",
+                    f"polar:{ring_index}:scale:{scale}",
+                )
+            )
+
+    regions = _merge_high_recall_regions(
+        (),
+        observations,
+        "en",
+        "model",
+        0.5,
+        0.85,
+        center,
+        (200, 200),
+    )
+
+    assert len(regions) == 2
+    widths = [
+        _polar_geometry(region.polygon, center).band_width
+        for region in regions
+    ]
+    assert max(widths) < 12
+
+
+def test_spatially_conflicting_dissimilar_candidates_keep_one_region() -> None:
+    center = (100, 100)
+    polygon = order_quad(((75, 42), (125, 42), (125, 58), (75, 58)))
+    observations = []
+    for text, base_confidence in (("Sales", 0.95), ("Noise", 0.83)):
+        for scale in (2, 3):
+            observations.append(
+                OcrObservation(
+                    "polar",
+                    0,
+                    scale,
+                    base_confidence,
+                    polygon,
+                    text,
+                    f"polar:0:scale:{scale}:{text}",
+                )
+            )
+
+    regions = _merge_high_recall_regions(
+        (),
+        observations,
+        "en",
+        "model",
+        0.5,
+        0.85,
+        center,
+        (200, 200),
+    )
+
+    assert len(regions) == 1
+    assert regions[0].text == "Sales"
 
 
 def test_polar_helpers_find_rows_words_and_restore_tangent_geometry() -> None:

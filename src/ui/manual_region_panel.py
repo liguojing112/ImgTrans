@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+from math import atan2, degrees, hypot
+
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QDoubleSpinBox,
     QFormLayout,
@@ -14,7 +17,12 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from src.domain.layout import TextBox
+from src.domain.layout import (
+    CircularTextPath,
+    PathPoint,
+    TextBox,
+    ensure_bottom_inward_circular_path,
+)
 from src.domain.manual_region import ManualInputMode, ManualRegionSpec
 
 
@@ -74,6 +82,35 @@ class ManualRegionPanel(QFrame):
         layout.addLayout(erase_form)
         layout.addLayout(text_form)
 
+        self.circular_enabled = QCheckBox("沿圆环逐字排版")
+        self.circular_enabled.setObjectName("manualCircularTextEnabled")
+        self.circular_enabled.toggled.connect(self._circular_mode_changed)
+        layout.addWidget(self.circular_enabled)
+        self.circular_fields = QWidget()
+        circular_form = QFormLayout(self.circular_fields)
+        circular_form.setContentsMargins(0, 0, 0, 0)
+        self.circle_center_x = _coordinate_spin("CircleCenterX")
+        self.circle_center_y = _coordinate_spin("CircleCenterY")
+        center_row = QWidget()
+        center_layout = QGridLayout(center_row)
+        center_layout.setContentsMargins(0, 0, 0, 0)
+        center_layout.addWidget(self.circle_center_x, 0, 0)
+        center_layout.addWidget(self.circle_center_y, 0, 1)
+        self.circle_radius = _coordinate_spin("CircleRadius")
+        self.circle_start_angle = _angle_spin("manualCircleStartAngle")
+        self.circle_end_angle = _angle_spin("manualCircleEndAngle")
+        angles_row = QWidget()
+        angles_layout = QGridLayout(angles_row)
+        angles_layout.setContentsMargins(0, 0, 0, 0)
+        angles_layout.addWidget(self.circle_start_angle, 0, 0)
+        angles_layout.addWidget(self.circle_end_angle, 0, 1)
+        self.circle_reverse = QCheckBox("反向排列")
+        circular_form.addRow("圆心 X / Y", center_row)
+        circular_form.addRow("半径", self.circle_radius)
+        circular_form.addRow("起止角度", angles_row)
+        circular_form.addRow("", self.circle_reverse)
+        layout.addWidget(self.circular_fields)
+
         self.process_button = QPushButton("处理手动区域")
         self.process_button.setObjectName("processManualRegionButton")
         self.process_button.setEnabled(False)
@@ -85,6 +122,7 @@ class ManualRegionPanel(QFrame):
         layout.addWidget(self.status_label)
         layout.addStretch(1)
         self._mode_changed()
+        self._circular_mode_changed(False)
 
     @property
     def has_selection(self) -> bool:
@@ -94,6 +132,22 @@ class ManualRegionPanel(QFrame):
     def spec(self) -> ManualRegionSpec:
         if self._selection_box is None:
             raise ValueError("请先在画布框选区域")
+        circular_path = (
+            ensure_bottom_inward_circular_path(
+                CircularTextPath(
+                    PathPoint(
+                        self.circle_center_x.value(),
+                        self.circle_center_y.value(),
+                    ),
+                    self.circle_radius.value(),
+                    self.circle_start_angle.value(),
+                    self.circle_end_angle.value(),
+                    self.circle_reverse.isChecked(),
+                ),
+            )
+            if self.circular_enabled.isChecked()
+            else None
+        )
         return ManualRegionSpec(
             mode=ManualInputMode(self.mode_combo.currentData()),
             selection_box=self._selection_box,
@@ -101,6 +155,7 @@ class ManualRegionPanel(QFrame):
             text_box=self.text_fields.box,
             source_text=self.source_text.toPlainText(),
             translated_text=self.translated_text.toPlainText(),
+            circular_path=circular_path,
         )
 
     def set_selection(self, box: TextBox) -> None:
@@ -111,6 +166,20 @@ class ManualRegionPanel(QFrame):
             f"已框选：{box.width:.0f} × {box.height:.0f} px"
         )
         self.status_label.setText("可调整擦除区域和译文区域，然后开始处理")
+
+        if self.circle_radius.value() <= 0.01:
+            self.set_circle_center(
+                box.center_x,
+                box.center_y + max(box.width, box.height),
+            )
+        else:
+            self._fit_circle_angles(box)
+
+    def set_circle_center(self, center_x: float, center_y: float) -> None:
+        self.circle_center_x.setValue(center_x)
+        self.circle_center_y.setValue(center_y)
+        if self._selection_box is not None:
+            self._fit_circle_angles(self._selection_box)
 
     def clear_selection(self) -> None:
         self._selection_box = None
@@ -127,6 +196,21 @@ class ManualRegionPanel(QFrame):
         mode = ManualInputMode(self.mode_combo.currentData())
         self.source_text.setVisible(mode is ManualInputMode.SOURCE_TEXT)
         self.translated_text.setVisible(mode is ManualInputMode.TRANSLATED_TEXT)
+
+    def _circular_mode_changed(self, enabled: bool) -> None:
+        self.circular_fields.setVisible(enabled)
+
+    def _fit_circle_angles(self, box: TextBox) -> None:
+        dx = box.center_x - self.circle_center_x.value()
+        dy = box.center_y - self.circle_center_y.value()
+        radius = hypot(dx, dy)
+        if radius <= 0.01:
+            return
+        midpoint = degrees(atan2(dy, dx))
+        half_span = min(75.0, max(1.0, degrees(box.width / (2 * radius))))
+        self.circle_radius.setValue(radius)
+        self.circle_start_angle.setValue(midpoint - half_span)
+        self.circle_end_angle.setValue(midpoint + half_span)
 
 
 class _BoxFields(QWidget):
@@ -182,4 +266,13 @@ def _coordinate_spin(name: str) -> QDoubleSpinBox:
     control.setRange(0.01, 100000)
     control.setDecimals(1)
     control.setSuffix(" px")
+    return control
+
+
+def _angle_spin(name: str) -> QDoubleSpinBox:
+    control = QDoubleSpinBox()
+    control.setObjectName(name)
+    control.setRange(-720, 720)
+    control.setDecimals(1)
+    control.setSuffix("°")
     return control

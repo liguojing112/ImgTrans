@@ -17,10 +17,10 @@ from src.domain.composition import (
 from src.domain.image import ImageDocument
 from src.domain.inpainting import EraseMask
 from src.domain.layout import (
-    ArcTextPath,
     TextBox,
     TextLayer,
     TextLayout,
+    TextPath,
     TextStyle,
     transform_arc_path,
 )
@@ -104,7 +104,7 @@ class EditComposition:
     def replace_path(
         self,
         region_id: str,
-        path: ArcTextPath | None,
+        path: TextPath | None,
     ) -> CompositionEditResult:
         with self._lock:
             before = self._session.layout.layer_by_id(region_id)
