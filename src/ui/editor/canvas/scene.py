@@ -1,12 +1,13 @@
-"""编辑器场景 — 管理背景图片、OCR 文字区域和文字图层图形项。"""
+"""编辑器场景 — 管理背景图片、OCR 文字区域和文字图层图形项 + 擦除蒙版覆盖层。"""
 
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QImage, QPixmap
+from PySide6.QtGui import QBrush, QColor, QImage, QPainter, QPixmap
 from PySide6.QtWidgets import QGraphicsScene, QGraphicsSceneMouseEvent
 
 from src.domain.image import ImageDocument
+from src.domain.inpainting import EraseMask
 from src.domain.layout import TextLayout
 from src.domain.ocr import TextRegion
 
@@ -16,7 +17,7 @@ from .ocr_item import OcrRegionItem
 
 
 class EditorScene(QGraphicsScene):
-    """管理图片、OCR 区域和文字图层的场景。"""
+    """管理图片、OCR 区域、文字图层和擦除蒙版的场景。"""
 
     layer_selected = Signal(str)
     layer_dropped = Signal(str, object)
@@ -28,6 +29,8 @@ class EditorScene(QGraphicsScene):
         self._background: BackgroundImageItem | None = None
         self._layer_items: dict[str, TextLayerItem] = {}
         self._ocr_items: dict[str, OcrRegionItem] = {}
+        self._erase_mask_image: QImage | None = None
+        self._mask_visible = True
         self._scene_width = 800
         self._scene_height = 600
 
@@ -53,11 +56,9 @@ class EditorScene(QGraphicsScene):
     def set_text_layout(self, layout: TextLayout) -> None:
         new_ids = {layer.region_id for layer in layout.layers}
         old_ids = set(self._layer_items.keys())
-
         for region_id in old_ids - new_ids:
             item = self._layer_items.pop(region_id)
             self.removeItem(item)
-
         for index, layer in enumerate(layout.layers):
             if layer.region_id in self._layer_items:
                 self._layer_items[layer.region_id].update_layer(layer)
@@ -69,14 +70,11 @@ class EditorScene(QGraphicsScene):
     # —— OCR Regions ——
 
     def set_regions(self, regions: tuple[TextRegion, ...]) -> None:
-        """设置 OCR 识别区域。diff 现有 items → 增删。"""
         new_ids = {r.region_id for r in regions}
         old_ids = set(self._ocr_items.keys())
-
         for region_id in old_ids - new_ids:
             item = self._ocr_items.pop(region_id)
             self.removeItem(item)
-
         for region in regions:
             if region.region_id not in self._ocr_items:
                 item = OcrRegionItem(region)
@@ -84,10 +82,25 @@ class EditorScene(QGraphicsScene):
                 self.addItem(item)
 
     def clear_regions(self) -> None:
-        """清除所有 OCR 区域图形项。"""
         for item in self._ocr_items.values():
             self.removeItem(item)
         self._ocr_items.clear()
+
+    # —— 擦除蒙版 ——
+
+    def set_erase_mask(self, mask: EraseMask | None) -> None:
+        if mask is not None:
+            self._erase_mask_image = QImage(
+                mask.pixels, mask.width, mask.height,
+                mask.width, QImage.Format.Format_Alpha8,
+            ).copy()
+        else:
+            self._erase_mask_image = None
+        self.update()
+
+    def set_mask_visible(self, visible: bool) -> None:
+        self._mask_visible = visible
+        self.update()
 
     # —— 选择 ——
 
@@ -109,6 +122,28 @@ class EditorScene(QGraphicsScene):
         for item in self._layer_items.values():
             item.setVisible(visible)
 
+    # —— QGraphicsScene 重写 ——
+
+    def drawForeground(self, painter: QPainter, rect) -> None:
+        """在场景顶层绘制擦除蒙版（半透明紫色覆盖）。"""
+        super().drawForeground(painter, rect)
+        if self._erase_mask_image is None or not self._mask_visible:
+            return
+
+        painter.save()
+        tinted = QImage(
+            self._erase_mask_image.size(), QImage.Format.Format_ARGB32,
+        )
+        tinted.fill(QColor(139, 92, 246, 105))
+        tint_painter = QPainter(tinted)
+        tint_painter.setCompositionMode(
+            QPainter.CompositionMode.CompositionMode_DestinationIn,
+        )
+        tint_painter.drawImage(0, 0, self._erase_mask_image)
+        tint_painter.end()
+        painter.drawImage(0, 0, tinted)
+        painter.restore()
+
     # —— 鼠标事件 ——
 
     def mousePressEvent(self, event: QGraphicsSceneMouseEvent) -> None:
@@ -118,11 +153,9 @@ class EditorScene(QGraphicsScene):
             if item.contains(item.mapFromScene(pos)):
                 clicked = item
                 break
-
         if clicked is None:
             self.clear_selection()
             self.selection_cleared.emit()
-
         super().mousePressEvent(event)
 
     def mouseReleaseEvent(self, event: QGraphicsSceneMouseEvent) -> None:

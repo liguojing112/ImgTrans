@@ -271,7 +271,7 @@ class EditorPage(QWidget):
         self.apply_edit_result(edit_result)
 
     def _on_model_showing_original_changed(self, showing: bool) -> None:
-        pass
+        self.top_bar.set_showing_original(showing)
 
     # —— 字段变更映射 ——
 
@@ -288,9 +288,22 @@ class EditorPage(QWidget):
         elif field == "text": text = str(value)
         elif field == "font_size": style = replace(style, font_size=float(value))
         elif field == "fill_rgb": style = replace(style, fill_rgb=tuple(value))
+        elif field == "font_family": style = replace(style, font_family=str(value))
         elif field == "font_weight":
             weight = int(value)
             if weight in (400, 600, 700): style = replace(style, font_weight=weight)
             else: return None
+        elif field == "wrap": style = replace(style, wrap=bool(value))
+        elif field == "alignment": style = replace(style, alignment=value)
+        elif field == "vertical_alignment": style = replace(style, vertical_alignment=value)
+        elif field == "stroke_rgb": style = replace(style, stroke_rgb=tuple(value))
+        elif field == "stroke_width": style = replace(style, stroke_width=float(value))
+        elif field == "shadow_rgb": style = replace(style, shadow_rgb=tuple(value))
+        elif field == "shadow_enabled":
+            opacity = 0.5 if value else 0.0
+            style = replace(style, shadow_opacity=opacity)
+        elif field == "shadow_opacity": style = replace(style, shadow_opacity=float(value) / 100.0)
+        elif field == "shadow_offset_x": style = replace(style, shadow_offset_x=float(value))
+        elif field == "shadow_offset_y": style = replace(style, shadow_offset_y=float(value))
         else: return None
         return replace(layer, text=text, box=box, style=style)

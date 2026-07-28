@@ -341,8 +341,9 @@ class EditorMainWindow(QMainWindow):
         self._model.rendered_document = result.document
         self._model.showing_original = False
 
-        # 翻译完成后清除 OCR 区域，显示译图层
+        # 翻译完成后清除 OCR 区域，显示译图层 + 擦除蒙版
         self._editor_page.scene.clear_regions()
+        self._editor_page.scene.set_erase_mask(result.repair.erase_mask)
         self._editor_page.set_document(result.document)
         self._editor_page.set_text_layout(result.layout)
         self._editor_page.top_bar.set_has_result(True)
@@ -380,12 +381,14 @@ class EditorMainWindow(QMainWindow):
 
         if showing and self._model.source_document is not None:
             self._editor_page.set_document(self._model.source_document)
-            self._editor_page.set_text_layout(self._model.text_layout)
+            self._editor_page.scene.set_mask_visible(False)
+            self._editor_page.set_layers_visible(False)
         else:
             rendered = self._model.rendered_document
             if rendered is not None:
                 self._editor_page.set_document(rendered)
-                self._editor_page.set_text_layout(self._model.text_layout)
+                self._editor_page.scene.set_mask_visible(True)
+                self._editor_page.set_layers_visible(True)
 
         self._editor_page.top_bar.set_showing_original(showing)
 
