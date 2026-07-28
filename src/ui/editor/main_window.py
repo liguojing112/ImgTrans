@@ -316,10 +316,15 @@ class EditorMainWindow(QMainWindow):
         self._editor_page.top_bar.set_translating(True)
         self._undo_stack.clear()
 
+        ctrl = self._editor_page.translate_controls
+        mode = TranslationMode(ctrl.selected_mode)
+        source_lang = ctrl.selected_source_language if mode is TranslationMode.SPECIFIC_LANGUAGE else None
         selection = TranslationSelection(
-            mode=TranslationMode.ALL,
+            mode=mode,
             target_language=target_language,
+            source_language=source_lang,
         )
+        brand_terms = ctrl.configured_brand_terms
 
         def on_stage(stage: ImageStage) -> None:
             self._model.translation_stage_changed.emit(stage)
@@ -331,7 +336,7 @@ class EditorMainWindow(QMainWindow):
 
         self._task_runner.submit(
             lambda: self._translate_image.execute(
-                document, ocr_language, selection, (), on_stage
+                document, ocr_language, selection, brand_terms, on_stage
             ),
             self._on_translation_succeeded,
             self._on_translation_failed,
@@ -374,10 +379,17 @@ class EditorMainWindow(QMainWindow):
 
         self._editor_page.view.fit_to_window()
 
-        layer_count = len(result.layout.layers)
-        provider = result.translation.provider
-        self.statusBar().showMessage(
-            f"翻译完成：{layer_count} 个文字图层（{provider}）"
+        # 翻译摘要统计
+        units = result.translation.units
+        ocr_count = len(result.ocr.regions) if result.ocr else 0
+        translated = sum(1 for u in units if u.status.value == "translated")
+        review = sum(1 for u in units if u.status.value == "review_required")
+        skipped = sum(1 for u in units if u.status.value in ("skipped_language", "skipped_protected"))
+        failed = sum(1 for u in units if u.status.value == "failed")
+        overflow = sum(1 for layer in result.layout.layers if layer.overflow)
+
+        self._editor_page.translate_controls.set_summary(
+            ocr_count, translated, review, skipped, failed, overflow
         )
         self._model.translation_finished.emit(result)
 

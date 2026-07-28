@@ -36,10 +36,11 @@ class TextLayerItem(QGraphicsItem):
     绘制填充矩形 + 边框，选中时显示手柄。
     """
 
-    def __init__(self, layer: TextLayer, index: int = 0) -> None:
+    def __init__(self, layer: TextLayer, index: int = 0, status: str = "translated") -> None:
         super().__init__()
         self._layer = layer
         self._index = index
+        self._status = status  # "translated" | "review_required" | "overflow" | "skipped" | "failed"
         self._hovered = False
         self._drag_mode: str | None = None
         self._drag_start_pos: QPointF | None = None
@@ -146,12 +147,24 @@ class TextLayerItem(QGraphicsItem):
         body = self._body_rect()
         selected = self.isSelected()
 
+        # 按状态选择颜色
+        if self._status == "review_required":
+            base_color = QColor("#e5b83c")  # 琥珀色 — 待复核
+        elif self._status in ("overflow", "failed"):
+            base_color = QColor("#e55353")  # 红色 — 溢出/失败
+        elif self._status in ("skipped_language", "skipped_protected"):
+            base_color = QColor("#9898b0")  # 灰色 — 跳过
+        else:
+            base_color = QColor("#3973db")  # 蓝色 — 正常翻译
+
         # 文字背景
-        fill_color = QColor(57, 115, 219, 40) if selected else QColor(57, 115, 219, 20)
+        fill_alpha = 40 if selected else 20
+        fill_color = QColor(base_color.red(), base_color.green(), base_color.blue(), fill_alpha)
         painter.fillRect(body, QBrush(fill_color))
 
         # 边框
-        border_color = QColor(57, 115, 219, 200) if (selected or self._hovered) else QColor(57, 115, 219, 100)
+        border_alpha = 220 if (selected or self._hovered) else 120
+        border_color = QColor(base_color.red(), base_color.green(), base_color.blue(), border_alpha)
         border_width = 2.0 if selected else 1.0
         pen = QPen(border_color, border_width)
         pen.setCosmetic(True)
@@ -170,8 +183,8 @@ class TextLayerItem(QGraphicsItem):
         if not selected:
             return
 
-        painter.setPen(QPen(QColor("#3973db"), 1.0))
-        painter.setBrush(QBrush(QColor("#3973db")))
+        painter.setPen(QPen(base_color, 1.0))
+        painter.setBrush(QBrush(base_color))
 
         corners, rotate_handle = self._handle_rects()
         for corner in corners:
@@ -182,6 +195,12 @@ class TextLayerItem(QGraphicsItem):
         painter.drawEllipse(rotate_handle)
         painter.setPen(QPen(QColor("#3973db"), 1.0, Qt.PenStyle.DotLine))
         painter.drawLine(QPointF(0, -box.height / 2), QPointF(0, -box.height / 2 - _ROTATE_HANDLE_OFFSET))
+
+    # —— 状态 ——
+
+    def set_status(self, status: str) -> None:
+        self._status = status
+        self.update()
 
     # —— 交互 ——
 
