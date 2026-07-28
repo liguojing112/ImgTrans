@@ -50,6 +50,7 @@ class EditorPage(QWidget):
     toggle_layers_requested = Signal()
     delete_requested = Signal(str)  # region_id
     duplicate_requested = Signal(str)  # region_id
+    add_layer_requested = Signal(str)  # default text
 
     # 属性编辑信号 — payload: (region_id, field_kind, value, before_layer)
     edit_requested = Signal(str, str, object, object)
@@ -122,6 +123,7 @@ class EditorPage(QWidget):
         self.property_panel.layer_property_changed.connect(self._on_property_changed)
         self.property_panel.delete_layer_requested.connect(self.delete_requested.emit)
         self.property_panel.duplicate_layer_requested.connect(self.duplicate_requested.emit)
+        self.property_panel.add_layer_requested.connect(self.add_layer_requested.emit)
 
         # OCR 结果面板 → 画布选中
         self.ocr_result_panel.region_selected.connect(self._on_ocr_region_selected)

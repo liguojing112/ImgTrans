@@ -43,6 +43,8 @@ class PropertyPanel(QFrame):
     keep_original_requested = Signal(str)
     confirm_review_requested = Signal(str)
 
+    add_layer_requested = Signal(str)  # default text
+
     def __init__(self) -> None:
         super().__init__()
         self.setObjectName("propertyPanel")
@@ -231,6 +233,10 @@ class PropertyPanel(QFrame):
         self.duplicate_btn.setObjectName("applyPropertyButton")
         self.duplicate_btn.clicked.connect(self._on_duplicate)
 
+        self.add_btn = QPushButton("新增文字图层")
+        self.add_btn.setObjectName("applyPropertyButton")
+        self.add_btn.clicked.connect(lambda: self.add_layer_requested.emit("新文本"))
+
         self.restore_layout_btn = QPushButton("恢复自动布局")
         self.restore_layout_btn.setObjectName("applyPropertyButton")
         self.restore_layout_btn.clicked.connect(self._on_restore_layout)
@@ -252,6 +258,7 @@ class PropertyPanel(QFrame):
 
         layout.addWidget(self.delete_btn)
         layout.addWidget(self.duplicate_btn)
+        layout.addWidget(self.add_btn)
         layout.addWidget(self.restore_layout_btn)
         layout.addWidget(self.retranslate_btn)
         layout.addWidget(self.keep_original_btn)
@@ -429,7 +436,7 @@ class PropertyPanel(QFrame):
             self.color_button, self.stroke_width_spin, self.stroke_color_button,
             self.shadow_check, self.shadow_x_spin, self.shadow_y_spin,
             self.shadow_opacity_spin, self.shadow_color_button,
-            self.delete_btn, self.duplicate_btn, self.restore_layout_btn,
+            self.delete_btn, self.duplicate_btn, self.add_btn, self.restore_layout_btn,
         ):
             w.setEnabled(enabled)
 

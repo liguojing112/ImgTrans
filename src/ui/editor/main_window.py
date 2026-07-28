@@ -150,6 +150,7 @@ class EditorMainWindow(QMainWindow):
         self._editor_page.redo_requested.connect(self._on_redo)
         self._editor_page.delete_requested.connect(self._on_delete_layer)
         self._editor_page.duplicate_requested.connect(self._on_duplicate_layer)
+        self._editor_page.add_layer_requested.connect(self._on_add_layer)
         self._editor_page.zoom_in_requested.connect(
             lambda: self._editor_page.view.apply_zoom(1.15)
         )
@@ -507,6 +508,17 @@ class EditorMainWindow(QMainWindow):
             lambda: editor.add_layer(layer.text),
             self._editor_page.apply_edit_result,
             lambda e: self.statusBar().showMessage(f"复制失败：{e}"),
+        )
+
+    def _on_add_layer(self, default_text: str) -> None:
+        editor = self._model.composition_editor
+        if editor is None or self._task_runner is None:
+            return
+        self.statusBar().showMessage("正在新增文字图层…")
+        self._task_runner.submit(
+            lambda: editor.add_layer(default_text),
+            self._editor_page.apply_edit_result,
+            lambda e: self.statusBar().showMessage(f"新增失败：{e}"),
         )
 
     # —— 导出 ——
