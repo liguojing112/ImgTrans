@@ -24,12 +24,12 @@ from PySide6.QtWidgets import (
 from src.domain.layout import TextBox, TextLayer, TextLayout, TextStyle
 from src.ui.editor.canvas.scene import EditorScene
 from src.ui.editor.canvas.view import EditorView
-from src.ui.editor.top_bar import TopBar
-from src.ui.editor.translate_controls import TranslateControls
+from src.ui.editor.widgets.top_bar import TopBar
+from src.ui.editor.widgets.translate_controls import TranslateControls
 from src.ui.editor.undo_commands import ReplaceLayerUndoCommand
-from src.ui.editor.property_panel import PropertyPanel
-from src.ui.editor.ocr_result_panel import OcrResultPanel
-from src.ui.editor.toolbar import EditorToolBar
+from src.ui.editor.widgets.property_panel import PropertyPanel
+from src.ui.editor.widgets.ocr_result_panel import OcrResultPanel
+from src.ui.editor.widgets.toolbar import EditorToolBar
 
 
 class EditorPage(QWidget):
@@ -103,7 +103,7 @@ class EditorPage(QWidget):
         splitter.addWidget(right_panel)
         splitter.setStretchFactor(0, 1)
         splitter.setStretchFactor(1, 0)
-        splitter.setSizes([600, 280])
+        splitter.setSizes([600, 340])
         center_layout.addWidget(splitter, stretch=1)
 
         # 整体布局

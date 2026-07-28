@@ -5,7 +5,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication
 
-from src.ui.editor.translate_controls import TranslateControls
+from src.ui.editor.widgets.translate_controls import TranslateControls
 
 
 def test_translate_controls_creates(qtbot) -> None:

@@ -6,7 +6,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtWidgets import QApplication
 
 from src.domain.layout import TextBox, TextLayer, TextStyle
-from src.ui.editor.property_panel import PropertyPanel
+from src.ui.editor.widgets.property_panel import PropertyPanel
 
 
 def _make_layer(**kw) -> TextLayer:

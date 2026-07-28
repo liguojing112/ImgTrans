@@ -284,4 +284,14 @@ QDoubleSpinBox:disabled, QSpinBox:disabled, QComboBox:disabled, QPlainTextEdit:d
     background: #252536;
     color: #686878;
 }
+QPushButton:disabled {
+    color: #686878;
+}
+
+/* 统一圆角 */
+QPushButton { border-radius: 8px; }
+QDoubleSpinBox, QSpinBox, QComboBox, QPlainTextEdit, QLineEdit { border-radius: 6px; }
+
+/* QLabel disabled 可读 */
+QLabel:disabled { color: #9898b0; }
 """

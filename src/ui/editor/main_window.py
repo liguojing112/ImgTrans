@@ -26,6 +26,8 @@ from src.ui.editor.editor_model import EditorModel
 from src.ui.editor.editor_page import EditorPage
 from src.ui.editor.error_handler import classify_error
 from src.ui.editor.home_page import HomePage
+from src.ui.editor.services.editor_import_service import load_document
+from src.ui.editor.services.editor_export_service import export_document
 from src.ui.editor.theme import EDITOR_DARK_THEME
 
 
@@ -203,7 +205,7 @@ class EditorMainWindow(QMainWindow):
         if self._task_runner is not None:
             self.statusBar().showMessage(f"正在导入 {source.name}…")
             self._task_runner.submit(
-                lambda: _load_document(source, self._import_usecase, self._codec),
+                lambda: load_document(source, self._import_usecase, self._codec),
                 self._on_image_loaded,
                 self._on_import_failed,
             )
@@ -212,7 +214,7 @@ class EditorMainWindow(QMainWindow):
             self.statusBar().showMessage("图片编解码器不可用")
             return
         try:
-            document = _load_document(source, self._import_usecase, self._codec)
+            document = load_document(source, self._import_usecase, self._codec)
         except Exception as exc:
             self._on_import_failed(exc)
             return
@@ -561,34 +563,20 @@ class EditorMainWindow(QMainWindow):
             self.statusBar().showMessage("没有可导出的图片")
             return
 
-        if self._export_usecase is None:
-            if self._codec is None:
-                self.statusBar().showMessage("导出功能不可用")
-                return
-            try:
-                from src.domain.image import ImageFileFormat
-                fmt = ImageFileFormat.from_output_suffix(target.suffix)
-                self._codec.save(document, target, fmt)
-                self._model.is_dirty = False
-                self.statusBar().showMessage(f"已导出：{target}")
-            except Exception as exc:
-                self.statusBar().showMessage(f"导出失败：{exc}")
-            return
-
         if self._task_runner is not None:
             self.statusBar().showMessage(f"正在导出 {target.name}…")
             def _on_export_ok(p):
                 self._model.is_dirty = False
                 self.statusBar().showMessage(f"已导出：{Path(p)}")
             self._task_runner.submit(
-                lambda: self._export_usecase.execute(document, target),
+                lambda: export_document(document, target, self._export_usecase, self._codec),
                 _on_export_ok,
                 lambda e: self.statusBar().showMessage(f"导出失败：{e}"),
             )
             return
 
         try:
-            result = self._export_usecase.execute(document, target)
+            result = export_document(document, target, self._export_usecase, self._codec)
             self._model.is_dirty = False
             self.statusBar().showMessage(f"已导出：{result}")
         except Exception as exc:
@@ -611,39 +599,3 @@ class EditorMainWindow(QMainWindow):
     def undo_stack(self) -> QUndoStack:
         return self._undo_stack
 
-
-# —— 模块级辅助 ——
-
-def _load_document(
-    source: Path,
-    import_usecase: ImportImage,
-    codec: PillowImageCodec | None,
-) -> ImageDocument:
-    """尝试通过 ImportImage 加载，失败时 fallback 到 BMP/其他格式。"""
-    try:
-        return import_usecase.execute(source)
-    except Exception:
-        if source.suffix.lower() == ".bmp":
-            return _load_bmp(source)
-        raise
-
-
-def _load_bmp(source: Path) -> ImageDocument:
-    """绕过 frozen 格式校验层，直接用 Pillow 加载 BMP 并构造 ImageDocument。"""
-    from PIL import Image as PILImage
-    from src.domain.image import ImageAsset
-
-    with PILImage.open(source) as img:
-        width, height = img.size
-        working = img.convert("RGB")
-        pixels = working.tobytes()
-    asset = ImageAsset(
-        source_path=source.resolve(),
-        width=width,
-        height=height,
-        file_size=source.stat().st_size,
-        file_format=None,  # type: ignore — BMP 没有对应的 ImageFileFormat
-        has_alpha=False,
-        orientation_applied=False,
-    )
-    return ImageDocument(asset=asset, mode="RGB", pixels=pixels)

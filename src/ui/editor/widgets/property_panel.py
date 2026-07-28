@@ -49,7 +49,7 @@ class PropertyPanel(QFrame):
         super().__init__()
         self.setObjectName("propertyPanel")
         self.setMinimumWidth(240)
-        self.setMaximumWidth(300)
+        self.setMaximumWidth(360)
 
         self._region_id: str | None = None
         self._suppress_signals = False

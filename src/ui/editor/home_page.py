@@ -7,9 +7,12 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
+    QStyle,
     QVBoxLayout,
     QWidget,
 )
+
+from src.ui.editor.icons import standard_icon
 
 
 class HomePage(QFrame):
@@ -79,11 +82,12 @@ class HomePage(QFrame):
 
         inner = QVBoxLayout(card)
         inner.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        inner.setSpacing(12)
+        inner.setSpacing(16)
 
-        icon = QLabel("🖼" if enabled else "🔜")
-        icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        icon.setStyleSheet("font-size: 36px;")
+        icon_pix = QStyle.StandardPixmap.SP_FileDialogContentsView if enabled else QStyle.StandardPixmap.SP_ComputerIcon
+        icon_label = QLabel()
+        icon_label.setPixmap(standard_icon(icon_pix).pixmap(36, 36))
+        icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         t = QLabel(title_text)
         t.setObjectName("homeCardTitle")
@@ -94,7 +98,7 @@ class HomePage(QFrame):
         d.setAlignment(Qt.AlignmentFlag.AlignCenter)
         d.setWordWrap(True)
 
-        inner.addWidget(icon)
+        inner.addWidget(icon_label)
         inner.addWidget(t)
         inner.addWidget(d)
 
