@@ -319,4 +319,5 @@ def _create_editor_window() -> EditorMainWindow:
         task_runner=task_runner,
         translate_image=translate_image,
         create_composition_editor=create_composition_editor,
+        recognize_text=recognize,
     )

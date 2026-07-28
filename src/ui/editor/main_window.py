@@ -39,6 +39,7 @@ class EditorMainWindow(QMainWindow):
         task_runner: object | None = None,
         translate_image: TranslateImage | None = None,
         create_composition_editor: object | None = None,
+        recognize_text: object | None = None,
     ) -> None:
         super().__init__()
         self.setProperty("editorStyle", True)
@@ -53,6 +54,7 @@ class EditorMainWindow(QMainWindow):
         self._task_runner = task_runner
         self._translate_image = translate_image
         self._create_composition_editor = create_composition_editor
+        self._recognize_text = recognize_text
 
         self._model = EditorModel()
         self._undo_stack = QUndoStack(self)
@@ -206,6 +208,7 @@ class EditorMainWindow(QMainWindow):
         self._model.composition_editor = None
         self._model.rendered_document = None
         self._model.showing_original = False
+        self._editor_page.scene.clear_regions()
         self._editor_page.set_document(document)
         self._editor_page.set_text_layout(self._model.text_layout)
         self._editor_page.clear_layer_selection()
@@ -231,11 +234,50 @@ class EditorMainWindow(QMainWindow):
     # —— OCR ——
 
     def _on_ocr(self) -> None:
-        """独立 OCR 识别（不翻译）。"""
-        # 现阶段 OCR 作为一键翻译的子步骤，独立 OCR 按钮复用翻译流程
-        # 但使用 TranslateControls 当前语言设置
+        """独立 OCR 识别（不翻译），在当前图片上运行 OCR 并显示识别区域。"""
+        if self._recognize_text is None or self._task_runner is None:
+            self.statusBar().showMessage("OCR 服务不可用")
+            return
+        document = self._model.source_document
+        if document is None:
+            self.statusBar().showMessage("请先导入图片")
+            return
+
         ctrl = self._editor_page.translate_controls
-        self._on_translate(ctrl.selected_ocr_language, ctrl.selected_target_language)
+        ocr_language = ctrl.selected_ocr_language
+
+        self._model.ocr_started.emit()
+        self._editor_page.top_bar.set_translating(True)
+        self.statusBar().showMessage(f"正在 OCR 识别（{ocr_language}）…")
+
+        self._task_runner.submit(
+            lambda: self._recognize_text.execute(document, ocr_language),
+            self._on_ocr_succeeded,
+            self._on_ocr_failed,
+        )
+
+    def _on_ocr_succeeded(self, value: object) -> None:
+        from src.domain.ocr import OcrResult
+        if not isinstance(value, OcrResult):
+            self._on_ocr_failed(TypeError("OCR 返回了无效结果"))
+            return
+
+        result: OcrResult = value
+        self._model.ocr_result = result
+        self._editor_page.top_bar.set_translating(False)
+
+        # 显示 OCR 区域在画布上
+        self._editor_page.scene.set_regions(result.regions)
+
+        region_count = len(result.regions)
+        self.statusBar().showMessage(
+            f"OCR 完成：识别到 {region_count} 个文字区域"
+        )
+        self._model.ocr_finished.emit(result)
+
+    def _on_ocr_failed(self, error: Exception) -> None:
+        self._editor_page.top_bar.set_translating(False)
+        self.statusBar().showMessage(f"OCR 失败：{error}")
 
     # —— 翻译 ——
 
@@ -296,6 +338,8 @@ class EditorMainWindow(QMainWindow):
         self._model.rendered_document = result.document
         self._model.showing_original = False
 
+        # 翻译完成后清除 OCR 区域，显示译图层
+        self._editor_page.scene.clear_regions()
         self._editor_page.set_document(result.document)
         self._editor_page.set_text_layout(result.layout)
         self._editor_page.top_bar.set_has_result(True)

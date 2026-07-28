@@ -25,6 +25,8 @@ class EditorModel(QObject):
     edit_finished = Signal(object)  # CompositionEditResult
     edit_failed = Signal(str)
     showing_original_changed = Signal(bool)
+    ocr_started = Signal()
+    ocr_finished = Signal(object)  # OcrResult
 
     def __init__(self) -> None:
         super().__init__()
@@ -36,6 +38,7 @@ class EditorModel(QObject):
         self._translating = False
         self._showing_original = False
         self._layers_visible = True
+        self._ocr_result: object = None  # OcrResult | None
         self._translation_result: object = None  # TranslateImageResult | None
         self._composition_editor: object = None  # EditComposition | None
         self._rendered_document: ImageDocument | None = None
@@ -105,6 +108,16 @@ class EditorModel(QObject):
             return self._text_layout.layer_by_id(self._selected_layer_id)
         except KeyError:
             return None
+
+    # —— ocr_result ——
+
+    @property
+    def ocr_result(self) -> object | None:
+        return self._ocr_result
+
+    @ocr_result.setter
+    def ocr_result(self, value: object | None) -> None:
+        self._ocr_result = value
 
     # —— translation ——
 
