@@ -167,6 +167,7 @@ class EditorPage(QWidget):
         model.translation_finished.connect(self._on_model_translation_finished)
         model.edit_finished.connect(self._on_model_edit_finished)
         model.showing_original_changed.connect(self._on_model_showing_original_changed)
+        model.ocr_finished.connect(self._on_model_ocr_finished)
 
     def set_layers_visible(self, visible: bool) -> None:
         self.scene.set_layers_visible(visible)
@@ -222,11 +223,12 @@ class EditorPage(QWidget):
 
     def _on_ocr_region_selected(self, region_id: str) -> None:
         """OCR 面板点击行 → 画布选中对应 OCR 区域。"""
-        # 取消所有文字图层选中
         self.scene.clear_selection()
-        # 高亮对应的 OCR item
         for item in self.scene._ocr_items.values():
             item.setSelected(item.region_id == region_id)
+        # 属性面板提示当前选中 OCR 区域
+        self.property_panel.set_layer(None)
+        self.property_panel._no_selection_label.setText("当前选中 OCR 识别区域，不是文字图层")
 
     def _on_property_changed(self, region_id: str, field: str, value: object) -> None:
         """属性面板变更 → 映射到字段组 → 发射 edit_requested。"""
@@ -289,6 +291,12 @@ class EditorPage(QWidget):
 
     def _on_model_showing_original_changed(self, showing: bool) -> None:
         self.top_bar.set_showing_original(showing)
+
+    def _on_model_ocr_finished(self, _result) -> None:
+        """OCR 完成后，在导入图片时清空 OCR 面板。"""
+        self.ocr_result_panel.clear_result()
+        # 恢复属性面板默认提示
+        self.property_panel._no_selection_label.setText("点击画布中的文字框可查看属性")
 
     # —— 字段变更映射 ——
 

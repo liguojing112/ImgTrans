@@ -2,6 +2,7 @@
 
 视觉外观与生产 UI (image_canvas.py _paint_ocr_regions) 一致：
 边框 #e5484d 1px cosmetic, 填充 rgba(229,72,77,18)。
+选中时增强填充和边框，显示 region_id 标签。
 """
 
 from __future__ import annotations
@@ -10,6 +11,7 @@ from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import (
     QBrush,
     QColor,
+    QFont,
     QPainter,
     QPainterPath,
     QPen,
@@ -20,7 +22,7 @@ from PySide6.QtWidgets import (
     QStyleOptionGraphicsItem,
 )
 
-from src.domain.ocr import TextRegion
+from src.domain.ocr import TextRegion, TextRegionStatus
 
 
 class OcrRegionItem(QGraphicsItem):
@@ -46,6 +48,10 @@ class OcrRegionItem(QGraphicsItem):
     def text_region(self) -> TextRegion:
         return self._region
 
+    @property
+    def is_low_confidence(self) -> bool:
+        return self._region.status is TextRegionStatus.LOW_CONFIDENCE
+
     # —— 几何 ——
 
     def _polygon(self) -> QPolygonF:
@@ -54,7 +60,7 @@ class OcrRegionItem(QGraphicsItem):
         ])
 
     def boundingRect(self) -> QRectF:
-        return self._polygon().boundingRect().adjusted(-3, -3, 3, 3)
+        return self._polygon().boundingRect().adjusted(-5, -5, 5, 5)
 
     def shape(self) -> QPainterPath:
         path = QPainterPath()
@@ -74,30 +80,54 @@ class OcrRegionItem(QGraphicsItem):
         poly = self._polygon()
         selected = self.isSelected()
 
-        # 填充：选中时稍深
-        alpha = 30 if selected else 18
-        painter.setBrush(QBrush(QColor(229, 72, 77, alpha)))
+        # 填充
+        if selected:
+            alpha = 50
+        elif self.is_low_confidence:
+            alpha = 30
+        else:
+            alpha = 18
+        brush_color = QColor(229, 72, 77, alpha)
+        if self.is_low_confidence:
+            brush_color = QColor(229, 154, 45, alpha)
+        painter.setBrush(QBrush(brush_color))
 
         # 边框
-        width = 2.0 if selected else 1.0
-        pen = QPen(QColor("#e5484d"), width)
+        if selected:
+            width = 2.5
+            pen_color = QColor("#ff6b6b")
+        elif self.is_low_confidence:
+            width = 1.5
+            pen_color = QColor("#e59a2d")
+        else:
+            width = 1.0
+            pen_color = QColor("#e5484d")
+        pen = QPen(pen_color, width)
         pen.setCosmetic(True)
         painter.setPen(pen)
 
         painter.drawPolygon(poly)
 
-        # hover 时显示文字标签
-        if self._hovered and self._region.text:
+        # 选中时绘制 region_id 标签
+        if selected or self._hovered:
             center = poly.boundingRect().center()
-            text = self._region.text
-            if len(text) > 30:
-                text = text[:30] + "…"
-            painter.setPen(QPen(QColor("#ffffff")))
-            painter.drawText(
-                QRectF(center.x() - 100, center.y() - 12, 200, 24),
-                Qt.AlignmentFlag.AlignCenter,
-                text,
-            )
+            if selected:
+                label = self._region.region_id[-6:] if len(self._region.region_id) > 6 else self._region.region_id
+                painter.setPen(QPen(QColor("#ffffff")))
+                bg_rect = QRectF(center.x() - 50, poly.boundingRect().top() - 20, 100, 18)
+                painter.fillRect(bg_rect, QBrush(QColor(40, 40, 60, 200)))
+                painter.drawText(bg_rect, Qt.AlignmentFlag.AlignCenter, label)
+
+            if self._hovered and self._region.text:
+                text = self._region.text
+                if len(text) > 30:
+                    text = text[:30] + "…"
+                painter.setPen(QPen(QColor("#ffffff")))
+                painter.drawText(
+                    QRectF(center.x() - 100, center.y() - 12, 200, 24),
+                    Qt.AlignmentFlag.AlignCenter,
+                    text,
+                )
 
     # —— 交互 ——
 
