@@ -267,13 +267,56 @@ if __name__ == "__main__":
 
 
 def _create_editor_window() -> EditorMainWindow:
-    """构建编辑器窗口的最小依赖集。"""
+    """构建编辑器窗口的完整依赖集。"""
     codec = PillowImageCodec()
     image_limits = ImageLimits()
     import_image = ImportImage(codec, image_limits)
+    export_image = ExportImage(codec)
     task_runner = QtTaskRunner()
+
+    # —— OCR ——
+    from src.infrastructure.rapidocr_adapter import RapidOcrAdapter
+    recognize = RecognizeText(RapidOcrAdapter())
+
+    # —— 翻译（离线 mock） ——
+    from src.infrastructure.mock_translator import MockTranslationAdapter
+    translate = TranslateRegions(
+        MockTranslationAdapter(),
+        ProtectionEngine(),
+    )
+
+    # —— 修复 ——
+    from src.infrastructure.opencv_inpaint_adapter import OpenCvInpaintAdapter
+    cv_inpaint = OpenCvInpaintAdapter()
+    repair = RepairTranslatedRegions(
+        BuildEraseMask(PillowMaskRasterizer()),
+        cv_inpaint,
+    )
+
+    # —— 排版 & 渲染 ——
+    layout_adapter = QtBasicTextLayoutAdapter()
+    renderer = QtTextRenderer()
+
+    # —— 翻译流水线 ——
+    translate_image = TranslateImage(
+        recognize,
+        translate,
+        repair,
+        layout_adapter,
+        renderer,
+    )
+
+    # —— 编辑合成 ——
+    create_composition_editor = CreateCompositionEditor(
+        layout_adapter,
+        renderer,
+    )
+
     return EditorMainWindow(
         import_image=import_image,
+        export_image=export_image,
         codec=codec,
         task_runner=task_runner,
+        translate_image=translate_image,
+        create_composition_editor=create_composition_editor,
     )

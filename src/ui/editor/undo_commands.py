@@ -1,7 +1,7 @@
 """QUndoCommand 子类 — 将 TextLayer 操作适配为 Qt 撤销命令。
 
-这些命令直接操作 EditorModel.text_layout（前端状态），
-后续可桥接到 CompositionSession 进行完整渲染。
+这些命令直接操作 EditorModel.text_layout（前端状态）。
+EditComposition 在后台线程处理渲染，成功后通过 CompositionEditResult 更新画布。
 """
 
 from __future__ import annotations
@@ -12,17 +12,11 @@ from src.domain.layout import TextLayer
 from src.ui.editor.editor_model import EditorModel
 
 
-class _LayerCommand(QUndoCommand):
-    """基类：持有 EditorModel 引用和前后图层快照。"""
+class ReplaceLayerUndoCommand(QUndoCommand):
+    """替换文字图层 — 文本、位置、尺寸、样式变更。"""
 
-    def __init__(
-        self,
-        model: EditorModel,
-        before: TextLayer,
-        after: TextLayer,
-        text: str,
-    ) -> None:
-        super().__init__(text)
+    def __init__(self, model: EditorModel, before: TextLayer, after: TextLayer) -> None:
+        super().__init__("修改文字图层")
         self._model = model
         self._before = before
         self._after = after
@@ -32,13 +26,6 @@ class _LayerCommand(QUndoCommand):
 
     def undo(self) -> None:
         self._model.replace_layer(self._after, self._before)
-
-
-class ReplaceLayerUndoCommand(_LayerCommand):
-    """替换文字图层 — 文本、位置、尺寸、样式 变更。"""
-
-    def __init__(self, model: EditorModel, before: TextLayer, after: TextLayer) -> None:
-        super().__init__(model, before, after, "修改文字图层")
 
 
 class AddLayerUndoCommand(QUndoCommand):

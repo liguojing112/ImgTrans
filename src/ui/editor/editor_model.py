@@ -1,7 +1,7 @@
 """编辑器状态中心。
 
 非 MVVM 架构 — 仅作为信号驱动的状态聚合器。
-持有当前图片文档、文字图层集合和选中状态。
+持有当前图片文档、文字图层集合、翻译结果和编辑合成器引用。
 """
 
 from __future__ import annotations
@@ -18,13 +18,24 @@ class EditorModel(QObject):
     document_changed = Signal(object)  # ImageDocument | None
     text_layout_changed = Signal(object)  # TextLayout
     selected_layer_changed = Signal(object)  # TextLayer | None
+    translation_started = Signal()
+    translation_stage_changed = Signal(object)  # ImageStage
+    translation_finished = Signal(object)  # TranslateImageResult
+    translation_failed = Signal(str)  # error message
+    edit_finished = Signal(object)  # CompositionEditResult
+    edit_failed = Signal(str)
 
     def __init__(self) -> None:
         super().__init__()
         self._document: ImageDocument | None = None
+        self._source_document: ImageDocument | None = None
         self._text_layout = TextLayout(())
         self._selected_layer_id: str | None = None
         self._zoom_factor = 1.0
+        self._translating = False
+        self._translation_result: object = None  # TranslateImageResult | None
+        self._composition_editor: object = None  # EditComposition | None
+        self._rendered_document: ImageDocument | None = None
 
     # —— document ——
 
@@ -39,6 +50,14 @@ class EditorModel(QObject):
         self._document = value
         self.document_changed.emit(value)
 
+    @property
+    def source_document(self) -> ImageDocument | None:
+        return self._source_document
+
+    @source_document.setter
+    def source_document(self, value: ImageDocument | None) -> None:
+        self._source_document = value
+
     # —— text_layout ——
 
     @property
@@ -50,7 +69,6 @@ class EditorModel(QObject):
         if value is not self._text_layout:
             self._text_layout = value
             self.text_layout_changed.emit(value)
-            # 检查当前选中图层是否还存在
             if self._selected_layer_id is not None:
                 try:
                     value.layer_by_id(self._selected_layer_id)
@@ -85,6 +103,42 @@ class EditorModel(QObject):
         except KeyError:
             return None
 
+    # —— translation ——
+
+    @property
+    def translating(self) -> bool:
+        return self._translating
+
+    @translating.setter
+    def translating(self, value: bool) -> None:
+        self._translating = value
+
+    @property
+    def translation_result(self) -> object | None:
+        return self._translation_result
+
+    @translation_result.setter
+    def translation_result(self, value: object | None) -> None:
+        self._translation_result = value
+
+    # —— composition ——
+
+    @property
+    def composition_editor(self) -> object | None:
+        return self._composition_editor
+
+    @composition_editor.setter
+    def composition_editor(self, value: object | None) -> None:
+        self._composition_editor = value
+
+    @property
+    def rendered_document(self) -> ImageDocument | None:
+        return self._rendered_document
+
+    @rendered_document.setter
+    def rendered_document(self, value: ImageDocument | None) -> None:
+        self._rendered_document = value
+
     # —— zoom ——
 
     @property
@@ -95,22 +149,19 @@ class EditorModel(QObject):
     def zoom_factor(self, value: float) -> None:
         self._zoom_factor = max(0.1, min(20.0, value))
 
-    # —— 图层操作方法（不可变 domain 对象，使用 TextLayout 方法） ——
+    # —— 图层操作方法 ——
 
     def replace_layer(self, before: TextLayer, after: TextLayer) -> None:
-        """替换图层并通知。"""
         self.text_layout = self._text_layout.replace_layer(after)
         if self._selected_layer_id == before.region_id:
             self._selected_layer_id = after.region_id
             self.selected_layer_changed.emit(after)
 
     def add_layer(self, layer: TextLayer) -> None:
-        """添加图层并通知。"""
         self.text_layout = self._text_layout.add_layer(
             layer, len(self._text_layout.layers)
         )
 
     def remove_layer(self, region_id: str) -> None:
-        """删除图层并通知。"""
         layout, _, _ = self._text_layout.remove_layer(region_id)
         self.text_layout = layout

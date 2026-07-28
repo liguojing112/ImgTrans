@@ -1,6 +1,6 @@
 """编辑器主窗口 — QStackedWidget 切换首页 / 编辑器页。
 
-集成 QUndoStack，连接图片导入、模型同步、undo/redo。
+集成 QUndoStack + 翻译流水线 + 编辑合成 + 导出。
 """
 
 from __future__ import annotations
@@ -10,13 +10,18 @@ from pathlib import Path
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QUndoStack
 from PySide6.QtWidgets import (
+    QFileDialog,
     QMainWindow,
     QStackedWidget,
     QStatusBar,
 )
 
-from src.application.image_io import ImportImage
+from src.application.composition import EditComposition
+from src.application.image_io import ExportImage, ImportImage
+from src.application.translate_image import TranslateImage, TranslateImageResult
 from src.domain.image import ImageDocument
+from src.domain.job import ImageStage
+from src.domain.translation import TranslationSelection, TranslationMode
 from src.infrastructure.pillow_image_codec import PillowImageCodec
 
 from src.ui.editor.editor_model import EditorModel
@@ -31,8 +36,11 @@ class EditorMainWindow(QMainWindow):
     def __init__(
         self,
         import_image: ImportImage,
+        export_image: ExportImage | None = None,
         codec: PillowImageCodec | None = None,
         task_runner: object | None = None,
+        translate_image: TranslateImage | None = None,
+        create_composition_editor: object | None = None,
     ) -> None:
         super().__init__()
         self.setProperty("editorStyle", True)
@@ -42,8 +50,11 @@ class EditorMainWindow(QMainWindow):
         self.resize(1280, 800)
 
         self._import_usecase = import_image
+        self._export_usecase = export_image
         self._codec = codec
         self._task_runner = task_runner
+        self._translate_image = translate_image
+        self._create_composition_editor = create_composition_editor
 
         # 状态中心
         self._model = EditorModel()
@@ -82,8 +93,13 @@ class EditorMainWindow(QMainWindow):
         import_action.setShortcut("Ctrl+O")
         import_action.triggered.connect(self._editor_page._on_import_clicked)
         file_menu.addAction(import_action)
-        file_menu.addSeparator()
 
+        export_action = QAction("导出图片…", self)
+        export_action.setShortcut("Ctrl+S")
+        export_action.triggered.connect(self._editor_page._on_export_clicked)
+        file_menu.addAction(export_action)
+
+        file_menu.addSeparator()
         back_action = QAction("返回首页", self)
         back_action.triggered.connect(self._go_home)
         file_menu.addAction(back_action)
@@ -127,6 +143,8 @@ class EditorMainWindow(QMainWindow):
     def _connect_signals(self) -> None:
         self._home_page.image_translation_requested.connect(self._enter_editor)
         self._editor_page.import_requested.connect(self._on_import)
+        self._editor_page.translate_requested.connect(self._on_translate)
+        self._editor_page.export_requested.connect(self._on_export)
         self._editor_page.set_model(self._model)
 
     # —— 操作 ——
@@ -138,6 +156,8 @@ class EditorMainWindow(QMainWindow):
     def _go_home(self) -> None:
         self._stack.setCurrentWidget(self._home_page)
         self.statusBar().showMessage("就绪")
+
+    # —— 导入 ——
 
     def _on_import(self, source: Path) -> None:
         if self._task_runner is not None:
@@ -166,7 +186,15 @@ class EditorMainWindow(QMainWindow):
 
         document: ImageDocument = value
         self._model.document = document
-        self._editor_page.set_document(document, None)
+        self._model.source_document = document
+        self._model.translation_result = None
+        self._model.composition_editor = None
+        self._model.rendered_document = None
+        self._editor_page.set_document(document)
+        self._editor_page.set_text_layout(self._model.text_layout)
+        self._editor_page.set_export_enabled(True)
+        self._editor_page.clear_layer_selection()
+        self._editor_page.translate_controls.reset_progress()
         self._stack.setCurrentWidget(self._editor_page)
 
         asset = document.asset
@@ -178,8 +206,127 @@ class EditorMainWindow(QMainWindow):
     def _on_import_failed(self, error: Exception) -> None:
         self.statusBar().showMessage(f"导入失败：{error}")
 
+    # —— 翻译 ——
+
+    def _on_translate(self, ocr_language: str, target_language: str) -> None:
+        if self._translate_image is None or self._task_runner is None:
+            self.statusBar().showMessage("翻译服务不可用")
+            return
+        document = self._model.source_document
+        if document is None:
+            self.statusBar().showMessage("请先导入图片")
+            return
+
+        self._model.translating = True
+        self._model.translation_started.emit()
+        self._editor_page.translate_controls.set_translating(True)
+        self._undo_stack.clear()
+
+        selection = TranslationSelection(
+            mode=TranslationMode.ALL,
+            target_language=target_language,
+        )
+
+        def on_stage(stage: ImageStage) -> None:
+            self._model.translation_stage_changed.emit(stage)
+            self._editor_page.translate_controls.set_stage(stage)
+
+        self.statusBar().showMessage(f"正在翻译（OCR：{ocr_language} → 目标：{target_language}）…")
+
+        self._task_runner.submit(
+            lambda: self._translate_image.execute(
+                document,
+                ocr_language,
+                selection,
+                (),
+                on_stage,
+            ),
+            self._on_translation_succeeded,
+            self._on_translation_failed,
+        )
+
+    def _on_translation_succeeded(self, value: object) -> None:
+        if not isinstance(value, TranslateImageResult):
+            self._on_translation_failed(TypeError("翻译返回了无效结果"))
+            return
+
+        result: TranslateImageResult = value
+        self._model.translating = False
+        self._model.translation_result = result
+
+        # 初始化 EditComposition
+        if self._create_composition_editor is not None:
+            editor = self._create_composition_editor.execute(
+                result.repair.result.document,
+                result.document,
+                result.layout,
+            )
+            self._model.composition_editor = editor
+
+        # 更新显示
+        self._model.text_layout = result.layout
+        self._model.rendered_document = result.document
+        self._editor_page.set_document(result.document)
+        self._editor_page.set_text_layout(result.layout)
+        self._editor_page.set_export_enabled(True)
+
+        # 选中第一个图层
+        if result.layout.layers:
+            self._model.selected_layer_id = result.layout.layers[0].region_id
+
+        self._editor_page.view.fit_to_window()
+
+        layer_count = len(result.layout.layers)
+        provider = result.translation.provider
+        self.statusBar().showMessage(
+            f"翻译完成：{layer_count} 个文字图层（{provider}）"
+        )
+        self._model.translation_finished.emit(result)
+
+    def _on_translation_failed(self, error: Exception) -> None:
+        self._model.translating = False
+        self._model.translation_failed.emit(str(error))
+        self._editor_page.translate_controls.reset_progress()
+        self._editor_page.translate_controls.set_translating(False)
+        self.statusBar().showMessage(f"翻译失败：{error}")
+
+    # —— 导出 ——
+
+    def _on_export(self, target: Path) -> None:
+        document = self._model.rendered_document or self._model.document
+        if document is None:
+            self.statusBar().showMessage("没有可导出的图片")
+            return
+
+        if self._export_usecase is None:
+            if self._codec is None:
+                self.statusBar().showMessage("导出功能不可用")
+                return
+            try:
+                from src.domain.image import ImageFileFormat
+                fmt = ImageFileFormat.from_output_suffix(target.suffix)
+                self._codec.save(document, target, fmt)
+                self.statusBar().showMessage(f"已导出：{target.name}")
+            except Exception as exc:
+                self.statusBar().showMessage(f"导出失败：{exc}")
+            return
+
+        if self._task_runner is not None:
+            self.statusBar().showMessage(f"正在导出 {target.name}…")
+            self._task_runner.submit(
+                lambda: self._export_usecase.execute(document, target),
+                lambda p: self.statusBar().showMessage(f"已导出：{Path(p).name}"),
+                lambda e: self.statusBar().showMessage(f"导出失败：{e}"),
+            )
+            return
+
+        try:
+            result = self._export_usecase.execute(document, target)
+            self.statusBar().showMessage(f"已导出：{result.name}")
+        except Exception as exc:
+            self.statusBar().showMessage(f"导出失败：{exc}")
+
     def request_runtime_recovery(self, reason: str = "runtime") -> None:
-        """兼容生产 UI 接口 — 编辑器暂无运行时恢复需求。"""
         self.statusBar().showMessage("运行时已恢复", 5000)
 
     # —— 公开接口 ——
