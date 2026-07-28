@@ -28,6 +28,7 @@ from src.ui.editor.top_bar import TopBar
 from src.ui.editor.translate_controls import TranslateControls
 from src.ui.editor.undo_commands import ReplaceLayerUndoCommand
 from src.ui.editor.property_panel import PropertyPanel
+from src.ui.editor.ocr_result_panel import OcrResultPanel
 from src.ui.editor.toolbar import EditorToolBar
 
 
@@ -69,6 +70,9 @@ class EditorPage(QWidget):
         # 翻译控件
         self.translate_controls = TranslateControls()
 
+        # OCR 结果面板
+        self.ocr_result_panel = OcrResultPanel()
+
         # 导出按钮
         self.export_button = QPushButton("导出图片")
         self.export_button.setObjectName("applyPropertyButton")
@@ -80,6 +84,7 @@ class EditorPage(QWidget):
         right_layout.setContentsMargins(0, 0, 0, 0)
         right_layout.setSpacing(0)
         right_layout.addWidget(self.translate_controls)
+        right_layout.addWidget(self.ocr_result_panel)
         right_layout.addWidget(self.property_panel, stretch=1)
         right_layout.addWidget(self.export_button)
 
@@ -113,6 +118,9 @@ class EditorPage(QWidget):
         self.scene.selection_cleared.connect(self.property_panel.set_layer)
         self.scene.layer_dropped.connect(self._on_layer_dropped)
         self.property_panel.layer_property_changed.connect(self._on_property_changed)
+
+        # OCR 结果面板 → 画布选中
+        self.ocr_result_panel.region_selected.connect(self._on_ocr_region_selected)
 
         self.top_bar.import_requested.connect(self._on_import_clicked)
         self.top_bar.back_requested.connect(self.back_requested.emit)
@@ -181,7 +189,8 @@ class EditorPage(QWidget):
 
     def _on_import_clicked(self) -> None:
         value, _ = QFileDialog.getOpenFileName(
-            self, "导入图片", "", "图片 (*.jpg *.jpeg *.png *.webp)"
+            self, "导入图片", "",
+            "图片 (*.jpg *.jpeg *.png *.webp *.bmp);;所有文件 (*)",
         )
         if value:
             self.import_requested.emit(Path(value))
@@ -210,6 +219,14 @@ class EditorPage(QWidget):
         if after == before:
             return
         self.edit_requested.emit(region_id, "box", after, before)
+
+    def _on_ocr_region_selected(self, region_id: str) -> None:
+        """OCR 面板点击行 → 画布选中对应 OCR 区域。"""
+        # 取消所有文字图层选中
+        self.scene.clear_selection()
+        # 高亮对应的 OCR item
+        for item in self.scene._ocr_items.values():
+            item.setSelected(item.region_id == region_id)
 
     def _on_property_changed(self, region_id: str, field: str, value: object) -> None:
         """属性面板变更 → 映射到字段组 → 发射 edit_requested。"""

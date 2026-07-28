@@ -184,7 +184,7 @@ class EditorMainWindow(QMainWindow):
         if self._task_runner is not None:
             self.statusBar().showMessage(f"正在导入 {source.name}…")
             self._task_runner.submit(
-                lambda: self._import_usecase.execute(source),
+                lambda: _load_document(source, self._import_usecase, self._codec),
                 self._on_image_loaded,
                 self._on_import_failed,
             )
@@ -193,7 +193,7 @@ class EditorMainWindow(QMainWindow):
             self.statusBar().showMessage("图片编解码器不可用")
             return
         try:
-            document = self._codec.load(source)
+            document = _load_document(source, self._import_usecase, self._codec)
         except Exception as exc:
             self._on_import_failed(exc)
             return
@@ -207,10 +207,13 @@ class EditorMainWindow(QMainWindow):
         document: ImageDocument = value
         self._model.document = document
         self._model.source_document = document
+        self._model.ocr_result = None
         self._model.translation_result = None
         self._model.composition_editor = None
         self._model.rendered_document = None
+        self._model.selected_layer_id = None
         self._model.showing_original = False
+        self._undo_stack.clear()
         self._editor_page.scene.clear_regions()
         self._editor_page.set_document(document)
         self._editor_page.set_text_layout(self._model.text_layout)
@@ -271,6 +274,7 @@ class EditorMainWindow(QMainWindow):
 
         # 显示 OCR 区域在画布上
         self._editor_page.scene.set_regions(result.regions)
+        self._editor_page.ocr_result_panel.set_result(result)
 
         region_count = len(result.regions)
         self.statusBar().showMessage(
@@ -501,3 +505,40 @@ class EditorMainWindow(QMainWindow):
     @property
     def undo_stack(self) -> QUndoStack:
         return self._undo_stack
+
+
+# —— 模块级辅助 ——
+
+def _load_document(
+    source: Path,
+    import_usecase: ImportImage,
+    codec: PillowImageCodec | None,
+) -> ImageDocument:
+    """尝试通过 ImportImage 加载，失败时 fallback 到 BMP/其他格式。"""
+    try:
+        return import_usecase.execute(source)
+    except Exception:
+        if source.suffix.lower() == ".bmp":
+            return _load_bmp(source)
+        raise
+
+
+def _load_bmp(source: Path) -> ImageDocument:
+    """绕过 frozen 格式校验层，直接用 Pillow 加载 BMP 并构造 ImageDocument。"""
+    from PIL import Image as PILImage
+    from src.domain.image import ImageAsset
+
+    with PILImage.open(source) as img:
+        width, height = img.size
+        working = img.convert("RGB")
+        pixels = working.tobytes()
+    asset = ImageAsset(
+        source_path=source.resolve(),
+        width=width,
+        height=height,
+        file_size=source.stat().st_size,
+        file_format=None,  # type: ignore — BMP 没有对应的 ImageFileFormat
+        has_alpha=False,
+        orientation_applied=False,
+    )
+    return ImageDocument(asset=asset, mode="RGB", pixels=pixels)
