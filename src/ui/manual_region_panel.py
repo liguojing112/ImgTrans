@@ -24,6 +24,7 @@ from src.domain.layout import (
     ensure_bottom_inward_circular_path,
 )
 from src.domain.manual_region import ManualInputMode, ManualRegionSpec
+from src.ui.common import wrap_spin
 
 
 class ManualRegionPanel(QFrame):
@@ -94,19 +95,27 @@ class ManualRegionPanel(QFrame):
         center_row = QWidget()
         center_layout = QGridLayout(center_row)
         center_layout.setContentsMargins(0, 0, 0, 0)
-        center_layout.addWidget(self.circle_center_x, 0, 0)
-        center_layout.addWidget(self.circle_center_y, 0, 1)
+        center_layout.addWidget(
+            wrap_spin(self.circle_center_x, width=100, label="圆心 X"), 0, 0
+        )
+        center_layout.addWidget(
+            wrap_spin(self.circle_center_y, width=100, label="圆心 Y"), 0, 1
+        )
         self.circle_radius = _coordinate_spin("CircleRadius")
         self.circle_start_angle = _angle_spin("manualCircleStartAngle")
         self.circle_end_angle = _angle_spin("manualCircleEndAngle")
         angles_row = QWidget()
         angles_layout = QGridLayout(angles_row)
         angles_layout.setContentsMargins(0, 0, 0, 0)
-        angles_layout.addWidget(self.circle_start_angle, 0, 0)
-        angles_layout.addWidget(self.circle_end_angle, 0, 1)
+        angles_layout.addWidget(
+            wrap_spin(self.circle_start_angle, width=100, label="起始角度"), 0, 0
+        )
+        angles_layout.addWidget(
+            wrap_spin(self.circle_end_angle, width=100, label="结束角度"), 0, 1
+        )
         self.circle_reverse = QCheckBox("反向排列")
         circular_form.addRow("圆心 X / Y", center_row)
-        circular_form.addRow("半径", self.circle_radius)
+        circular_form.addRow("半径", wrap_spin(self.circle_radius, width=100, label="半径"))
         circular_form.addRow("起止角度", angles_row)
         circular_form.addRow("", self.circle_reverse)
         layout.addWidget(self.circular_fields)
@@ -235,10 +244,16 @@ class _BoxFields(QWidget):
         )
         for index, (label, control) in enumerate(controls):
             grid.addWidget(QLabel(label), index // 2, (index % 2) * 2)
-            grid.addWidget(control, index // 2, (index % 2) * 2 + 1)
+            grid.addWidget(
+                wrap_spin(control, width=110, label=label),
+                index // 2,
+                (index % 2) * 2 + 1,
+            )
         if allow_rotation:
             grid.addWidget(QLabel("旋转"), 2, 0)
-            grid.addWidget(self.rotation, 2, 1)
+            grid.addWidget(
+                wrap_spin(self.rotation, width=110, label="旋转"), 2, 1
+            )
         else:
             self.rotation.hide()
 

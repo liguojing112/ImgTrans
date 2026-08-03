@@ -2,14 +2,40 @@
 
 非 MVVM 架构 — 仅作为信号驱动的状态聚合器。
 持有当前图片文档、文字图层集合、翻译结果和编辑合成器引用。
+支持多文档（批量图片可一一进入工作台）。
 """
 
 from __future__ import annotations
+
+from dataclasses import dataclass, field
+from pathlib import Path
+from uuid import uuid4
 
 from PySide6.QtCore import QObject, Signal
 
 from src.domain.image import ImageDocument
 from src.domain.layout import TextLayer, TextLayout
+
+
+@dataclass
+class EditorDocumentRef:
+    """工作台中的一个文档条目（对应一张图片）。
+
+    除来源信息外还保存该文档的编辑状态，切换文档时由 EditorModel
+    负责快照/恢复，避免翻译结果等状态跨文档丢失。
+    """
+
+    doc_id: str
+    name: str
+    source_path: Path
+    source_document: ImageDocument
+    ocr_result: object = None
+    translation_result: object = None
+    text_layout: TextLayout = field(default_factory=lambda: TextLayout(()))
+    composition_editor: object = None
+    rendered_document: ImageDocument | None = None
+    repaired_background: ImageDocument | None = None
+    is_dirty: bool = False
 
 
 class EditorModel(QObject):
@@ -28,6 +54,8 @@ class EditorModel(QObject):
     preview_mode_changed = Signal(str)
     ocr_started = Signal()
     ocr_finished = Signal(object)  # OcrResult
+    documents_changed = Signal()  # 文档列表变化
+    active_document_changed = Signal(str)  # doc_id
 
     def __init__(self) -> None:
         super().__init__()
@@ -45,8 +73,107 @@ class EditorModel(QObject):
         self._is_dirty = False
         self._composition_editor: object = None  # EditComposition | None
         self._rendered_document: ImageDocument | None = None
+        self._repaired_background: ImageDocument | None = None
         self._ocr_elapsed_ms = 0.0
         self._translation_elapsed_ms = 0.0
+        # 多文档
+        self._documents: list[EditorDocumentRef] = []
+        self._active_document_id: str | None = None
+
+    # —— 多文档 ——
+
+    def add_document(
+        self,
+        source_path: Path,
+        source_document: ImageDocument,
+        name: str | None = None,
+    ) -> str:
+        """把一张图片加入工作台文档列表，返回 doc_id。
+
+        加入前先保存当前活动文档的编辑状态；新文档以干净状态激活。
+        """
+        self._snapshot_active()
+        doc_id = str(uuid4())
+        ref = EditorDocumentRef(
+            doc_id=doc_id,
+            name=name or source_path.name,
+            source_path=source_path,
+            source_document=source_document,
+        )
+        self._documents.append(ref)
+        self._active_document_id = doc_id
+        self._restore_active()
+        self.documents_changed.emit()
+        self.active_document_changed.emit(doc_id)
+        return doc_id
+
+    def remove_document(self, doc_id: str) -> None:
+        self._documents = [d for d in self._documents if d.doc_id != doc_id]
+        if self._active_document_id == doc_id:
+            self._active_document_id = (
+                self._documents[-1].doc_id if self._documents else None
+            )
+            if self._active_document_id:
+                self._restore_active()
+                self.active_document_changed.emit(self._active_document_id)
+        self.documents_changed.emit()
+
+    def clear_documents(self) -> None:
+        self._documents.clear()
+        self._active_document_id = None
+        self.documents_changed.emit()
+
+    def documents(self) -> list[EditorDocumentRef]:
+        return list(self._documents)
+
+    @property
+    def active_document_id(self) -> str | None:
+        return self._active_document_id
+
+    def set_active_document(self, doc_id: str) -> None:
+        if doc_id == self._active_document_id:
+            return
+        if not any(d.doc_id == doc_id for d in self._documents):
+            return
+        self._snapshot_active()
+        self._active_document_id = doc_id
+        self._restore_active()
+        self.active_document_changed.emit(doc_id)
+
+    def active_document(self) -> EditorDocumentRef | None:
+        for d in self._documents:
+            if d.doc_id == self._active_document_id:
+                return d
+        return None
+
+    # —— 文档编辑状态快照 ——
+
+    def _snapshot_active(self) -> None:
+        """把当前全局编辑状态保存到活动文档条目。"""
+        ref = self.active_document()
+        if ref is None:
+            return
+        ref.ocr_result = self._ocr_result
+        ref.translation_result = self._translation_result
+        ref.text_layout = self._text_layout
+        ref.composition_editor = self._composition_editor
+        ref.rendered_document = self._rendered_document
+        ref.repaired_background = self._repaired_background
+        ref.is_dirty = self._is_dirty
+
+    def _restore_active(self) -> None:
+        """从活动文档条目恢复全局编辑状态（直接赋值，不发射信号）。"""
+        ref = self.active_document()
+        if ref is None:
+            return
+        self._ocr_result = ref.ocr_result
+        self._translation_result = ref.translation_result
+        self._text_layout = ref.text_layout
+        self._composition_editor = ref.composition_editor
+        self._rendered_document = ref.rendered_document
+        self._repaired_background = ref.repaired_background
+        self._is_dirty = ref.is_dirty
+        self._selected_layer_id = None
 
     # —— document ——
 
@@ -188,6 +315,14 @@ class EditorModel(QObject):
     def rendered_document(self, value: ImageDocument | None) -> None:
         self._rendered_document = value
 
+    @property
+    def repaired_background(self) -> ImageDocument | None:
+        return self._repaired_background
+
+    @repaired_background.setter
+    def repaired_background(self, value: ImageDocument | None) -> None:
+        self._repaired_background = value
+
     # —— showing_original ——
 
     @property
@@ -201,7 +336,7 @@ class EditorModel(QObject):
         self._showing_original = value
         self.showing_original_changed.emit(value)
 
-    # —— preview_mode ——
+    # —— 预览模式 ——
 
     @property
     def preview_mode(self) -> str:

@@ -1,4 +1,4 @@
-"""首页 — 两个入口卡片。"""
+"""首页 — 三个入口卡片（倒品字形布局）。"""
 
 from __future__ import annotations
 
@@ -16,10 +16,11 @@ from src.ui.editor.icons import standard_icon
 
 
 class HomePage(QFrame):
-    """首页，提供"图片翻译"和"商品详情生成"两个入口。"""
+    """首页，提供"图片翻译"、"商品详情生成"和"图片工具箱"三个入口。"""
 
     image_translation_requested = Signal()
     product_detail_requested = Signal()
+    toolbox_requested = Signal()
 
     def __init__(self) -> None:
         super().__init__()
@@ -34,7 +35,7 @@ class HomePage(QFrame):
         title_group.setAlignment(Qt.AlignmentFlag.AlignCenter)
         title_group.setSpacing(8)
 
-        title = QLabel("ImgTrans 图片翻译")
+        title = QLabel("优译图AI 图片翻译")
         title.setObjectName("homeTitle")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
@@ -46,10 +47,10 @@ class HomePage(QFrame):
         title_group.addWidget(subtitle)
         layout.addLayout(title_group)
 
-        # 两张入口卡片
-        cards = QHBoxLayout()
-        cards.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        cards.setSpacing(24)
+        # 第一行：主营功能卡片
+        cards_top = QHBoxLayout()
+        cards_top.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        cards_top.setSpacing(24)
 
         translate_card = self._make_card(
             "图片翻译",
@@ -60,19 +61,48 @@ class HomePage(QFrame):
 
         detail_card = self._make_card(
             "商品详情生成",
-            "敬请期待",
-            enabled=False,
+            "上传商品图片 / AI 商品分析\n生成多语言标题、标签、卖点与详情文案",
+            enabled=True,
         )
+        detail_card.mousePressEvent = lambda e: self.product_detail_requested.emit()
 
-        cards.addWidget(translate_card)
-        cards.addWidget(detail_card)
-        layout.addLayout(cards)
+        cards_top.addWidget(translate_card)
+        cards_top.addWidget(detail_card)
+        layout.addLayout(cards_top)
 
-    def _make_card(self, title_text: str, desc: str, enabled: bool) -> QFrame:
+        # 第二行：辅助功能卡片（稍小，居中）
+        cards_bottom = QHBoxLayout()
+        cards_bottom.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        cards_bottom.setSpacing(24)
+        cards_bottom.addStretch()
+
+        toolbox_card = self._make_card(
+            "图片工具箱",
+            "裁剪 / 旋转 / 翻转\n水印 / 压缩 / 格式转换",
+            enabled=True,
+            width=220,
+            height=170,
+            icon_pix=QStyle.StandardPixmap.SP_DialogSaveButton,
+        )
+        toolbox_card.mousePressEvent = lambda e: self.toolbox_requested.emit()
+
+        cards_bottom.addWidget(toolbox_card)
+        cards_bottom.addStretch()
+        layout.addLayout(cards_bottom)
+
+    def _make_card(
+        self,
+        title_text: str,
+        desc: str,
+        enabled: bool,
+        width: int = 260,
+        height: int = 200,
+        icon_pix: QStyle.StandardPixmap | None = None,
+    ) -> QFrame:
         card = QFrame()
         card.setObjectName("homeCard")
         card.setProperty("editorStyle", True)
-        card.setFixedSize(260, 200)
+        card.setFixedSize(width, height)
         card.setCursor(
             Qt.CursorShape.PointingHandCursor
             if enabled
@@ -84,7 +114,12 @@ class HomePage(QFrame):
         inner.setAlignment(Qt.AlignmentFlag.AlignCenter)
         inner.setSpacing(16)
 
-        icon_pix = QStyle.StandardPixmap.SP_FileDialogContentsView if enabled else QStyle.StandardPixmap.SP_ComputerIcon
+        if icon_pix is None:
+            icon_pix = (
+                QStyle.StandardPixmap.SP_FileDialogContentsView
+                if enabled
+                else QStyle.StandardPixmap.SP_ComputerIcon
+            )
         icon_label = QLabel()
         icon_label.setPixmap(standard_icon(icon_pix).pixmap(36, 36))
         icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)

@@ -83,13 +83,28 @@ QFrame#editorToolBar {
     background: #232336;
     border-right: 1px solid #3d3d5c;
 }
+QFrame#textListPanel {
+    background: #252538;
+    border-right: 1px solid #3d3d5c;
+}
+QFrame#editorRightPanel {
+    background: #2a2a3e;
+    border-left: 1px solid #3d3d5c;
+}
+QSplitter::handle {
+    background: #3d3d5c;
+    width: 2px;
+}
+QSplitter::handle:hover {
+    background: #3973db;
+}
 QPushButton#toolButton {
     background: transparent;
     color: #9898b0;
     border: none;
     border-radius: 8px;
-    padding: 10px;
-    font-size: 18px;
+    padding: 4px;
+    font-size: 12px;
     min-width: 36px;
     min-height: 36px;
 }
@@ -98,14 +113,41 @@ QPushButton#toolButton:hover {
     color: #e0e0f0;
 }
 QPushButton#toolButton:checked {
-    background: #3973db;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                stop:0 #4a8af4, stop:1 #3973db);
     color: #ffffff;
+    border: 1px solid #5a9af4;
 }
 
 /* 画布区域 */
 QGraphicsView#editorCanvas {
     background: #1a1a2e;
     border: none;
+}
+
+QTabWidget#editorRightTabs::pane {
+    border: none;
+    border-top: 1px solid #3d3d5c;
+    background: #2a2a3e;
+}
+QTabWidget#editorRightTabs QTabBar::tab {
+    background: #252538;
+    color: #9898b0;
+    border: none;
+    padding: 9px 8px;
+    min-width: 58px;
+}
+QTabWidget#editorRightTabs QTabBar::tab:selected {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                stop:0 #4a8af4, stop:1 #3973db);
+    color: #ffffff;
+    border: 1px solid #5a9af4;
+    border-bottom: none;
+    font-weight: 600;
+}
+QTabWidget#editorRightTabs QTabBar::tab:hover:!selected {
+    background: #363650;
+    color: #e0e0f0;
 }
 
 /* 属性面板 */
@@ -157,35 +199,54 @@ QPushButton#colorButton {
     min-height: 24px;
 }
 
-/* 操作按钮 */
+/* 操作按钮 - 现代渐变风格 */
 QPushButton#applyPropertyButton {
-    background: #3973db;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                stop:0 #4a8af4, stop:1 #3973db);
     color: #ffffff;
-    border: none;
-    border-radius: 7px;
+    border: 1px solid #5a9af4;
+    border-radius: 8px;
     padding: 8px 16px;
     font-weight: 600;
+    font-size: 13px;
 }
 QPushButton#applyPropertyButton:hover {
-    background: #5085e8;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                stop:0 #5a9af4, stop:1 #4a8af4);
+    border-color: #6aaaf4;
+}
+QPushButton#applyPropertyButton:pressed {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                stop:0 #2a6ad4, stop:1 #1a5ac4);
+    border-color: #3a7ae4;
 }
 QPushButton#applyPropertyButton:disabled {
-    background: #2e2e48;
-    color: #686878;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                stop:0 #3a4a5e, stop:1 #2e3e4e);
+    border-color: #4a5a6e;
+    color: #8898a8;
 }
 
-/* 首页按钮 */
+/* 首页按钮 - 更大的渐变按钮 */
 QPushButton#enterEditorButton {
-    background: #3973db;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                stop:0 #4a8af4, stop:1 #3973db);
     color: #ffffff;
-    border: none;
-    border-radius: 8px;
+    border: 1px solid #5a9af4;
+    border-radius: 10px;
     padding: 12px 28px;
     font-weight: 600;
     font-size: 15px;
 }
 QPushButton#enterEditorButton:hover {
-    background: #5085e8;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                stop:0 #5a9af4, stop:1 #4a8af4);
+    border-color: #6aaaf4;
+}
+QPushButton#enterEditorButton:pressed {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                stop:0 #2a6ad4, stop:1 #1a5ac4);
+    border-color: #3a7ae4;
 }
 
 /* 返回按钮 */
@@ -264,7 +325,7 @@ QSplitter::handle {
     background: #3d3d5c;
 }
 QSplitter::handle:horizontal {
-    width: 1px;
+    width: 4px;
 }
 
 /* 状态栏 */
@@ -294,4 +355,32 @@ QDoubleSpinBox, QSpinBox, QComboBox, QPlainTextEdit, QLineEdit { border-radius: 
 
 /* QLabel disabled 可读 */
 QLabel:disabled { color: #9898b0; }
+
+/* 通用主要按钮样式 - 现代渐变 */
+QPushButton.primary, QPushButton[primary="true"] {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                stop:0 #4a8af4, stop:1 #3973db);
+    color: #ffffff;
+    border: 1px solid #5a9af4;
+    border-radius: 8px;
+    padding: 8px 16px;
+    font-weight: 600;
+    font-size: 13px;
+}
+QPushButton.primary:hover, QPushButton[primary="true"]:hover {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                stop:0 #5a9af4, stop:1 #4a8af4);
+    border-color: #6aaaf4;
+}
+QPushButton.primary:pressed, QPushButton[primary="true"]:pressed {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                stop:0 #2a6ad4, stop:1 #1a5ac4);
+    border-color: #3a7ae4;
+}
+QPushButton.primary:disabled, QPushButton[primary="true"]:disabled {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                stop:0 #3a4a5e, stop:1 #2e3e4e);
+    border-color: #4a5a6e;
+    color: #8898a8;
+}
 """

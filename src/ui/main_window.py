@@ -1186,7 +1186,7 @@ class MainWindow(QMainWindow):
             self,
             "导入图片",
             "",
-            "图片 (*.jpg *.jpeg *.png *.webp)",
+            "图片 (*.jpg *.jpeg *.png *.webp *.bmp)",
         )
         if value:
             self.request_import(Path(value))
@@ -1196,7 +1196,7 @@ class MainWindow(QMainWindow):
             self,
             "添加批量图片",
             "",
-            "图片 (*.jpg *.jpeg *.png *.webp)",
+            "图片 (*.jpg *.jpeg *.png *.webp *.bmp)",
         )
         if not values:
             return
@@ -1787,9 +1787,10 @@ QPushButton#recognizeButton, QPushButton#headerTranslateButton,
 QPushButton#translateButton, QPushButton#headerRepairButton,
 QPushButton#repairButton, QPushButton#headerAutoButton,
 QPushButton#startWorkflowButton, QPushButton#exportButton {
-    background: #3973db;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                stop:0 #4a8af4, stop:1 #3973db);
     color: #ffffff;
-    border: none;
+    border: 1px solid #5a9af4;
     border-radius: 8px;
     padding: 9px 16px;
     font-weight: 600;
@@ -1860,42 +1861,47 @@ QPushButton#redoEditButton, QPushButton#fitCanvasButton {
     padding: 8px 12px;
 }
 QPushButton#applyTextEditButton {
-    background: #3973db;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                stop:0 #4a8af4, stop:1 #3973db);
     color: #ffffff;
-    border: none;
+    border: 1px solid #5a9af4;
     border-radius: 7px;
     padding: 8px 12px;
     font-weight: 600;
 }
 QPushButton#applyLayerStyleButton, QPushButton#addTextLayerButton {
-    background: #3973db;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                stop:0 #4a8af4, stop:1 #3973db);
     color: #ffffff;
-    border: none;
+    border: 1px solid #5a9af4;
     border-radius: 7px;
     padding: 8px 12px;
     font-weight: 600;
 }
 QPushButton#selectManualRegionButton, QPushButton#processManualRegionButton {
-    background: #3973db;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                stop:0 #4a8af4, stop:1 #3973db);
     color: #ffffff;
-    border: none;
+    border: 1px solid #5a9af4;
     border-radius: 7px;
     padding: 8px 12px;
     font-weight: 600;
 }
 QPushButton#addBatchImagesButton, QPushButton#startBatchButton,
 QPushButton#exportBatchButton {
-    background: #3973db;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                stop:0 #4a8af4, stop:1 #3973db);
     color: #ffffff;
-    border: none;
+    border: 1px solid #5a9af4;
     border-radius: 7px;
     padding: 8px 12px;
     font-weight: 600;
 }
 QPushButton#defaultCurveButton, QPushButton#applyCurveButton {
-    background: #3973db;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                stop:0 #4a8af4, stop:1 #3973db);
     color: #ffffff;
-    border: none;
+    border: 1px solid #5a9af4;
     border-radius: 7px;
     padding: 8px 12px;
     font-weight: 600;

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import traceback
 from collections.abc import Callable
 from typing import Any
 
@@ -22,6 +23,8 @@ class _FunctionWorker(QRunnable):
         try:
             self.signals.succeeded.emit(self.operation())
         except Exception as error:
+            print(f"[QtTaskRunner] 任务异常: {error}")
+            traceback.print_exc()
             self.signals.failed.emit(error)
         finally:
             self.signals.finished.emit()

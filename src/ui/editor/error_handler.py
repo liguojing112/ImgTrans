@@ -8,7 +8,7 @@ _ERROR_SUGGESTIONS = {
     "rate_limited": ("请求过多", "请求频率超过限制", "请稍后重试。"),
     "server_error": ("服务端错误", "后端服务返回异常", "请联系管理员，或稍后重试。"),
     "model_load": ("模型加载失败", "OCR/修复模型加载失败", "请检查模型文件是否完整，或重新下载模型。"),
-    "image_format": ("图片格式不支持", "不支持该图片格式或文件无法读取", "请使用 JPG、PNG、WebP 或 BMP 格式。"),
+    "image_format": ("图片格式不支持", "不支持该图片格式或文件无法读取", "请使用 JPG、PNG 或 WebP 格式。"),
     "image_not_found": ("图片未找到", "找不到所选图片文件", "请检查文件路径是否正确，文件是否已被删除。"),
     "export_error": ("导出失败", "导出目录不存在或磁盘空间不足", "请检查导出路径是否存在，以及磁盘空间是否充足。"),
     "file_too_large": ("文件过大", "图片文件超过大小限制", "请压缩图片后再试。"),
@@ -48,7 +48,11 @@ def classify_error(error: Exception) -> tuple[str, str, str]:
     if error_code == "file_too_large":
         return _ERROR_SUGGESTIONS["file_too_large"]
     if error_code in ("dimensions_too_small", "dimensions_too_large", "pixel_count_too_large"):
-        return _ERROR_SUGGESTIONS["dimension_limit"]
+        return (
+            "尺寸超限",
+            msg or _ERROR_SUGGESTIONS["dimension_limit"][1],
+            "请按提示调整图片尺寸后重试。",
+        )
     if error_code in ("output_directory_missing", "output_disk_full", "output_unavailable", "output_permission_denied"):
         return _ERROR_SUGGESTIONS["export_error"]
 

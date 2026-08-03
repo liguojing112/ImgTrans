@@ -48,6 +48,15 @@ class OcrRegionItem(QGraphicsItem):
     def text_region(self) -> TextRegion:
         return self._region
 
+    def update_region(self, region: TextRegion) -> None:
+        """Refresh displayed OCR text/geometry without recreating selection."""
+        if region.region_id != self._region.region_id:
+            return
+        self.prepareGeometryChange()
+        self._region = region
+        self.setToolTip(region.text)
+        self.update()
+
     @property
     def is_low_confidence(self) -> bool:
         return self._region.status is TextRegionStatus.LOW_CONFIDENCE

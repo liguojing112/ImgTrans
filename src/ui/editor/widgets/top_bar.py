@@ -5,13 +5,14 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QTimer, Qt, Signal
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QApplication,
     QFrame,
     QHBoxLayout,
     QLabel,
+    QMenu,
     QStyle,
     QToolButton,
 )
@@ -23,15 +24,21 @@ class TopBar(QFrame):
     """顶部操作栏。"""
 
     import_requested = Signal()
+    batch_requested = Signal()
     ocr_requested = Signal()
     translate_requested = Signal()
     toggle_original_requested = Signal()
+    split_compare_requested = Signal()
+    slider_compare_requested = Signal()
+    compare_hold_started = Signal()
+    compare_hold_finished = Signal()
     toggle_layers_requested = Signal()
     undo_requested = Signal()
     redo_requested = Signal()
     zoom_in_requested = Signal()
     zoom_out_requested = Signal()
     fit_requested = Signal()
+    save_requested = Signal()
     export_requested = Signal()
     back_requested = Signal()
 
@@ -64,24 +71,31 @@ class TopBar(QFrame):
 
         # 3. 导入
         self.import_btn = _make_tool_button(
-            QStyle.StandardPixmap.SP_DialogOpenButton, "导入图片 (Ctrl+O)"
+            QStyle.StandardPixmap.SP_DialogOpenButton, "导入图片 (Ctrl+O)", "导入"
         )
         self.import_btn.clicked.connect(self.import_requested.emit)
 
         layout.addWidget(self.import_btn)
+        self.batch_btn = _make_tool_button(
+            QStyle.StandardPixmap.SP_FileDialogListView,
+            "批量导入、处理和选择性导出",
+            "批量",
+        )
+        self.batch_btn.clicked.connect(self.batch_requested.emit)
+        layout.addWidget(self.batch_btn)
 
         # 分隔
         layout.addWidget(_separator())
 
         # 4. OCR
         self.ocr_btn = _make_tool_button(
-            QStyle.StandardPixmap.SP_FileDialogContentsView, "OCR 文字识别"
+            QStyle.StandardPixmap.SP_FileDialogContentsView, "OCR 文字识别", "OCR"
         )
         self.ocr_btn.clicked.connect(self.ocr_requested.emit)
 
         # 5. 一键翻译
         self.translate_btn = _make_tool_button(
-            QStyle.StandardPixmap.SP_MediaPlay, "一键翻译"
+            QStyle.StandardPixmap.SP_MediaPlay, "开始翻译", "开始翻译"
         )
         self.translate_btn.clicked.connect(self.translate_requested.emit)
 
@@ -91,12 +105,36 @@ class TopBar(QFrame):
         # 分隔
         layout.addWidget(_separator())
 
-        # 6. 预览切换（3 态循环）
+        # 6. 原图/译图单视图切换，下拉菜单保留分屏
         self.toggle_original_btn = _make_tool_button(
-            QStyle.StandardPixmap.SP_BrowserReload, "预览：译图"  # updated by set_preview_mode
+            QStyle.StandardPixmap.SP_TitleBarContextHelpButton,
+            "单击切换原图/译图；长按临时查看原图；菜单可选择更多对比方式",
+            "对比",
         )
-        self.toggle_original_btn.setCheckable(False)
-        self.toggle_original_btn.clicked.connect(self.toggle_original_requested.emit)
+        self.toggle_original_btn.setCheckable(True)
+        self.toggle_original_btn.setChecked(False)
+        self._compare_hold_active = False
+        self._suppress_compare_click = False
+        self._compare_checked_before_hold = False
+        self._compare_hold_timer = QTimer(self)
+        self._compare_hold_timer.setSingleShot(True)
+        self._compare_hold_timer.setInterval(350)
+        self._compare_hold_timer.timeout.connect(self._begin_compare_hold)
+        self.toggle_original_btn.pressed.connect(self._start_compare_hold)
+        self.toggle_original_btn.released.connect(self._finish_compare_hold)
+        self.toggle_original_btn.clicked.connect(self._on_compare_clicked)
+        comparison_menu = QMenu(self.toggle_original_btn)
+        split_action = comparison_menu.addAction("左右分屏对比")
+        split_action.triggered.connect(self.split_compare_requested.emit)
+        self._slider_compare_action = comparison_menu.addAction("滑块拖动对比")
+        self._slider_compare_action.setCheckable(True)
+        self._slider_compare_action.triggered.connect(
+            self.slider_compare_requested.emit
+        )
+        self.toggle_original_btn.setMenu(comparison_menu)
+        self.toggle_original_btn.setPopupMode(
+            QToolButton.ToolButtonPopupMode.MenuButtonPopup
+        )
 
         # 7. 显示/隐藏文字图层
         self.toggle_layers_btn = _make_tool_button(
@@ -164,9 +202,18 @@ class TopBar(QFrame):
         # 分隔
         layout.addWidget(_separator())
 
-        # 14. 导出
+        # 14. 保存当前成品图
+        self.save_btn = _make_tool_button(
+            QStyle.StandardPixmap.SP_DialogSaveButton,
+            "保存当前译图 (Ctrl+Shift+S)",
+            "保存",
+        )
+        self.save_btn.clicked.connect(self.save_requested.emit)
+        layout.addWidget(self.save_btn)
+
+        # 15. 导出
         self.export_btn = _make_tool_button(
-            QStyle.StandardPixmap.SP_DialogSaveButton, "导出图片 (Ctrl+S)"
+            QStyle.StandardPixmap.SP_DialogSaveButton, "导出图片 (Ctrl+S)", "导出"
         )
         self.export_btn.clicked.connect(self.export_requested.emit)
 
@@ -185,6 +232,7 @@ class TopBar(QFrame):
         self.zoom_label.setText(f"{percent}%")
 
     def set_has_image(self, has: bool) -> None:
+        self._has_image = has
         """有图片时启用 OCR / 翻译 / 缩放按钮。"""
         self.import_btn.setEnabled(not self._translating)
         self.ocr_btn.setEnabled(has and not self._translating)
@@ -194,9 +242,17 @@ class TopBar(QFrame):
         self.fit_btn.setEnabled(has)
 
     def set_has_result(self, has: bool) -> None:
-        """有翻译结果时启用原图切换 / 导出。"""
+        """有翻译结果时启用分屏对比 / 导出。"""
         self.toggle_original_btn.setEnabled(has)
+        self.save_btn.setEnabled(has)
         self.export_btn.setEnabled(has)
+        if not has:
+            self.toggle_original_btn.setChecked(False)
+
+    def set_export_available(self, available: bool) -> None:
+        """允许在没有翻译结果时导出已导入/OCR-only 的原图。"""
+        self.save_btn.setEnabled(available)
+        self.export_btn.setEnabled(available)
 
     def set_has_layers(self, has: bool) -> None:
         """有文字图层时启用图层切换按钮。"""
@@ -225,10 +281,42 @@ class TopBar(QFrame):
         self.toggle_original_btn.setChecked(showing)
 
     def set_preview_mode(self, mode: str) -> None:
-        labels = {"original": "原图", "translated": "译图", "layers": "译图+图层"}
-        label = labels.get(mode, mode)
-        self.toggle_original_btn.setToolTip(f"预览：{label}")
         self._preview_mode = mode
+
+    def set_split_view(self, enabled: bool) -> None:
+        self.toggle_original_btn.setToolTip(
+            "单击切换原图/译图；长按临时查看原图；当前已启用左右分屏"
+            if enabled
+            else "单击切换原图/译图；长按临时查看原图；菜单可选择更多对比方式"
+        )
+
+    def set_slider_compare(self, enabled: bool) -> None:
+        self._slider_compare_action.setChecked(enabled)
+
+    def _start_compare_hold(self) -> None:
+        self._compare_hold_active = False
+        self._compare_checked_before_hold = self.toggle_original_btn.isChecked()
+        self._compare_hold_timer.start()
+
+    def _begin_compare_hold(self) -> None:
+        self._compare_hold_active = True
+        self._suppress_compare_click = True
+        self.compare_hold_started.emit()
+
+    def _finish_compare_hold(self) -> None:
+        self._compare_hold_timer.stop()
+        if self._compare_hold_active:
+            self._compare_hold_active = False
+            self.compare_hold_finished.emit()
+
+    def _on_compare_clicked(self) -> None:
+        if self._suppress_compare_click:
+            self._suppress_compare_click = False
+            self.toggle_original_btn.setChecked(
+                self._compare_checked_before_hold
+            )
+            return
+        self.toggle_original_requested.emit()
 
     def _reset_state(self) -> None:
         self._translating = False
@@ -245,18 +333,27 @@ class TopBar(QFrame):
         self.zoom_out_btn.setEnabled(False)
         self.fit_btn.setEnabled(False)
         self.export_btn.setEnabled(False)
+        self.save_btn.setEnabled(False)
 
 
-def _make_tool_button(pixmap: QStyle.StandardPixmap, tooltip: str) -> QToolButton:
+def _make_tool_button(
+    pixmap: QStyle.StandardPixmap,
+    tooltip: str,
+    text: str = "",
+) -> QToolButton:
     btn = QToolButton()
     btn.setIcon(standard_icon(pixmap))
     btn.setToolTip(tooltip)
+    if text:
+        btn.setText(text)
+        btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
     btn.setAutoRaise(True)
     btn.setIconSize(btn.iconSize())
     btn.setStyleSheet(
         "QToolButton { border: none; border-radius: 4px; padding: 4px; }"
         "QToolButton:hover { background: #363650; }"
-        "QToolButton:checked { background: #3973db; }"
+        "QToolButton:checked { background: qlineargradient(x1:0, y1:0, x2:0, y2:1,"
+        "  stop:0 #4a8af4, stop:1 #3973db); border: 1px solid #5a9af4; }"
         "QToolButton:disabled { color: #686878; }"
     )
     return btn

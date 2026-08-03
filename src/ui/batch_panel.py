@@ -4,12 +4,16 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
+    QFileDialog,
     QFrame,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QProgressBar,
     QPushButton,
+    QSpinBox,
     QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
@@ -38,11 +42,17 @@ _STAGE_LABELS = {
 
 class BatchPanel(QFrame):
     add_requested = Signal()
+    add_folder_requested = Signal()
+    remove_requested = Signal()
+    retry_failed_requested = Signal()
     clear_requested = Signal()
     start_requested = Signal()
+    pause_requested = Signal()
+    resume_requested = Signal()
     cancel_requested = Signal()
     export_requested = Signal()
     preview_requested = Signal(str)
+    send_to_editor_requested = Signal()
 
     def __init__(self) -> None:
         super().__init__()
@@ -51,6 +61,8 @@ class BatchPanel(QFrame):
         self._snapshot: BatchSnapshot | None = None
         self._known_completed: set[str] = set()
         self._interactive = False
+        self._scheduler_available = False
+        self._running = False
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(8)
@@ -67,11 +79,17 @@ class BatchPanel(QFrame):
         source_actions = QHBoxLayout()
         self.add_button = QPushButton("添加图片")
         self.add_button.setObjectName("addBatchImagesButton")
+        self.add_folder_button = QPushButton("添加文件夹")
+        self.remove_button = QPushButton("删除选中")
         self.clear_button = QPushButton("清空")
         self.clear_button.setObjectName("clearBatchButton")
         self.add_button.clicked.connect(self.add_requested.emit)
+        self.add_folder_button.clicked.connect(self.add_folder_requested.emit)
+        self.remove_button.clicked.connect(self.remove_requested.emit)
         self.clear_button.clicked.connect(self.clear_requested.emit)
         source_actions.addWidget(self.add_button)
+        source_actions.addWidget(self.add_folder_button)
+        source_actions.addWidget(self.remove_button)
         source_actions.addWidget(self.clear_button)
         layout.addLayout(source_actions)
 
@@ -81,6 +99,7 @@ class BatchPanel(QFrame):
         self.items.setHeaderLabels(["导出 / 图片", "状态", "阶段", "错误"])
         self.items.setRootIsDecorated(False)
         self.items.setAlternatingRowColors(True)
+        self.items.setSelectionMode(QTreeWidget.SelectionMode.ExtendedSelection)
         self.items.header().resizeSection(0, 170)
         self.items.header().resizeSection(1, 58)
         self.items.header().resizeSection(2, 54)
@@ -105,8 +124,21 @@ class BatchPanel(QFrame):
         self.start_button.clicked.connect(self.start_requested.emit)
         self.cancel_button.clicked.connect(self.cancel_requested.emit)
         self.cancel_button.setEnabled(False)
+        self.pause_button = QPushButton("暂停")
+        self.pause_button.setObjectName("pauseBatchButton")
+        self.pause_button.clicked.connect(self._toggle_pause)
+        self.pause_button.setEnabled(False)
+        self.retry_button = QPushButton("重试失败项")
+        self.retry_button.clicked.connect(self.retry_failed_requested.emit)
         run_actions.addWidget(self.start_button)
+        run_actions.addWidget(self.pause_button)
         run_actions.addWidget(self.cancel_button)
+        run_actions.addWidget(self.retry_button)
+        # 发送到工作台编辑
+        self.send_to_editor_button = QPushButton("发送到工作台编辑")
+        self.send_to_editor_button.setToolTip("将面板中的图片送入编辑器工作台，可逐张编辑（无需先翻译）")
+        self.send_to_editor_button.clicked.connect(self.send_to_editor_requested.emit)
+        run_actions.addWidget(self.send_to_editor_button)
         layout.addLayout(run_actions)
 
         export_actions = QHBoxLayout()
@@ -124,10 +156,92 @@ class BatchPanel(QFrame):
         self.export_button = QPushButton("导出勾选项")
         self.export_button.setObjectName("exportBatchButton")
         self.export_button.clicked.connect(self.export_requested.emit)
+        self.export_now_button = QPushButton("导出")
+        self.export_now_button.setObjectName("exportBatchNowButton")
+        self.export_now_button.setToolTip("选择导出目录并导出当前勾选的成功图片")
+        self.export_now_button.clicked.connect(self.export_requested.emit)
         export_actions.addWidget(self.select_success_button)
         export_actions.addWidget(self.output_format)
         export_actions.addWidget(self.export_button)
+        export_actions.addWidget(self.export_now_button)
         layout.addLayout(export_actions)
+        folder_options = QHBoxLayout()
+        self.separate_subdirectory = QCheckBox("导出到独立子目录")
+        self.separate_subdirectory.setChecked(True)
+        self.subdirectory_name = QLineEdit()
+        self.subdirectory_name.setPlaceholderText("留空则按当前批次自动命名")
+        self.separate_subdirectory.toggled.connect(
+            self.subdirectory_name.setEnabled
+        )
+        folder_options.addWidget(self.separate_subdirectory)
+        folder_options.addWidget(self.subdirectory_name, stretch=1)
+        layout.addLayout(folder_options)
+        compression = QHBoxLayout()
+        compression.addWidget(QLabel("压缩"))
+        self.resize_mode = QComboBox()
+        self.resize_mode.addItem("保持原尺寸", "original")
+        self.resize_mode.addItem("按比例缩小", "percent")
+        self.resize_mode.addItem("限制最长边", "max_edge")
+        self.resize_value = QSpinBox()
+        self.resize_value.setRange(10, 100)
+        self.resize_value.setValue(100)
+        self.resize_value.setSuffix("%")
+        self.resize_mode.currentIndexChanged.connect(
+            self._sync_resize_control
+        )
+        self.quality = QSpinBox()
+        self.quality.setRange(1, 100)
+        self.quality.setValue(90)
+        self.quality.setSuffix("%")
+        compression.addWidget(self.resize_mode)
+        compression.addWidget(self.resize_value)
+        compression.addWidget(QLabel("质量"))
+        compression.addWidget(self.quality)
+        layout.addLayout(compression)
+
+        watermark = QHBoxLayout()
+        self.watermark_enabled = QCheckBox("批量水印")
+        self.watermark_kind = QComboBox()
+        self.watermark_kind.addItem("文字", "text")
+        self.watermark_kind.addItem("图片", "image")
+        self.watermark_value = QLineEdit()
+        self.watermark_value.setPlaceholderText("水印文字")
+        self.watermark_image_button = QPushButton("选择图片")
+        self.watermark_image_button.clicked.connect(
+            self._choose_watermark_image
+        )
+        self.watermark_opacity = QSpinBox()
+        self.watermark_opacity.setRange(1, 100)
+        self.watermark_opacity.setValue(55)
+        self.watermark_opacity.setSuffix("%")
+        self.watermark_tiled = QCheckBox("平铺")
+        self.watermark_position = QComboBox()
+        for label, value in (
+            ("左上", "top_left"),
+            ("上中", "top_center"),
+            ("右上", "top_right"),
+            ("左中", "middle_left"),
+            ("居中", "center"),
+            ("右中", "middle_right"),
+            ("左下", "bottom_left"),
+            ("下中", "bottom_center"),
+            ("右下", "bottom_right"),
+        ):
+            self.watermark_position.addItem(label, value)
+        self.watermark_position.setCurrentIndex(4)
+        self.watermark_kind.currentIndexChanged.connect(
+            self._sync_watermark_control
+        )
+        watermark.addWidget(self.watermark_enabled)
+        watermark.addWidget(self.watermark_kind)
+        watermark.addWidget(self.watermark_value, stretch=1)
+        watermark.addWidget(self.watermark_image_button)
+        watermark.addWidget(self.watermark_opacity)
+        watermark.addWidget(self.watermark_tiled)
+        watermark.addWidget(self.watermark_position)
+        layout.addLayout(watermark)
+        self._sync_resize_control()
+        self._sync_watermark_control()
         self.set_available(False, False)
 
     @property
@@ -152,6 +266,56 @@ class BatchPanel(QFrame):
     def selected_output_suffix(self) -> str:
         return str(self.output_format.currentData())
 
+    @property
+    def batch_export_config(self) -> dict[str, object]:
+        return {
+            "quality": self.quality.value(),
+            "resize_mode": str(self.resize_mode.currentData()),
+            "resize_value": self.resize_value.value(),
+            "watermark_enabled": self.watermark_enabled.isChecked(),
+            "watermark_kind": str(self.watermark_kind.currentData()),
+            "watermark_value": self.watermark_value.text().strip(),
+            "watermark_opacity": self.watermark_opacity.value() / 100,
+            "watermark_tiled": self.watermark_tiled.isChecked(),
+            "watermark_position": str(self.watermark_position.currentData()),
+            "separate_subdirectory": self.separate_subdirectory.isChecked(),
+            "subdirectory_name": self.subdirectory_name.text().strip(),
+        }
+
+    @property
+    def failed_sources(self) -> tuple[Path, ...]:
+        if self._snapshot is None:
+            return ()
+        return tuple(
+            item.source
+            for item in self._snapshot.items
+            if item.status is BatchItemStatus.FAILED
+        )
+
+    @property
+    def succeeded_sources(self) -> tuple[Path, ...]:
+        """返回勾选的成功项源文件（用于发送到工作台）。"""
+        if self._snapshot is None:
+            return ()
+        selected = set(self.selected_result_ids)
+        return tuple(
+            item.source
+            for item in self._snapshot.items
+            if item.status is BatchItemStatus.COMPLETED
+            and item.item_id in selected
+        )
+
+    @property
+    def all_succeeded_sources(self) -> tuple[Path, ...]:
+        """返回全部成功项源文件（不要求勾选）。"""
+        if self._snapshot is None:
+            return ()
+        return tuple(
+            item.source
+            for item in self._snapshot.items
+            if item.status is BatchItemStatus.COMPLETED
+        )
+
     def add_sources(self, sources: tuple[Path, ...]) -> None:
         existing = {source.resolve() for source in self._sources}
         for source in sources:
@@ -163,6 +327,7 @@ class BatchPanel(QFrame):
         self._known_completed.clear()
         self._render_sources()
         self.status_label.setText(f"已添加 {len(self._sources)} 张图片")
+        self.set_available(self._scheduler_available, self._running)
 
     def set_snapshot(self, snapshot: BatchSnapshot) -> None:
         checked = set(self.selected_result_ids)
@@ -182,19 +347,48 @@ class BatchPanel(QFrame):
                 )
                 self._known_completed.add(batch_item.item_id)
         self.progress.setValue(round(snapshot.progress * 100))
+        paused = snapshot.status in {
+            BatchStatus.PAUSING,
+            BatchStatus.PAUSED,
+        }
+        self.pause_button.setText("恢复" if paused else "暂停")
+        self.pause_button.setEnabled(
+            snapshot.status
+            in {BatchStatus.RUNNING, BatchStatus.PAUSING, BatchStatus.PAUSED}
+        )
         self.status_label.setText(
-            f"完成 {snapshot.completed_count} · 失败 {snapshot.failed_count} · "
-            f"取消 {snapshot.cancelled_count} · 共 {len(snapshot.items)} 张"
+            (
+                "正在等待当前图片完成后暂停 · "
+                if snapshot.status is BatchStatus.PAUSING
+                else "批次已暂停 · "
+                if snapshot.status is BatchStatus.PAUSED
+                else ""
+            )
+            + f"完成 {snapshot.completed_count} · 失败 {snapshot.failed_count} · "
+            + f"取消 {snapshot.cancelled_count} · 共 {len(snapshot.items)} 张"
         )
 
     def set_available(self, scheduler_available: bool, running: bool) -> None:
+        self._scheduler_available = scheduler_available
+        self._running = running
         self._interactive = scheduler_available and not running
         self.add_button.setEnabled(scheduler_available and not running)
+        self.add_folder_button.setEnabled(scheduler_available and not running)
+        self.remove_button.setEnabled(
+            scheduler_available and bool(self._sources) and not running
+        )
         self.clear_button.setEnabled(bool(self._sources) and not running)
         self.start_button.setEnabled(
             scheduler_available and bool(self._sources) and not running
         )
         self.cancel_button.setEnabled(scheduler_available and running)
+        if not running:
+            self.pause_button.setEnabled(False)
+        self.retry_button.setEnabled(
+            scheduler_available
+            and not running
+            and bool(self.failed_sources)
+        )
         has_success = self._snapshot is not None and self._snapshot.completed_count > 0
         self.select_success_button.setEnabled(has_success and not running)
         self.output_format.setEnabled(has_success and not running)
@@ -204,6 +398,16 @@ class BatchPanel(QFrame):
             and bool(self.selected_result_ids)
             and not running
         )
+        self.export_now_button.setEnabled(
+            scheduler_available
+            and has_success
+            and bool(self.selected_result_ids)
+            and not running
+        )
+
+    def set_error(self, message: str) -> None:
+        self.pause_button.setEnabled(False)
+        self.status_label.setText(f"批量处理未启动：{message}")
 
     def select_all_successful(self) -> None:
         if self._snapshot is None:
@@ -218,6 +422,7 @@ class BatchPanel(QFrame):
             if row.data(0, Qt.ItemDataRole.UserRole) in successful:
                 row.setCheckState(0, Qt.CheckState.Checked)
         self.export_button.setEnabled(bool(successful))
+        self.export_now_button.setEnabled(bool(successful))
 
     def clear_batch(self) -> None:
         self._sources.clear()
@@ -226,11 +431,77 @@ class BatchPanel(QFrame):
         self.items.clear()
         self.progress.setValue(0)
         self.status_label.setText("添加多张图片后开始批量翻译")
+        self.pause_button.setText("暂停")
+        self.pause_button.setEnabled(False)
+        self.set_available(self._scheduler_available, self._running)
+
+    def _toggle_pause(self) -> None:
+        if self._snapshot is not None and self._snapshot.status in {
+            BatchStatus.PAUSING,
+            BatchStatus.PAUSED,
+        }:
+            self.resume_requested.emit()
+        else:
+            self.pause_requested.emit()
+
+    def _sync_resize_control(self) -> None:
+        mode = str(self.resize_mode.currentData())
+        self.resize_value.setEnabled(mode != "original")
+        if mode == "percent":
+            self.resize_value.setRange(10, 100)
+            self.resize_value.setSuffix("%")
+            self.resize_value.setValue(min(100, self.resize_value.value()))
+        elif mode == "max_edge":
+            previous_maximum = self.resize_value.maximum()
+            self.resize_value.setRange(64, 16000)
+            self.resize_value.setSuffix(" px")
+            if previous_maximum <= 100 or self.resize_value.value() < 64:
+                self.resize_value.setValue(1920)
+
+    def _sync_watermark_control(self) -> None:
+        is_image = str(self.watermark_kind.currentData()) == "image"
+        self.watermark_image_button.setVisible(is_image)
+        self.watermark_value.setPlaceholderText(
+            "水印图片路径" if is_image else "水印文字"
+        )
+
+    def _choose_watermark_image(self) -> None:
+        value, _ = QFileDialog.getOpenFileName(
+            self,
+            "选择水印图片",
+            "",
+            "图片 (*.png *.jpg *.jpeg *.webp *.bmp)",
+        )
+        if value:
+            self.watermark_value.setText(value)
+
+    def remove_selected_sources(self) -> None:
+        if self._snapshot is not None:
+            return
+        selected = {
+            Path(str(item.data(0, Qt.ItemDataRole.UserRole + 1))).resolve()
+            for item in self.items.selectedItems()
+            if item.data(0, Qt.ItemDataRole.UserRole + 1)
+        }
+        if not selected:
+            return
+        self._sources = [
+            source for source in self._sources if source.resolve() not in selected
+        ]
+        self._render_sources()
+        self.status_label.setText(f"已添加 {len(self._sources)} 张图片")
+        self.set_available(self._scheduler_available, self._running)
+
+    def replace_sources(self, sources: tuple[Path, ...]) -> None:
+        self.clear_batch()
+        self.add_sources(sources)
 
     def _render_sources(self) -> None:
         self.items.clear()
         for source in self._sources:
-            self.items.addTopLevelItem(QTreeWidgetItem([source.name, "等待", "", ""]))
+            item = QTreeWidgetItem([source.name, "等待", "", ""])
+            item.setData(0, Qt.ItemDataRole.UserRole + 1, str(source))
+            self.items.addTopLevelItem(item)
         self.progress.setValue(0)
 
     def _snapshot_row(self, item: BatchItemSnapshot) -> QTreeWidgetItem:
@@ -265,5 +536,8 @@ class BatchPanel(QFrame):
             and self._snapshot.status is not BatchStatus.RUNNING
         )
         self.export_button.setEnabled(
+            self._interactive and finished and bool(self.selected_result_ids)
+        )
+        self.export_now_button.setEnabled(
             self._interactive and finished and bool(self.selected_result_ids)
         )
