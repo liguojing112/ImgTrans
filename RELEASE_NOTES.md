@@ -36,3 +36,13 @@
 - More advanced automatic artistic typography reconstruction.
 - Shared multi-instance backend rate limiting.
 - Payment, order and automatic activation-code issuance.
+
+## Desktop editor completion
+
+- Added a complete manual-region confirmation flow with separate OCR, erase and text geometry.
+- Added mask-based local AI erase with rectangle, brush, eraser, preview and exact outside-mask preservation.
+- Added undoable crop with text/path/watermark coordinate transformation.
+- Added text and image watermarks, tiling, opacity, visibility, locking, duplication and same-type ordering.
+- Added unified background/text/repair/watermark layer state and export quality/alpha/background options.
+- Removed matting from the confirmed product scope. Watermark removal is not included.
+- Automated suite after editor completion: 551 tests passed.
