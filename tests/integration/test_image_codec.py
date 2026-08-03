@@ -4,7 +4,12 @@ from PIL import Image, features
 import pytest
 
 from src.application.image_io import ExportImage
-from src.domain.image import ImageFileFormat, ImageLimits, ImageValidationError
+from src.domain.image import (
+    ExportOptions,
+    ImageFileFormat,
+    ImageLimits,
+    ImageValidationError,
+)
 from src.infrastructure.pillow_image_codec import PillowImageCodec
 
 
@@ -59,6 +64,20 @@ def test_input_webp_is_supported(tmp_path: Path) -> None:
     assert (document.asset.width, document.asset.height) == (96, 72)
 
 
+def test_input_bmp_is_formally_supported_and_content_checked(tmp_path: Path) -> None:
+    source = tmp_path / "input.bmp"
+    Image.new("RGB", (96, 72), "purple").save(source, format="BMP")
+    document = PillowImageCodec().load(source, ImageLimits())
+    assert document.asset.file_format is ImageFileFormat.BMP
+    assert (document.asset.width, document.asset.height) == (96, 72)
+
+    fake = tmp_path / "fake.bmp"
+    Image.new("RGB", (96, 72), "purple").save(fake, format="PNG")
+    with pytest.raises(ImageValidationError) as error:
+        PillowImageCodec().load(fake, ImageLimits())
+    assert error.value.code == "extension_content_mismatch"
+
+
 @pytest.mark.skipif(not features.check("webp"), reason="Pillow WebP codec unavailable")
 def test_export_all_five_formats_as_single_images(tmp_path: Path) -> None:
     source = tmp_path / "alpha.png"
@@ -101,3 +120,41 @@ def test_export_refuses_to_overwrite_imported_source(tmp_path: Path) -> None:
     with pytest.raises(ImageValidationError) as error:
         ExportImage(codec).execute(document, source)
     assert error.value.code == "source_overwrite"
+
+
+def test_export_options_control_quality_alpha_and_background(tmp_path: Path) -> None:
+    source = tmp_path / "alpha-options.png"
+    Image.new("RGBA", (80, 80), (200, 30, 40, 0)).save(source)
+    codec = PillowImageCodec()
+    document = codec.load(source, ImageLimits())
+    options = ExportOptions(
+        quality=72,
+        preserve_alpha=False,
+        background_rgb=(12, 34, 56),
+    )
+    png = tmp_path / "flattened.png"
+    jpg = tmp_path / "flattened.jpg"
+    ExportImage(codec).execute(document, png, options)
+    ExportImage(codec).execute(document, jpg, options)
+    with Image.open(png) as opened:
+        assert opened.mode == "RGB"
+        assert opened.getpixel((0, 0)) == (12, 34, 56)
+    with Image.open(jpg) as opened:
+        color = opened.convert("RGB").getpixel((0, 0))
+        assert all(abs(actual - expected) < 8 for actual, expected in zip(color, (12, 34, 56)))
+
+
+def test_export_options_resize_output_without_changing_document(tmp_path: Path) -> None:
+    source = tmp_path / "resize-source.png"
+    Image.new("RGB", (120, 80), "navy").save(source)
+    codec = PillowImageCodec()
+    document = codec.load(source, ImageLimits())
+    target = tmp_path / "resized.png"
+    ExportImage(codec).execute(
+        document,
+        target,
+        ExportOptions(output_width=60, output_height=40),
+    )
+    with Image.open(target) as opened:
+        assert opened.size == (60, 40)
+    assert (document.asset.width, document.asset.height) == (120, 80)

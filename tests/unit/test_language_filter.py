@@ -173,6 +173,22 @@ def test_all_low_confidence_regions_skip_adapter_and_manual_override_translates(
     ]
 
 
+def test_disabled_number_protection_sends_pure_number_to_adapter() -> None:
+    adapter = _RecordingAdapter()
+    result = TranslateRegions(adapter, ProtectionEngine()).execute(
+        OcrResult(
+            (_region("number", "2026", "en", 0, 0.99),),
+            "en",
+            "fixture-model",
+            1,
+        ),
+        TranslationSelection(TranslationMode.ALL, "zh-Hans"),
+        preserve_numbers=False,
+    )
+    assert result.units[0].status is TranslationStatus.TRANSLATED
+    assert adapter.calls == [(("2026",), None, "zh-Hans")]
+
+
 def test_unconfirmed_enhanced_region_never_calls_adapter_until_manual_confirmation() -> None:
     adapter = _RecordingAdapter()
     use_case = TranslateRegions(adapter, ProtectionEngine())

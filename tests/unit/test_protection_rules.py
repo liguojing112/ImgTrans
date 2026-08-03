@@ -118,3 +118,17 @@ def test_short_or_embedded_brand_fragment_is_not_guessed() -> None:
     engine = ProtectionEngine()
     assert not engine.protect("森", ("杰克森轴心",)).spans
     assert not engine.protect("new AXIS product", ("JACKSON AXIS",)).spans
+
+
+def test_number_protection_can_be_disabled_without_disabling_other_rules() -> None:
+    value = ProtectionEngine().protect(
+        "ACME X100 SKU-AB12 https://example.com 25%",
+        ("ACME",),
+        preserve_numbers=False,
+    )
+    protected = {(span.kind, span.text) for span in value.spans}
+    assert (ProtectionKind.NUMBER, "25%") not in protected
+    assert (ProtectionKind.BRAND, "ACME") in protected
+    assert (ProtectionKind.MODEL, "X100") in protected
+    assert (ProtectionKind.SKU, "SKU-AB12") in protected
+    assert (ProtectionKind.URL, "https://example.com") in protected

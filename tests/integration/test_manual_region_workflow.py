@@ -11,7 +11,7 @@ from src.application.ocr import RecognizeText
 from src.application.translation import TranslateRegions
 from src.domain.image import ImageAsset, ImageDocument, ImageFileFormat
 from src.domain.inpainting import InpaintingRequest, InpaintingResult
-from src.domain.layout import TextBox
+from src.domain.layout import CircularTextPath, PathPoint, TextBox
 from src.domain.manual_region import ManualInputMode, ManualRegionSpec
 from src.domain.ocr import OcrResult, TextRegion, order_quad
 from src.domain.protection import ProtectionEngine
@@ -30,7 +30,7 @@ from src.infrastructure.text_renderer import QtBasicTextLayoutAdapter
 class _FixtureOcr:
     language_codes = ("en",)
 
-    def recognize(self, document: ImageDocument, language_code: str) -> OcrResult:
+    def recognize(self, document: ImageDocument, language_code: str, fast: bool = False) -> OcrResult:
         region = TextRegion(
             "crop-1",
             order_quad(((1, 1), (30, 1), (30, 12), (1, 12))),
@@ -135,6 +135,41 @@ def test_direct_source_and_translated_modes_skip_the_expected_steps() -> None:
     assert direct.source_text == ""
     assert direct.translated_text == "人工译文"
     assert direct.layer.text == "人工译文"
+
+
+def test_short_cjk_manual_translation_uses_clear_tangent_text() -> None:
+    QApplication.instance() or QApplication(["manual-circular-font-height-test"])
+    document = _document()
+    box = TextBox(60, 30, 70, 20, 32)
+    path = CircularTextPath(
+        PathPoint(60, 80),
+        50,
+        -125,
+        -45,
+    )
+    result = _processor().execute(
+        document,
+        document,
+        ManualRegionSpec(
+            ManualInputMode.SOURCE_TEXT,
+            box,
+            box,
+            box,
+            source_text="SALE",
+            circular_path=path,
+        ),
+        "en",
+        TranslationSelection(TranslationMode.ALL, "zh-Hans"),
+    )
+
+    assert result.layer.path is None
+    assert result.layer.box.center_x == box.center_x
+    assert result.layer.box.center_y == box.center_y
+    assert result.layer.box.width == box.width
+    assert result.layer.box.height == pytest.approx(21.5)
+    assert result.layer.box.rotation_degrees == box.rotation_degrees
+    assert 16.0 < result.layer.style.font_size <= 17.0
+    assert not result.layer.overflow
 
 
 def test_manual_source_translation_uses_current_brand_terms() -> None:

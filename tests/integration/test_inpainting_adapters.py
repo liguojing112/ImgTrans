@@ -67,6 +67,15 @@ class _SolidSession:
         return [np.full((1, 3, 512, 512), 7, dtype=np.float32)]
 
 
+class _MaskCapturingSession(_SolidSession):
+    def __init__(self) -> None:
+        self.mask: np.ndarray | None = None
+
+    def run(self, outputs: object, inputs: object) -> list[np.ndarray]:
+        self.mask = inputs["mask"].copy()
+        return super().run(outputs, inputs)
+
+
 def test_lama_contract_verifies_model_and_composites_exact_mask(tmp_path: Path) -> None:
     model = tmp_path / "model.onnx"
     model.write_bytes(b"contract-model")
@@ -84,6 +93,33 @@ def test_lama_contract_verifies_model_and_composites_exact_mask(tmp_path: Path) 
     assert np.array_equal(output[~mask], source[~mask])
     assert np.all(output[mask] == 7)
     assert result.backend_id == "lama-onnxruntime"
+
+
+def test_lama_binarizes_antialiased_mask_before_inference(tmp_path: Path) -> None:
+    model = tmp_path / "model.onnx"
+    model.write_bytes(b"contract-model")
+    expected = hashlib.sha256(model.read_bytes()).hexdigest()
+    session = _MaskCapturingSession()
+    adapter = LamaOnnxAdapter(
+        model,
+        expected,
+        session_factory=lambda path, threads: session,
+    )
+    base = _request("RGB")
+    mask = np.frombuffer(base.erase_mask.pixels, dtype=np.uint8).reshape(40, 48).copy()
+    mask[11, 15] = 1
+    mask[11, 16] = 127
+    request = InpaintingRequest(
+        base.document,
+        EraseMask(48, 40, mask.tobytes()),
+        base.context_pixels,
+    )
+
+    adapter.inpaint(request)
+
+    assert session.mask is not None
+    assert set(np.unique(session.mask)) <= {0.0, 1.0}
+    assert np.any(session.mask == 1.0)
 
 
 class _UnavailableAdapter:

@@ -7,7 +7,9 @@ from src.domain.composition import (
     DeleteLayerCommand,
     ReplaceLayerCommand,
 )
-from src.domain.layout import TextBox, TextLayer, TextLayout, TextStyle
+from src.application.coordinate_transform import CoordinateTransform
+from src.domain.composition import CropViewport
+from src.domain.layout import PathPoint, TextBox, TextLayer, TextLayout, TextStyle
 
 
 def _layer(region_id: str, text: str) -> TextLayer:
@@ -75,3 +77,17 @@ def test_add_and_delete_commands_round_trip_layer_order() -> None:
     assert session.layout.layers == (second,)
     session.undo()
     assert session.layout.layers == (first, second)
+
+
+def test_coordinate_transform_round_trips_original_canvas_and_view() -> None:
+    transform = CoordinateTransform(CropViewport(40, 25, 300, 200), 1.5, 12, 8)
+    original = PathPoint(90, 70)
+    canvas = transform.original_to_canvas(original)
+    assert canvas == PathPoint(50, 45)
+    assert transform.canvas_to_original(canvas) == original
+    view = transform.canvas_to_view(canvas)
+    assert transform.view_to_canvas(view) == canvas
+    box = TextBox(100, 80, 50, 20, 17)
+    assert transform.canvas_box_to_original(
+        transform.original_box_to_canvas(box)
+    ) == box

@@ -36,7 +36,7 @@ from src.infrastructure.text_renderer import QtBasicTextLayoutAdapter, QtTextRen
 class FixtureOcrAdapter:
     language_codes = ("en",)
 
-    def recognize(self, document: ImageDocument, language_code: str) -> OcrResult:
+    def recognize(self, document: ImageDocument, language_code: str, fast: bool = False) -> OcrResult:
         regions = (
             TextRegion(
                 "low",
@@ -248,7 +248,7 @@ def test_workflow_cancels_at_stage_boundary() -> None:
 class AdjacentFixtureOcrAdapter:
     language_codes = ("en",)
 
-    def recognize(self, document: ImageDocument, language_code: str) -> OcrResult:
+    def recognize(self, document: ImageDocument, language_code: str, fast: bool = False) -> OcrResult:
         return OcrResult(
             (
                 TextRegion(
@@ -505,7 +505,7 @@ def test_unconfirmed_high_recall_region_is_not_translated_erased_or_rendered() -
 class OverflowFixtureOcrAdapter:
     language_codes = ("en",)
 
-    def recognize(self, document: ImageDocument, language_code: str) -> OcrResult:
+    def recognize(self, document: ImageDocument, language_code: str, fast: bool = False) -> OcrResult:
         return OcrResult(
             (
                 TextRegion(

@@ -38,7 +38,7 @@ class FixtureOcrAdapter:
     def __init__(self) -> None:
         self.high_recall_options: HighRecallOcrOptions | None = None
 
-    def recognize(self, document: ImageDocument, language_code: str) -> OcrResult:
+    def recognize(self, document: ImageDocument, language_code: str, fast: bool = False) -> OcrResult:
         region = TextRegion(
             "region-0001",
             order_quad(((12, 14), (100, 14), (100, 42), (12, 42))),

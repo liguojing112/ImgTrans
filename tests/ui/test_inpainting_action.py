@@ -35,7 +35,7 @@ class ImmediateTaskRunner:
 class FixtureOcrAdapter:
     language_codes = ("en",)
 
-    def recognize(self, document: ImageDocument, language_code: str) -> OcrResult:
+    def recognize(self, document: ImageDocument, language_code: str, fast: bool = False) -> OcrResult:
         region = TextRegion(
             "region-1",
             order_quad(((20, 20), (100, 20), (100, 50), (20, 50))),

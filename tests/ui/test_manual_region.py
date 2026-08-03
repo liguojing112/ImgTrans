@@ -38,7 +38,7 @@ class _ImmediateTaskRunner:
 class _UnusedOcr:
     language_codes = ("en",)
 
-    def recognize(self, document: ImageDocument, language_code: str) -> OcrResult:
+    def recognize(self, document: ImageDocument, language_code: str, fast: bool = False) -> OcrResult:
         return OcrResult((), language_code, "unused", 0)
 
 

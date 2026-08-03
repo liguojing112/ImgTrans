@@ -33,7 +33,7 @@ class _ImmediateTaskRunner:
 class _UnusedOcr:
     language_codes = ("en",)
 
-    def recognize(self, document, language_code):
+    def recognize(self, document, language_code, fast: bool = False):
         return OcrResult((), language_code, "unused", 0)
 
 
@@ -110,6 +110,34 @@ def test_batch_panel_preserves_selection_and_exposes_failed_status() -> None:
     panel.items.topLevelItem(0).setCheckState(0, Qt.CheckState.Unchecked)
     panel.set_snapshot(snapshot)
     assert panel.selected_result_ids == ()
+
+
+def test_adding_sources_reenables_start_when_scheduler_is_available() -> None:
+    QApplication.instance() or QApplication(["batch-start-enabled-ui"])
+    panel = BatchPanel()
+    try:
+        panel.set_available(True, False)
+        assert not panel.start_button.isEnabled()
+        panel.add_sources((Path("one.png"), Path("two.png")))
+        assert panel.start_button.isEnabled()
+        panel.clear_batch()
+        assert not panel.start_button.isEnabled()
+    finally:
+        panel.close()
+
+
+def test_batch_panel_exposes_a_dedicated_export_button() -> None:
+    QApplication.instance() or QApplication(["batch-export-button-ui"])
+    panel = BatchPanel()
+    try:
+        assert panel.export_button.text() == "导出勾选项"
+        assert panel.export_now_button.text() == "导出"
+        emitted = []
+        panel.export_requested.connect(lambda: emitted.append(True))
+        panel.export_now_button.clicked.emit()
+        assert emitted == [True]
+    finally:
+        panel.close()
 
 
 def test_main_window_runs_previews_and_selectively_exports_batch(tmp_path: Path) -> None:

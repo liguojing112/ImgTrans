@@ -58,10 +58,12 @@ from src.infrastructure.text_renderer import (
     _normalize_repeated_panel_rows,
     _normalize_repeated_vertical_labels,
     _normalize_visual_group_sizes,
+    _render_font_and_horizontal_scale,
     _text_fits,
     _text_flags,
     _text_box_for_translation,
     _bottom_inward_text_angle,
+    _vertical_colored_label_background,
     _vertical_colored_label_foreground,
 )
 from src.platform.fonts import resolve_system_font
@@ -281,6 +283,7 @@ def test_long_arc_translation_uses_two_curved_lines_before_shrinking() -> None:
         reflowed.text,
         _font_for_layer(reflowed),
         reflowed.path,
+        reflowed.style.font_stretch / 100,
     )
 
     assert len(lines) == 2
@@ -306,6 +309,7 @@ def test_spacious_arc_translation_stays_on_one_curve() -> None:
         reflowed.text,
         _font_for_layer(reflowed),
         reflowed.path,
+        reflowed.style.font_stretch / 100,
     ) == (layer.text,)
     assert reflowed.style.font_size >= box.height * 0.2
     assert not reflowed.overflow
@@ -558,6 +562,21 @@ def test_colored_vertical_labels_keep_light_and_dark_source_foregrounds() -> Non
 
     assert min(_vertical_colored_label_foreground(pixels, purple)) >= 240
     assert max(_vertical_colored_label_foreground(pixels, green)) <= 25
+    document = ImageDocument(
+        ImageAsset(
+            Path("vertical-labels.png"),
+            180,
+            110,
+            1,
+            ImageFileFormat.PNG,
+            False,
+            False,
+        ),
+        "RGB",
+        pixels.tobytes(),
+    )
+    assert _vertical_colored_label_background(document, purple) == (126, 61, 151)
+    assert _vertical_colored_label_background(document, green) == (174, 220, 48)
 
 
 def test_repeated_vertical_labels_share_geometry_and_style_without_moving() -> None:
@@ -633,6 +652,35 @@ def test_qfont_uses_text_style_weight() -> None:
     assert layer_font.stretch() <= 100
 
 
+def test_rotated_and_curved_text_use_native_font_stretch_for_rendering() -> None:
+    QApplication.instance() or QApplication(["layout-native-stretch-render-test"])
+    style = TextStyle("Segoe UI", 24, (0, 0, 0), font_stretch=67)
+    box = TextBox(80, 40, 120, 28)
+
+    horizontal_font, horizontal_scale = _render_font_and_horizontal_scale(
+        TextLayer("horizontal", "Readable", box, style)
+    )
+    rotated_font, rotated_scale = _render_font_and_horizontal_scale(
+        TextLayer("rotated", "Readable", replace(box, rotation_degrees=90), style)
+    )
+    curved_font, curved_scale = _render_font_and_horizontal_scale(
+        TextLayer(
+            "curved",
+            "Readable",
+            box,
+            style,
+            path=default_arc_path(box, 0.35),
+        )
+    )
+
+    assert horizontal_font.stretch() == 100
+    assert horizontal_scale == pytest.approx(0.67)
+    assert rotated_font.stretch() == 67
+    assert rotated_scale == 1
+    assert curved_font.stretch() == 67
+    assert curved_scale == 1
+
+
 def test_weight_aware_reflow_and_renderer_share_effective_font() -> None:
     QApplication.instance() or QApplication(["layout-weight-aware-fit-test"])
     font_family = resolve_system_font("en")
@@ -657,7 +705,10 @@ def test_weight_aware_reflow_and_renderer_share_effective_font() -> None:
         "Label * 2",
     )
 
-    assert bold.style.font_size < regular.style.font_size
+    assert (
+        bold.style.font_size * bold.style.font_stretch / 100
+        < regular.style.font_size * regular.style.font_stretch / 100
+    )
     assert bold.style.font_weight == 700
     measured = _font_for_text(
         bold.style,

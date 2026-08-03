@@ -107,6 +107,72 @@ def test_adapter_normalizes_result_and_caches_profile_engine() -> None:
     assert first.regions[0].polygon[0].x == 10
 
 
+def test_fast_mode_runs_single_pass_without_enhanced_recovery() -> None:
+    """fast=True 只做一次标准识别，跳过瓦片恢复/密集修复/逐区域精修。"""
+    class _CountingEngine:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def __call__(self, image: np.ndarray, **_options: object) -> SimpleNamespace:
+            self.calls += 1
+            return SimpleNamespace(
+                boxes=np.array(
+                    [[[10, 10], [110, 10], [110, 40], [10, 40]]],
+                    dtype=float,
+                ),
+                txts=["耐用"],
+                scores=[0.9],
+            )
+
+    engine = _CountingEngine()
+    adapter = RapidOcrAdapter(engine_factory=lambda _profile: engine)
+    # 大图（1254×1254 > 960）触发瓦片恢复的阈值
+    result = adapter.recognize(_large_document(), "zh-Hans", fast=True)
+
+    assert [region.text for region in result.regions] == ["耐用"]
+    assert engine.calls == 1  # 瓦片恢复/2x3x 放大/逐区域精修全部跳过
+
+
+def test_non_fast_mode_keeps_enhanced_recovery() -> None:
+    """默认（fast=False）保留瓦片恢复，翻译流程质量不变。"""
+    class _TiledEngine:
+        def __init__(self) -> None:
+            self.detection_calls = 0
+
+        def __call__(self, image, **options):
+            if not options["use_det"]:
+                return SimpleNamespace(boxes=None, txts=["耐用"], scores=[0.999])
+            self.detection_calls += 1
+            if image.shape[:2] == (1254, 1254):
+                return SimpleNamespace(
+                    boxes=np.array(
+                        [[[1044, 87], [1147, 87], [1147, 147], [1044, 147]]],
+                        dtype=float,
+                    ),
+                    txts=["厚实"],
+                    scores=[1.0],
+                )
+            if self.detection_calls == 3:
+                return SimpleNamespace(
+                    boxes=np.array(
+                        [
+                            [[494, 87], [597, 87], [597, 147], [494, 147]],
+                            [[494, 133], [595, 133], [595, 190], [494, 190]],
+                        ],
+                        dtype=float,
+                    ),
+                    txts=["厚实", "耐用"],
+                    scores=[1.0, 0.999],
+                )
+            return SimpleNamespace(boxes=None, txts=None, scores=None)
+
+    engine = _TiledEngine()
+    adapter = RapidOcrAdapter(engine_factory=lambda _profile: engine)
+    adapter.recognize(_large_document(), "zh-Hans")  # 默认 fast=False
+
+    assert engine.detection_calls == 5  # 瓦片恢复照常执行
+
+
 def test_high_resolution_tiles_recover_small_region_without_duplicate() -> None:
     class _TiledEngine:
         def __init__(self) -> None:
