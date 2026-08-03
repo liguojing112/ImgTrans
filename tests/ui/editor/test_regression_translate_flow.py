@@ -185,6 +185,22 @@ class ImmediateTaskRunner:
             on_error(error)
 
 
+class DeferredTaskRunner:
+    def __init__(self) -> None:
+        self.pending = None
+
+    def submit(self, operation, on_success, on_error):
+        self.pending = (operation, on_success, on_error)
+
+    def complete(self) -> None:
+        operation, on_success, on_error = self.pending
+        self.pending = None
+        try:
+            on_success(operation())
+        except Exception as error:
+            on_error(error)
+
+
 def _document(w=190, h=72):
     pixels = np.full((h, w, 3), 235, dtype=np.uint8)
     pixels[18:49, 18:171] = (25, 35, 50)
@@ -1426,9 +1442,19 @@ def test_background_translation_completion_does_not_overwrite_other_document():
 
         # A 的画布与状态不被 B 的结果覆盖
         assert window._model.active_document_id == id_a
+        assert window._editor_page.top_bar.file_label.text() == source_a.asset.source_path.name
         assert window._model.translation_result.ocr is result_a.ocr
         assert window._model.rendered_document is result_a.document
         assert window._model.document is result_a.document
+        # Restoring a translated document also restores its composition
+        # history, so the toolbar undo/redo actions remain usable.
+        assert window._editor_page.top_bar.undo_btn.isEnabled()
+        assert window._undo_action.isEnabled()
+        window._editor_page.top_bar.undo_btn.click()
+        assert window._model.text_layout.layers == ()
+        assert window._editor_page.top_bar.redo_btn.isEnabled()
+        window._editor_page.top_bar.redo_btn.click()
+        assert window._model.text_layout == result_a.layout
 
         # B 的结果已写入 B 的文档条目
         ref_b = next(
@@ -1996,6 +2022,51 @@ def test_translation_preserved_when_switching_documents():
         assert window._model.translation_result is None
         assert window._model.text_layout.layers == ()
         assert window._model.document is source_b
+    finally:
+        window.close()
+
+
+def test_in_flight_translation_progress_survives_switching_away_and_back():
+    QApplication.instance() or QApplication(["translation-in-flight-switch-test"])
+    runner = DeferredTaskRunner()
+    workflow = FakeTranslateImage()
+    source_a = _document()
+    source_b = _document(w=200, h=80)
+    window = EditorMainWindow(
+        import_image=object(),
+        task_runner=runner,
+        translate_image=workflow,
+        create_composition_editor=CreateCompositionEditor(
+            QtBasicTextLayoutAdapter("Arial"),
+            QtTextRenderer(),
+        ),
+    )
+    try:
+        window._on_image_loaded(source_a)
+        id_a = window._model.active_document_id
+        window._on_translate("en", "zh-Hans")
+
+        assert window._translation_document_id == id_a
+        assert not window._editor_page.translate_controls.translate_button.isEnabled()
+        assert not window._editor_page.translate_controls.progress.isHidden()
+
+        window._model.add_document(Path("b.png"), source_b, name="b.png")
+        id_b = window._model.active_document_id
+        window._load_active_document()
+        assert id_b != id_a
+        assert window._translation_document_id == id_a
+
+        window._on_activate_document(id_a)
+        assert window._translation_document_id == id_a
+        assert not window._editor_page.translate_controls.translate_button.isEnabled()
+        assert not window._editor_page.translate_controls.progress.isHidden()
+
+        runner.complete()
+
+        assert window._translation_document_id is None
+        assert window._model.translation_result is not None
+        assert window._model.rendered_document is not None
+        assert window._editor_page.translate_controls.translate_button.isEnabled()
     finally:
         window.close()
 

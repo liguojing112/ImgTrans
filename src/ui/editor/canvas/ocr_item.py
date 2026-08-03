@@ -1,8 +1,7 @@
-"""OCR 文字区域图形项 — 只读半透明红色四边形。
+"""OCR 文字区域图形项。
 
-视觉外观与生产 UI (image_canvas.py _paint_ocr_regions) 一致：
-边框 #e5484d 1px cosmetic, 填充 rgba(229,72,77,18)。
-选中时增强填充和边框，显示 region_id 标签。
+画布只绘制半透明区域和选中边框。区域编号及原文通过右侧结果表和
+tooltip 展示，避免编号浮层遮住小字、旋转文字或译文预览。
 """
 
 from __future__ import annotations
@@ -11,7 +10,6 @@ from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import (
     QBrush,
     QColor,
-    QFont,
     QPainter,
     QPainterPath,
     QPen,
@@ -89,17 +87,15 @@ class OcrRegionItem(QGraphicsItem):
         poly = self._polygon()
         selected = self.isSelected()
 
-        # 填充
+        # 选中项只使用轮廓。半透明填充会盖住已经合成到背景中的小字译文。
         if selected:
-            alpha = 50
+            painter.setBrush(Qt.BrushStyle.NoBrush)
         elif self.is_low_confidence:
             alpha = 30
+            painter.setBrush(QBrush(QColor(229, 154, 45, alpha)))
         else:
             alpha = 18
-        brush_color = QColor(229, 72, 77, alpha)
-        if self.is_low_confidence:
-            brush_color = QColor(229, 154, 45, alpha)
-        painter.setBrush(QBrush(brush_color))
+            painter.setBrush(QBrush(QColor(229, 72, 77, alpha)))
 
         # 边框
         if selected:
@@ -117,26 +113,8 @@ class OcrRegionItem(QGraphicsItem):
 
         painter.drawPolygon(poly)
 
-        # 选中时绘制 region_id 标签
-        if selected or self._hovered:
-            center = poly.boundingRect().center()
-            if selected:
-                label = self._region.region_id[-6:] if len(self._region.region_id) > 6 else self._region.region_id
-                painter.setPen(QPen(QColor("#ffffff")))
-                bg_rect = QRectF(center.x() - 50, poly.boundingRect().top() - 20, 100, 18)
-                painter.fillRect(bg_rect, QBrush(QColor(40, 40, 60, 200)))
-                painter.drawText(bg_rect, Qt.AlignmentFlag.AlignCenter, label)
-
-            if self._hovered and self._region.text:
-                text = self._region.text
-                if len(text) > 30:
-                    text = text[:30] + "…"
-                painter.setPen(QPen(QColor("#ffffff")))
-                painter.drawText(
-                    QRectF(center.x() - 100, center.y() - 12, 200, 24),
-                    Qt.AlignmentFlag.AlignCenter,
-                    text,
-                )
+        # 不在图片上绘制 region_id 或 OCR 文本。小型、倾斜及圆环区域的
+        # 标签会覆盖实际译文；详细信息已经由 tooltip 和右侧 OCR 表提供。
 
     # —— 交互 ——
 

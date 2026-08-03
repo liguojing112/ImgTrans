@@ -579,6 +579,37 @@ def test_colored_vertical_labels_keep_light_and_dark_source_foregrounds() -> Non
     assert _vertical_colored_label_background(document, green) == (174, 220, 48)
 
 
+def test_vertical_colored_glyphs_on_white_are_not_treated_as_label_background() -> None:
+    pixels = np.full((90, 50, 3), (250, 250, 250), dtype=np.uint8)
+    pixels[12:78, 18:26] = (98, 222, 250)
+    pixels[18:24, 14:32] = (98, 222, 250)
+    pixels[42:48, 14:32] = (98, 222, 250)
+    pixels[68:74, 14:32] = (98, 222, 250)
+    region = TextRegion(
+        "cyan-word",
+        order_quad(((12, 8), (32, 8), (32, 82), (12, 82))),
+        "Eport",
+        0.99,
+        "en",
+        "fixture",
+    )
+    document = ImageDocument(
+        ImageAsset(
+            Path("cyan-word.png"),
+            50,
+            90,
+            1,
+            ImageFileFormat.PNG,
+            False,
+            False,
+        ),
+        "RGB",
+        pixels.tobytes(),
+    )
+
+    assert _vertical_colored_label_background(document, region) is None
+
+
 def test_repeated_vertical_labels_share_geometry_and_style_without_moving() -> None:
     layers = (
         TextLayer(

@@ -2262,7 +2262,10 @@ def _vertical_colored_label_palette(
     )
     colored = (geometry > 0) & (chroma > 45)
     colored_area = int(np.count_nonzero(colored))
-    if colored_area / polygon_area < 0.25:
+    # A label background fills most of the OCR polygon.  Saturated glyphs on
+    # a neutral background can also form one connected component, but their
+    # coverage is much lower and must not be painted back as a solid block.
+    if colored_area / polygon_area < 0.55:
         return None
     component_count, labels, stats, _ = cv2.connectedComponentsWithStats(
         colored.astype(np.uint8),

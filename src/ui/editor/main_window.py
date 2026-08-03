@@ -138,6 +138,8 @@ class EditorMainWindow(QMainWindow):
         self._last_non_original_preview = "translated"
         self._hold_preview_mode: str | None = None
         self._hold_slider_compare = False
+        self._translation_document_id: str | None = None
+        self._translation_stage: ImageStage | None = None
         self._ocr_preview_layers: dict[str, str] = {}
         # Keep the first OCR geometry as the anchor for OCR-only corrections.
         # Editing the source text must never resize or reflow the detected box.
@@ -939,6 +941,27 @@ class EditorMainWindow(QMainWindow):
         self._editor_page.export_settings.set_export_enabled(False)
         self.statusBar().showMessage("工作台已无图片")
 
+    def _sync_translation_activity_for_active_document(self) -> None:
+        """Keep an in-flight translation visible while documents are switched."""
+        running = self._translation_document_id is not None
+        self._model.translating = running
+        controls = self._editor_page.translate_controls
+        top_bar = self._editor_page.top_bar
+        if getattr(top_bar, "_translating", False) != running:
+            top_bar.set_translating(running)
+        controls.set_translating(running)
+        if not running:
+            return
+        if self._model.active_document_id == self._translation_document_id:
+            if self._translation_stage is None:
+                controls.set_preparing()
+            else:
+                controls.set_stage(self._translation_stage)
+            self.statusBar().showMessage("正在翻译当前图片…")
+        else:
+            controls.set_preparing()
+            self.statusBar().showMessage("另一张图片正在后台翻译，可切回查看进度")
+
     def _load_active_document(self) -> None:
         """把当前活动文档加载到画布（编辑状态已由模型快照恢复）。"""
         ref = self._model.active_document()
@@ -984,7 +1007,13 @@ class EditorMainWindow(QMainWindow):
         self._editor_page.top_bar.set_export_available(source is not None)
         has_layers = len(self._model.text_layout.layers) > 0
         self._editor_page.top_bar.set_has_layers(has_layers)
-        self._sync_history_actions(False, False)
+        # Each workbench document owns its composition editor and therefore
+        # its own history. Restore that state when switching documents.
+        editor = self._model.composition_editor
+        if editor is not None:
+            self._sync_history_actions(editor.can_undo, editor.can_redo)
+        else:
+            self._sync_history_actions(bool(self._source_undo), bool(self._source_redo))
         # A loaded document is a valid export source even when it only has an
         # OCR result and no TranslateImageResult yet.
         self._editor_page.export_settings.set_export_enabled(source is not None)
@@ -997,6 +1026,7 @@ class EditorMainWindow(QMainWindow):
             f"已切换：{asset.source_path.name}  {asset.width}×{asset.height}"
         )
         self._editor_page.view.fit_to_window()
+        self._sync_translation_activity_for_active_document()
 
     def _go_home(self) -> None:
         self._stack.setCurrentWidget(self._home_page)
@@ -1223,6 +1253,9 @@ class EditorMainWindow(QMainWindow):
     # —— 翻译 ——
 
     def _on_translate(self, ocr_language: str, target_language: str) -> None:
+        if self._translation_document_id is not None:
+            self.statusBar().showMessage("已有图片正在翻译，请等待完成或先取消")
+            return
         if self._translate_image is None or self._task_runner is None:
             self.statusBar().showMessage("翻译服务不可用")
             return
@@ -1231,6 +1264,9 @@ class EditorMainWindow(QMainWindow):
             self.statusBar().showMessage("请先导入图片")
             return
 
+        translating_doc_id = self._model.active_document_id
+        self._translation_document_id = translating_doc_id
+        self._translation_stage = None
         self._model.translating = True
         self._model.translation_started.emit()
         self._editor_page.translate_controls.set_translating(True)
@@ -1251,15 +1287,13 @@ class EditorMainWindow(QMainWindow):
         brand_terms = ctrl.configured_protection_terms
 
         def on_stage(stage: ImageStage) -> None:
-            self._model.translation_stage_changed.emit(stage)
+            self._translation_stage = stage
+            if self._model.active_document_id == translating_doc_id:
+                self._model.translation_stage_changed.emit(stage)
 
         self.statusBar().showMessage(
             f"正在翻译（OCR：{ocr_language} → 目标：{target_language}）…"
         )
-
-        # 记录本次翻译的目标文档：完成后把结果写回该文档，
-        # 避免翻译期间切换文档导致结果串图
-        translating_doc_id = self._model.active_document_id
 
         self._task_runner.submit(
             lambda: self._translate_image.execute(
@@ -1277,7 +1311,7 @@ class EditorMainWindow(QMainWindow):
             lambda value: self._on_translation_succeeded(
                 value, translating_doc_id
             ),
-            self._on_translation_failed,
+            lambda error: self._on_translation_failed(error, translating_doc_id),
         )
 
     def _on_translation_succeeded(
@@ -1286,8 +1320,12 @@ class EditorMainWindow(QMainWindow):
         doc_id: str | None = None,
     ) -> None:
         if not isinstance(value, TranslateImageResult):
-            self._on_translation_failed(TypeError("翻译返回了无效结果"))
+            self._on_translation_failed(TypeError("翻译返回了无效结果"), doc_id)
             return
+
+        if doc_id == self._translation_document_id:
+            self._translation_document_id = None
+            self._translation_stage = None
 
         result: TranslateImageResult = value
         self._ocr_preview_layers.clear()
@@ -1359,10 +1397,11 @@ class EditorMainWindow(QMainWindow):
 
         if not is_active:
             # 用户已切到其他文档：仅保存结果，不打扰当前画布
-            self._model.translating = False
-            self._editor_page.translate_controls.set_translating(False)
+            self._sync_translation_activity_for_active_document()
             self._editor_page.translate_controls.reset_progress()
-            self._editor_page.top_bar.set_translating(False)
+            active_ref = self._model.active_document()
+            if active_ref is not None:
+                self._editor_page.top_bar.set_file_name(active_ref.name)
             name = target_ref.name if target_ref is not None else "该图片"
             self.statusBar().showMessage(
                 f"「{name}」翻译完成，可切换到该图片查看结果"
@@ -1426,12 +1465,21 @@ class EditorMainWindow(QMainWindow):
         )
         self._model.translation_finished.emit(result)
 
-    def _on_translation_failed(self, error: Exception) -> None:
-        self._model.translating = False
+    def _on_translation_failed(
+        self,
+        error: Exception,
+        doc_id: str | None = None,
+    ) -> None:
+        if doc_id is None or doc_id == self._translation_document_id:
+            self._translation_document_id = None
+            self._translation_stage = None
+        self._model.translating = self._translation_document_id is not None
         self._model.translation_failed.emit(str(error))
         self._editor_page.translate_controls.reset_progress()
-        self._editor_page.translate_controls.set_translating(False)
-        self._editor_page.top_bar.set_translating(False)
+        self._sync_translation_activity_for_active_document()
+        active_ref = self._model.active_document()
+        if self._translation_document_id is None and active_ref is not None:
+            self._editor_page.top_bar.set_file_name(active_ref.name)
         title, msg, suggestion = classify_error(error)
         self.statusBar().showMessage(f"{title}：{msg}。{suggestion}")
 
