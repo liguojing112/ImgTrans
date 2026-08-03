@@ -3,6 +3,9 @@ from __future__ import annotations
 import argparse
 from collections.abc import Sequence
 import getpass
+import platform
+import socket
+import subprocess
 
 from server.app import create_app
 from server.config import ServerSettings, ServerSettingsError
@@ -22,6 +25,93 @@ def build_parser() -> argparse.ArgumentParser:
         help="prompt for an administrator password and print its scrypt hash",
     )
     return parser
+
+
+def listener_info(host: str, port: int) -> tuple[int | None, str | None]:
+    """探测 (host, port) 是否已被监听；返回 (占用进程 PID, 进程命令行摘要)。
+
+    端口空闲时返回 (None, None)。
+    """
+    probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        probe.settimeout(0.5)
+        probe_host = "127.0.0.1" if host in {"0.0.0.0", "::"} else host
+        if probe.connect_ex((probe_host, port)) != 0:
+            return None, None
+    finally:
+        probe.close()
+    return _find_listener(host, port)
+
+
+def _run_text(args: list[str]) -> str:
+    """运行命令并读取文本输出（Windows 按系统代码页解码，避免中文乱码崩溃）。"""
+    kwargs: dict[str, object] = {
+        "capture_output": True,
+        "text": True,
+        "errors": "replace",
+        "check": False,
+    }
+    if platform.system() == "Windows":
+        kwargs["encoding"] = "mbcs"
+    completed = subprocess.run(args, **kwargs)
+    return completed.stdout or ""
+
+
+def _find_listener(host: str, port: int) -> tuple[int | None, str | None]:
+    """按平台查找监听端口的进程 PID 与命令行。"""
+    pid: int | None = None
+    if platform.system() == "Windows":
+        output = _run_text(["netstat", "-ano"])
+        for line in output.splitlines():
+            parts = line.split()
+            if len(parts) >= 5 and parts[0] == "TCP" and parts[3] == "LISTENING":
+                address = parts[1]
+                if address.rsplit(":", 1)[-1] == str(port):
+                    try:
+                        pid = int(parts[4])
+                    except ValueError:
+                        pid = None
+                    break
+        if pid is None:
+            return None, None
+        command = _run_text(
+            [
+                "powershell",
+                "-NoProfile",
+                "-Command",
+                f"Get-CimInstance Win32_Process -Filter \"ProcessId={pid}\" | "
+                "Select-Object -ExpandProperty CommandLine",
+            ]
+        ).strip()
+        return pid, command or None
+    output = _run_text(["lsof", "-nP", f"-iTCP:{port}", "-sTCP:LISTEN"])
+    for line in output.splitlines()[1:]:
+        parts = line.split()
+        if len(parts) >= 2:
+            try:
+                pid = int(parts[1])
+            except ValueError:
+                pid = None
+            break
+    command = None
+    if pid is not None:
+        command = _run_text(
+            ["ps", "-p", str(pid), "-o", "command="]
+        ).strip()
+    return pid, command or None
+
+
+def _is_imgtrans_process(command: str | None) -> bool:
+    if not command:
+        return False
+    lowered = command.casefold()
+    return (
+        "imgtrans" in lowered
+        or "server.main" in lowered
+        or " -m server" in lowered
+        or "server.exe" in lowered
+        or ("server" in lowered and "uvicorn" in lowered)
+    )
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -67,6 +157,26 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 0
         finally:
             app.state.database.close()
+
+    pid, command = listener_info(settings.host, settings.port)
+    if pid is not None:
+        print(f"启动失败：{settings.host}:{settings.port} 已被占用。")
+        print(f"占用进程：PID {pid}（{command or '未知程序'}）")
+        if _is_imgtrans_process(command):
+            print(
+                "检测到旧的 ImgTrans 服务仍在运行——服务与客户端相互独立，"
+                "关闭客户端不会停止服务。"
+            )
+            print(
+                "如需重启服务，请先结束旧进程（Windows）："
+                f"taskkill /F /PID {pid}"
+            )
+        else:
+            print(
+                "该端口被其他程序占用；可设置 IMGTRANS_SERVER_PORT 换端口启动，"
+                "或先停止占用程序。"
+            )
+        return 3
 
     import uvicorn
 
