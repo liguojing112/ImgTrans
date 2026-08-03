@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Protocol
 
-from src.domain.image import ImageDocument, ImageFileFormat, ImageLimits
+from src.domain.image import ExportOptions, ImageDocument, ImageFileFormat, ImageLimits
 from src.domain.inpainting import EraseMask, InpaintingRequest, InpaintingResult
 from src.domain.layout import TextBox, TextLayer, TextLayout
 from src.domain.ocr import OcrResult
@@ -15,7 +15,11 @@ class ImageCodec(Protocol):
     def load(self, source: Path, limits: ImageLimits) -> ImageDocument: ...
 
     def save(
-        self, document: ImageDocument, target: Path, output_format: ImageFileFormat
+        self,
+        document: ImageDocument,
+        target: Path,
+        output_format: ImageFileFormat,
+        options: ExportOptions | None = None,
     ) -> None: ...
 
 
@@ -27,7 +31,12 @@ class OcrAdapter(Protocol):
     @property
     def language_codes(self) -> tuple[str, ...]: ...
 
-    def recognize(self, document: ImageDocument, language_code: str) -> OcrResult: ...
+    def recognize(
+        self,
+        document: ImageDocument,
+        language_code: str,
+        fast: bool = False,
+    ) -> OcrResult: ...
 
 
 class TranslationAdapter(Protocol):

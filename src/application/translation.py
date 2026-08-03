@@ -64,7 +64,18 @@ class TranslateRegions:
         selection: TranslationSelection,
         brand_terms: tuple[str, ...] = (),
         allow_low_confidence: bool = False,
+        automatic_confidence_threshold: float | None = None,
+        preserve_numbers: bool = True,
     ) -> TranslationResult:
+        threshold = (
+            self._automatic_confidence_threshold
+            if automatic_confidence_threshold is None
+            else automatic_confidence_threshold
+        )
+        if not 0 <= threshold <= 1:
+            raise ValueError(
+                "Automatic translation confidence threshold must be between zero and one"
+            )
         started = perf_counter()
         units: list[TranslationUnit | None] = [None] * len(ocr_result.regions)
         prepared: list[tuple[int, TextRegion, ProtectedText]] = []
@@ -81,7 +92,7 @@ class TranslateRegions:
         )
         corroborated_regions = _corroborated_low_confidence_regions(
             ocr_result,
-            self._automatic_confidence_threshold,
+            threshold,
         )
         for index, region in enumerate(ocr_result.regions):
             if (
@@ -95,7 +106,11 @@ class TranslateRegions:
             corroborated_text = corroborated_regions.get(region.region_id)
             if corroborated_text is not None:
                 region = replace(region, text=corroborated_text)
-            protected = self._protection.protect(region.text, brand_terms)
+            protected = self._protection.protect(
+                region.text,
+                brand_terms,
+                preserve_numbers,
+            )
             if protected.fully_protected:
                 units[index] = TranslationUnit(
                     region.region_id,
@@ -136,7 +151,7 @@ class TranslateRegions:
                 complex_layout_review
                 and region.confidence < max(
                     0.9,
-                    self._automatic_confidence_threshold,
+                    threshold,
                 )
             ):
                 units[index] = TranslationUnit(
@@ -151,7 +166,7 @@ class TranslateRegions:
                 continue
             if (
                 not allow_low_confidence
-                and region.confidence < self._automatic_confidence_threshold
+                and region.confidence < threshold
                 and region.region_id not in corroborated_regions
             ):
                 units[index] = TranslationUnit(

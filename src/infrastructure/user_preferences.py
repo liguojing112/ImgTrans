@@ -14,7 +14,7 @@ from src.domain.terminology import (
 
 _MAX_PREFERENCES_BYTES = 64 * 1024
 _CURRENT_SCHEMA_VERSION = 1
-_KNOWN_FIELDS = {"brand_terms", "terminology_entries"}
+_KNOWN_FIELDS = {"brand_terms", "model_terms", "terminology_entries"}
 
 
 class UserPreferencesError(RuntimeError):
@@ -104,6 +104,11 @@ class _JsonPreferencesFile:
             isinstance(term, str) for term in brand_terms
         ):
             raise ValueError("Invalid brand terms preferences")
+        model_terms = payload.get("model_terms", [])
+        if not isinstance(model_terms, list) or not all(
+            isinstance(term, str) for term in model_terms
+        ):
+            raise ValueError("Invalid model terms preferences")
         terminology = payload.get("terminology_entries", [])
         if not isinstance(terminology, list):
             raise ValueError("Invalid terminology preferences")
@@ -136,6 +141,24 @@ class JsonBrandTermsPreferences:
     def save(self, brand_terms: tuple[str, ...]) -> None:
         payload = self._file.load()
         payload["brand_terms"] = list(normalize_brand_terms(brand_terms))
+        self._file.save(payload)
+
+
+class JsonModelTermsPreferences:
+    def __init__(self, path: Path) -> None:
+        self._file = _JsonPreferencesFile(path)
+
+    def load(self) -> tuple[str, ...]:
+        values = self._file.load().get("model_terms", [])
+        if not isinstance(values, list) or not all(
+            isinstance(term, str) for term in values
+        ):
+            raise UserPreferencesError("Invalid model terms preferences")
+        return normalize_brand_terms(values)
+
+    def save(self, model_terms: tuple[str, ...]) -> None:
+        payload = self._file.load()
+        payload["model_terms"] = list(normalize_brand_terms(model_terms))
         self._file.save(payload)
 
 

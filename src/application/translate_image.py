@@ -56,6 +56,9 @@ class TranslateImage:
         on_stage: Callable[[ImageStage], None] | None = None,
         ocr_mode: OcrMode = OcrMode.STANDARD,
         high_recall_options: HighRecallOcrOptions | None = None,
+        allow_low_confidence: bool = False,
+        automatic_confidence_threshold: float | None = None,
+        preserve_numbers: bool = True,
     ) -> TranslateImageResult:
         token = CancellationToken()
         with self._token_lock:
@@ -79,7 +82,14 @@ class TranslateImage:
                 job,
                 token,
                 ImageStage.TRANSLATION,
-                lambda: self._translate.execute(ocr, selection, brand_terms),
+                lambda: self._translate.execute(
+                    ocr,
+                    selection,
+                    brand_terms,
+                    allow_low_confidence=allow_low_confidence,
+                    automatic_confidence_threshold=automatic_confidence_threshold,
+                    preserve_numbers=preserve_numbers,
+                ),
                 on_stage,
             )
             repair = self._run_stage(

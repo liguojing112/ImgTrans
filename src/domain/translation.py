@@ -22,6 +22,7 @@ class TranslationStatus(str, Enum):
     TRANSLATED = "translated"
     SKIPPED_LANGUAGE = "skipped_language"
     SKIPPED_PROTECTED = "skipped_protected"
+    SKIPPED_USER = "skipped_user"
     REVIEW_REQUIRED = "review_required"
     FAILED = "failed"
 

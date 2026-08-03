@@ -10,6 +10,7 @@ from PIL import Image, ImageOps, UnidentifiedImageError
 from src.domain.image import (
     ImageAsset,
     ImageDocument,
+    ExportOptions,
     ImageFileFormat,
     ImageLimits,
     ImageValidationError,
@@ -67,7 +68,11 @@ class PillowImageCodec:
         return ImageDocument(asset=asset, mode=mode, pixels=pixels)
 
     def save(
-        self, document: ImageDocument, target: Path, output_format: ImageFileFormat
+        self,
+        document: ImageDocument,
+        target: Path,
+        output_format: ImageFileFormat,
+        options: ExportOptions | None = None,
     ) -> None:
         target = target.expanduser()
         if not target.parent.is_dir():
@@ -87,8 +92,25 @@ class PillowImageCodec:
         )
         temporary = target.with_name(f".{target.name}.{uuid4().hex}.tmp")
         try:
-            export_image, options = self._prepare_export(image, output_format)
-            export_image.save(temporary, format=output_format.value, **options)
+            selected_options = options or ExportOptions()
+            if selected_options.output_width is not None:
+                image = image.resize(
+                    (
+                        selected_options.output_width,
+                        selected_options.output_height,
+                    ),
+                    Image.Resampling.LANCZOS,
+                )
+            export_image, save_options = self._prepare_export(
+                image,
+                output_format,
+                selected_options,
+            )
+            export_image.save(
+                temporary,
+                format=output_format.value,
+                **save_options,
+            )
             with temporary.open("rb+") as stream:
                 os.fsync(stream.fileno())
             os.replace(temporary, target)
@@ -121,11 +143,14 @@ class PillowImageCodec:
             "JPEG": ImageFileFormat.JPEG,
             "PNG": ImageFileFormat.PNG,
             "WEBP": ImageFileFormat.WEBP,
+            "BMP": ImageFileFormat.BMP,
         }
         try:
             return mapping[value or ""]
         except KeyError as error:
-            raise ImageValidationError("unsupported_input_format", "图片内容不是 JPG、PNG 或 WebP") from error
+            raise ImageValidationError(
+                "unsupported_input_format", "图片内容不是 JPG、PNG、WebP 或 BMP"
+            ) from error
 
     @staticmethod
     def _has_alpha(image: Image.Image) -> bool:
@@ -134,25 +159,42 @@ class PillowImageCodec:
         )
 
     @staticmethod
-    def _flatten_white(image: Image.Image) -> Image.Image:
+    def _flatten(
+        image: Image.Image,
+        background_rgb: tuple[int, int, int],
+    ) -> Image.Image:
         rgba = image.convert("RGBA")
-        background = Image.new("RGB", rgba.size, "white")
+        background = Image.new("RGB", rgba.size, background_rgb)
         background.paste(rgba, mask=rgba.getchannel("A"))
         return background
 
     def _prepare_export(
-        self, image: Image.Image, output_format: ImageFileFormat
+        self,
+        image: Image.Image,
+        output_format: ImageFileFormat,
+        options: ExportOptions,
     ) -> tuple[Image.Image, dict[str, object]]:
         if output_format is ImageFileFormat.JPEG:
-            return self._flatten_white(image), {"quality": 95, "subsampling": 0}
+            return self._flatten(image, options.background_rgb), {
+                "quality": options.quality,
+                "subsampling": 0,
+            }
         if output_format is ImageFileFormat.PNG:
-            return image, {"compress_level": 6}
+            export = (
+                image
+                if options.preserve_alpha
+                else self._flatten(image, options.background_rgb)
+            )
+            return export, {"compress_level": 6}
         if output_format is ImageFileFormat.WEBP:
-            if image.mode == "RGBA":
+            if image.mode == "RGBA" and options.preserve_alpha:
                 return image, {"lossless": True, "method": 6}
-            return image, {"quality": 95, "method": 6}
+            return (
+                self._flatten(image, options.background_rgb),
+                {"quality": options.quality, "method": 6},
+            )
         if output_format is ImageFileFormat.GIF:
-            flattened = self._flatten_white(image)
+            flattened = self._flatten(image, options.background_rgb)
             return flattened.convert("P", palette=Image.Palette.ADAPTIVE), {"save_all": False}
         if output_format is ImageFileFormat.TIFF:
             return image, {"compression": "tiff_lzw"}

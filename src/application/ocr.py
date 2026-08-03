@@ -19,6 +19,7 @@ class RecognizeText:
         language_code: str,
         mode: OcrMode = OcrMode.STANDARD,
         options: HighRecallOcrOptions | None = None,
+        fast: bool = False,
     ) -> OcrResult:
         if language_code not in self._adapter.language_codes:
             raise OcrError("unsupported_language", f"OCR 不支持语言代码：{language_code}")
@@ -34,4 +35,4 @@ class RecognizeText:
                 language_code,
                 options or HighRecallOcrOptions(),
             )
-        return self._adapter.recognize(document, language_code)
+        return self._adapter.recognize(document, language_code, fast=fast)

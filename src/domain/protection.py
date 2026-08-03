@@ -104,12 +104,20 @@ class ProtectionEngine:
     )
     _NUMBER = re.compile(r"(?<![\w])\d+(?:[.,]\d+)*(?:%|[xX]\d+)?(?![\w])")
 
-    def protect(self, text: str, brand_terms: tuple[str, ...] = ()) -> ProtectedText:
+    def protect(
+        self,
+        text: str,
+        brand_terms: tuple[str, ...] = (),
+        preserve_numbers: bool = True,
+    ) -> ProtectedText:
         candidates: list[_Candidate] = []
         candidates.extend(self._matches(self._URL, text, ProtectionKind.URL))
         candidates.extend(self._matches(self._SKU, text, ProtectionKind.SKU))
         candidates.extend(self._matches(self._MODEL, text, ProtectionKind.MODEL))
-        candidates.extend(self._matches(self._NUMBER, text, ProtectionKind.NUMBER))
+        if preserve_numbers:
+            candidates.extend(
+                self._matches(self._NUMBER, text, ProtectionKind.NUMBER)
+            )
         for term in sorted(normalize_brand_terms(brand_terms), key=len, reverse=True):
             escaped = re.escape(term)
             pattern = (

@@ -19,6 +19,7 @@ from src.domain.batch import (
 )
 from src.domain.image import ImageDocument
 from src.domain.job import ImageStage, JobCancelled
+from src.domain.ocr import HighRecallOcrOptions, OcrMode
 from src.domain.translation import TranslationSelection
 
 
@@ -30,6 +31,11 @@ class BatchWorkflow(Protocol):
         selection: TranslationSelection,
         brand_terms: tuple[str, ...] = (),
         on_stage: Callable[[ImageStage], None] | None = None,
+        allow_low_confidence: bool = False,
+        automatic_confidence_threshold: float | None = None,
+        preserve_numbers: bool = True,
+        ocr_mode: OcrMode = OcrMode.STANDARD,
+        high_recall_options: HighRecallOcrOptions | None = None,
     ) -> TranslateImageResult: ...
 
     def cancel(self) -> None: ...
@@ -53,6 +59,7 @@ class RunBatch:
         self._state_lock = Lock()
         self._lifecycle_lock = Lock()
         self._cancel_event: Event | None = None
+        self._pause_event: Event | None = None
         self._running = False
 
     def execute(
@@ -62,6 +69,11 @@ class RunBatch:
         selection: TranslationSelection,
         brand_terms: tuple[str, ...] = (),
         on_update: Callable[[BatchSnapshot], None] | None = None,
+        allow_low_confidence: bool = False,
+        automatic_confidence_threshold: float | None = None,
+        preserve_numbers: bool = True,
+        ocr_mode: OcrMode = OcrMode.STANDARD,
+        high_recall_options: HighRecallOcrOptions | None = None,
     ) -> BatchSnapshot:
         if not sources:
             raise ValueError("Batch requires at least one image")
@@ -70,14 +82,15 @@ class RunBatch:
                 raise RuntimeError("A batch is already running")
             self._running = True
             cancel_event = Event()
+            pause_event = Event()
             self._cancel_event = cancel_event
+            self._pause_event = pause_event
         batch_id = f"batch-{uuid4().hex}"
         items = [
             BatchItemSnapshot(f"item-{uuid4().hex}", Path(source))
             for source in sources
         ]
         status = BatchStatus.RUNNING
-        self._notify(batch_id, status, items, on_update)
         try:
             with ThreadPoolExecutor(
                 max_workers=self._max_active_items,
@@ -86,8 +99,26 @@ class RunBatch:
                 pending: dict[Future[BatchItemSnapshot], int] = {}
                 next_index = 0
                 while next_index < len(items) or pending:
+                    if pause_event.is_set():
+                        status = (
+                            BatchStatus.PAUSING
+                            if pending
+                            else BatchStatus.PAUSED
+                        )
+                        self._notify(batch_id, status, items, on_update)
+                        if not pending:
+                            while (
+                                pause_event.is_set()
+                                and not cancel_event.wait(0.05)
+                            ):
+                                pass
+                            if cancel_event.is_set():
+                                continue
+                            status = BatchStatus.RUNNING
+                            self._notify(batch_id, status, items, on_update)
                     while (
                         not cancel_event.is_set()
+                        and not pause_event.is_set()
                         and next_index < len(items)
                         and len(pending) < self._max_active_items
                     ):
@@ -104,6 +135,11 @@ class RunBatch:
                             selection,
                             brand_terms,
                             cancel_event,
+                            allow_low_confidence,
+                            automatic_confidence_threshold,
+                            preserve_numbers,
+                            ocr_mode,
+                            high_recall_options,
                             lambda stage, item_index=index: self._stage_changed(
                                 items,
                                 item_index,
@@ -139,13 +175,30 @@ class RunBatch:
                 self._running = False
                 if self._cancel_event is cancel_event:
                     self._cancel_event = None
+                if self._pause_event is pause_event:
+                    self._pause_event = None
 
     def cancel(self) -> None:
         with self._lifecycle_lock:
             cancel_event = self._cancel_event
+            pause_event = self._pause_event
         if cancel_event is not None:
             cancel_event.set()
+            if pause_event is not None:
+                pause_event.clear()
             self._workflow.cancel()
+
+    def pause(self) -> None:
+        with self._lifecycle_lock:
+            pause_event = self._pause_event
+        if pause_event is not None:
+            pause_event.set()
+
+    def resume(self) -> None:
+        with self._lifecycle_lock:
+            pause_event = self._pause_event
+        if pause_event is not None:
+            pause_event.clear()
 
     def _process_item(
         self,
@@ -155,6 +208,11 @@ class RunBatch:
         selection: TranslationSelection,
         brand_terms: tuple[str, ...],
         cancel_event: Event,
+        allow_low_confidence: bool,
+        automatic_confidence_threshold: float | None,
+        preserve_numbers: bool,
+        ocr_mode: OcrMode,
+        high_recall_options: HighRecallOcrOptions | None,
         on_stage: Callable[[ImageStage], None],
     ) -> BatchItemSnapshot:
         try:
@@ -163,13 +221,32 @@ class RunBatch:
             _throw_if_cancelled(cancel_event)
             with self._processing_lock:
                 _throw_if_cancelled(cancel_event)
-                result = self._workflow.execute(
-                    document,
-                    ocr_language,
-                    selection,
-                    brand_terms,
-                    on_stage,
-                )
+                if (
+                    allow_low_confidence
+                    or automatic_confidence_threshold is not None
+                    or not preserve_numbers
+                    or ocr_mode is OcrMode.HIGH_RECALL
+                ):
+                    result = self._workflow.execute(
+                        document,
+                        ocr_language,
+                        selection,
+                        brand_terms,
+                        on_stage,
+                        allow_low_confidence=allow_low_confidence,
+                        automatic_confidence_threshold=automatic_confidence_threshold,
+                        preserve_numbers=preserve_numbers,
+                        ocr_mode=ocr_mode,
+                        high_recall_options=high_recall_options,
+                    )
+                else:
+                    result = self._workflow.execute(
+                        document,
+                        ocr_language,
+                        selection,
+                        brand_terms,
+                        on_stage,
+                    )
             _throw_if_cancelled(cancel_event)
             result_ref = self._result_store.save(
                 batch_id, item.item_id, result.document

@@ -16,6 +16,7 @@ from PySide6.QtGui import (
     QImage,
     QPainter,
     QTextLayout,
+    QTextOption,
 )
 
 from src.domain.image import ImageDocument
@@ -107,6 +108,7 @@ class QtBasicTextLayoutAdapter:
                 else resolve_system_font_details(unit.target_language)
             )
             font_family = self._font_family or resolution.family
+            label_background = _vertical_colored_label_background(source, region)
             layer = self.reflow(
                 TextLayer(
                     region.region_id,
@@ -121,6 +123,8 @@ class QtBasicTextLayoutAdapter:
                         font_degraded=resolution.degraded if resolution else False,
                         font_fallback_reason=resolution.reason if resolution else None,
                         font_weight=_estimate_font_weight(source, region),
+                        background_rgb=label_background,
+                        background_opacity=1.0 if label_background is not None else 0.0,
                     ),
                     path=path,
                 ),
@@ -257,26 +261,48 @@ class QtTextRenderer:
             QPainter.RenderHint.Antialiasing | QPainter.RenderHint.TextAntialiasing
         )
         for layer in layout.layers:
-            font = _font_for_layer(layer)
+            if not layer.visible:
+                continue
+            font, horizontal_scale = _render_font_and_horizontal_scale(layer)
             if layer.path is not None:
-                _render_arc_layer(painter, layer, font)
+                painter.save()
+                painter.setOpacity(layer.style.text_opacity)
+                _render_arc_layer(
+                    painter,
+                    layer,
+                    font,
+                    horizontal_scale=horizontal_scale,
+                )
+                painter.restore()
                 continue
             painter.save()
             painter.translate(layer.box.center_x, layer.box.center_y)
             painter.rotate(layer.box.rotation_degrees)
+            painter.scale(
+                (-1 if layer.mirror_x else 1) * horizontal_scale,
+                -1 if layer.mirror_y else 1,
+            )
             painter.setFont(font)
             target = QRectF(
-                -layer.box.width / 2,
+                -layer.box.width / (2 * horizontal_scale),
                 -layer.box.height / 2,
-                layer.box.width,
+                layer.box.width / horizontal_scale,
                 layer.box.height,
             )
             painter.setClipRect(target)
+            if (
+                layer.style.background_rgb is not None
+                and layer.style.background_opacity > 0
+            ):
+                background = QColor(*layer.style.background_rgb)
+                background.setAlphaF(layer.style.background_opacity)
+                painter.fillRect(target, background)
+            painter.setOpacity(layer.style.text_opacity)
             flags = _text_flags(layer.style, layer.text)
             if layer.style.shadow_opacity > 0:
                 painter.save()
                 painter.translate(
-                    layer.style.shadow_offset_x,
+                    layer.style.shadow_offset_x / horizontal_scale,
                     layer.style.shadow_offset_y,
                 )
                 shadow = QColor(*layer.style.shadow_rgb)
@@ -291,12 +317,28 @@ class QtTextRenderer:
                     for offset_y in range(-radius, radius + 1):
                         if offset_x or offset_y:
                             painter.drawText(
-                                target.translated(offset_x, offset_y),
+                                target.translated(
+                                    offset_x / horizontal_scale,
+                                    offset_y,
+                                ),
                                 flags,
                                 layer.text,
                             )
             painter.setPen(QColor(*layer.style.fill_rgb))
-            painter.drawText(target, flags, layer.text)
+            if (
+                layer.style.line_height != 1
+                and layer.style.stroke_width == 0
+                and layer.style.shadow_opacity == 0
+            ):
+                _draw_text_with_line_height(
+                    painter,
+                    target,
+                    layer.text,
+                    font,
+                    layer.style,
+                )
+            else:
+                painter.drawText(target, flags, layer.text)
             painter.restore()
         painter.end()
         rgba = _rgba_bytes(image, document.asset.width, document.asset.height)
@@ -320,12 +362,67 @@ def _qimage(document: ImageDocument) -> QImage:
     ).copy()
 
 
-def _font_for_style(style: TextStyle) -> QFont:
+def _font_for_style(style: TextStyle, *, native_stretch: bool = False) -> QFont:
     font = QFont(style.font_family)
     font.setPixelSize(max(1, round(style.font_size)))
-    font.setStretch(style.font_stretch)
+    font.setStretch(style.font_stretch if native_stretch else 100)
     font.setWeight(QFont.Weight(style.font_weight))
+    font.setLetterSpacing(
+        QFont.SpacingType.AbsoluteSpacing,
+        style.letter_spacing,
+    )
     return font
+
+
+def _draw_text_with_line_height(
+    painter: QPainter,
+    target: QRectF,
+    text: str,
+    font: QFont,
+    style: TextStyle,
+) -> None:
+    layout = QTextLayout(text, font)
+    option = QTextOption()
+    option.setWrapMode(
+        QTextOption.WrapMode.WrapAtWordBoundaryOrAnywhere
+        if style.wrap
+        else QTextOption.WrapMode.NoWrap
+    )
+    option.setAlignment(
+        {
+            TextAlignment.LEFT: Qt.AlignmentFlag.AlignLeft,
+            TextAlignment.CENTER: Qt.AlignmentFlag.AlignHCenter,
+            TextAlignment.RIGHT: Qt.AlignmentFlag.AlignRight,
+        }[style.alignment]
+    )
+    layout.setTextOption(option)
+    lines = []
+    layout.beginLayout()
+    while True:
+        line = layout.createLine()
+        if not line.isValid():
+            break
+        line.setLineWidth(target.width())
+        lines.append(line)
+    layout.endLayout()
+    if not lines:
+        return
+    metrics = QFontMetricsF(font)
+    step = metrics.height() * style.line_height
+    total_height = metrics.height() + step * (len(lines) - 1)
+    if style.vertical_alignment is VerticalAlignment.TOP:
+        top = target.top()
+    elif style.vertical_alignment is VerticalAlignment.BOTTOM:
+        top = target.bottom() - total_height
+    else:
+        top = target.center().y() - total_height / 2
+    for index, line in enumerate(lines):
+        line.setPosition(QPointF(target.left(), top + index * step))
+    layout.draw(painter, QPointF(0, 0))
+
+
+def _font_horizontal_scale(style: TextStyle) -> float:
+    return style.font_stretch / 100
 
 
 def _fit_dense_short_word_overflow(
@@ -405,6 +502,17 @@ def _font_for_layer(layer: TextLayer) -> QFont:
     return _font_for_text(layer.style, layer.text)
 
 
+def _render_font_and_horizontal_scale(layer: TextLayer) -> tuple[QFont, float]:
+    native_stretch = layer.path is not None or _is_visibly_rotated(layer.box.rotation_degrees)
+    font = _font_for_style(layer.style, native_stretch=native_stretch)
+    return font, 1.0 if native_stretch else _font_horizontal_scale(layer.style)
+
+
+def _is_visibly_rotated(rotation_degrees: float) -> bool:
+    normalized = abs(((rotation_degrees + 90) % 180) - 90)
+    return normalized >= 10
+
+
 def _font_for_text(
     style: TextStyle,
     text: str,
@@ -417,21 +525,7 @@ def _font_for_text(
         font_size=style.font_size if font_size is None else font_size,
         font_stretch=style.font_stretch if font_stretch is None else font_stretch,
     )
-    font = _font_for_style(measured_style)
-    if measured_style.font_weight == 400 or not text:
-        return font
-    regular_style = replace(measured_style, font_weight=400)
-    regular_width = QFontMetricsF(_font_for_style(regular_style)).horizontalAdvance(
-        text
-    )
-    weighted_width = QFontMetricsF(font).horizontalAdvance(text)
-    if regular_width > 0 and weighted_width > regular_width:
-        compensated_stretch = max(
-            50,
-            round(measured_style.font_stretch * regular_width / weighted_width),
-        )
-        font.setStretch(compensated_stretch)
-    return font
+    return _font_for_style(measured_style)
 
 
 def _rgba_bytes(image: QImage, width: int, height: int) -> np.ndarray:
@@ -628,13 +722,13 @@ def _text_path_for_region(
     box: TextBox,
     circular_center: tuple[float, float] | None,
 ) -> TextPath | None:
-    circular_path = _circular_text_path(region, box, circular_center)
+    circular_path = circular_text_path_for_region(region, box, circular_center)
     if circular_path is not None:
         return circular_path
     return _estimate_arc_text_path(document, region, box)
 
 
-def _circular_text_path(
+def circular_text_path_for_region(
     region: TextRegion,
     box: TextBox,
     circular_center: tuple[float, float] | None,
@@ -1661,23 +1755,34 @@ def _text_fits(
         font_stretch=stretch,
     )
     metrics = QFontMetricsF(font)
+    horizontal_scale = stretch / 100
     if layer.path is not None:
-        lines = _arc_text_lines(text, font, layer.path)
+        lines = _arc_text_lines(
+            text,
+            font,
+            layer.path,
+            horizontal_scale,
+        )
         return (
             all(
-                metrics.horizontalAdvance(line)
+                metrics.horizontalAdvance(line) * horizontal_scale
                 <= layer.path.approximate_length() + 0.5
                 for line in lines
             )
             and metrics.height() * len(lines) <= layer.box.height + 0.5
         )
     bounds = metrics.boundingRect(
-        QRectF(0, 0, layer.box.width, layer.box.height),
+        QRectF(
+            0,
+            0,
+            layer.box.width / horizontal_scale,
+            layer.box.height,
+        ),
         _text_flags(layer.style, text),
         text,
     )
     return (
-        bounds.width() <= layer.box.width + 0.5
+        bounds.width() * horizontal_scale <= layer.box.width + 0.5
         and bounds.height() <= layer.box.height + 0.5
     )
 
@@ -1697,8 +1802,10 @@ def _arc_single_line_fits(
         font_stretch=stretch,
     )
     metrics = QFontMetricsF(font)
+    horizontal_scale = stretch / 100
     return (
-        metrics.horizontalAdvance(text) <= layer.path.approximate_length() + 0.5
+        metrics.horizontalAdvance(text) * horizontal_scale
+        <= layer.path.approximate_length() + 0.5
         and metrics.height() <= layer.box.height + 0.5
     )
 
@@ -1734,11 +1841,19 @@ def _requires_character_wrap(text: str) -> bool:
     )
 
 
-def _render_arc_layer(painter: QPainter, layer: TextLayer, font: QFont) -> None:
+def _render_arc_layer(
+    painter: QPainter,
+    layer: TextLayer,
+    font: QFont,
+    *,
+    horizontal_scale: float | None = None,
+) -> None:
     path = layer.path
     if path is None or not layer.text:
         return
-    lines = _arc_text_lines(layer.text, font, path)
+    if horizontal_scale is None:
+        horizontal_scale = _font_horizontal_scale(layer.style)
+    lines = _arc_text_lines(layer.text, font, path, horizontal_scale)
     line_height = QFontMetricsF(font).height()
     normal_offsets = (
         (0.0,)
@@ -1749,7 +1864,15 @@ def _render_arc_layer(painter: QPainter, layer: TextLayer, font: QFont) -> None:
         )
     )
     for text, normal_offset in zip(lines, normal_offsets, strict=True):
-        _render_arc_text_line(painter, layer, path, font, text, normal_offset)
+        _render_arc_text_line(
+            painter,
+            layer,
+            path,
+            font,
+            text,
+            normal_offset,
+            horizontal_scale,
+        )
 
 
 def _render_arc_text_line(
@@ -1759,8 +1882,12 @@ def _render_arc_text_line(
     font: QFont,
     text: str,
     normal_offset: float,
+    horizontal_scale: float,
 ) -> None:
-    glyphs = _shaped_glyphs(text, font)
+    glyphs = tuple(
+        (glyph, advance * horizontal_scale)
+        for glyph, advance in _shaped_glyphs(text, font)
+    )
     if not glyphs:
         return
     total_width = sum(advance for _, advance in glyphs)
@@ -1788,6 +1915,9 @@ def _render_arc_text_line(
             layer.style.shadow_offset_x,
             layer.style.shadow_offset_y,
             tracking,
+            horizontal_scale,
+            layer.mirror_x,
+            layer.mirror_y,
         )
     if layer.style.stroke_width > 0:
         painter.setPen(QColor(*layer.style.stroke_rgb))
@@ -1805,6 +1935,9 @@ def _render_arc_text_line(
                         offset_x,
                         offset_y,
                         tracking,
+                        horizontal_scale,
+                        layer.mirror_x,
+                        layer.mirror_y,
                     )
     painter.setPen(QColor(*layer.style.fill_rgb))
     _draw_arc_glyphs(
@@ -1817,6 +1950,9 @@ def _render_arc_text_line(
         0,
         0,
         tracking,
+        horizontal_scale,
+        layer.mirror_x,
+        layer.mirror_y,
     )
 
 
@@ -1839,10 +1975,11 @@ def _arc_text_lines(
     text: str,
     font: QFont,
     path: TextPath,
+    horizontal_scale: float = 1,
 ) -> tuple[str, ...]:
     metrics = QFontMetricsF(font)
     path_length = path.approximate_length()
-    if metrics.horizontalAdvance(text) <= path_length + 0.5:
+    if metrics.horizontalAdvance(text) * horizontal_scale <= path_length + 0.5:
         return (text,)
     words = text.split()
     if len(words) < 2:
@@ -1858,7 +1995,11 @@ def _arc_text_lines(
             abs(metrics.horizontalAdvance(lines[0]) - metrics.horizontalAdvance(lines[1])),
         ),
     )
-    if max(metrics.horizontalAdvance(first), metrics.horizontalAdvance(second)) > path_length + 0.5:
+    if (
+        max(metrics.horizontalAdvance(first), metrics.horizontalAdvance(second))
+        * horizontal_scale
+        > path_length + 0.5
+    ):
         return (text,)
     return first, second
 
@@ -1911,6 +2052,9 @@ def _draw_arc_glyphs(
     draw_offset_x: float,
     draw_offset_y: float,
     tracking: float = 0,
+    horizontal_scale: float = 1,
+    mirror_x: bool = False,
+    mirror_y: bool = False,
 ) -> None:
     cursor = offset
     total_length = samples[-1][0]
@@ -1933,8 +2077,15 @@ def _draw_arc_glyphs(
             point.y + normal_y * normal_offset,
         )
         painter.rotate(angle)
+        painter.scale(
+            (-1 if mirror_x else 1) * horizontal_scale,
+            -1 if mirror_y else 1,
+        )
         painter.drawGlyphRun(
-            QPointF(-advance / 2 + draw_offset_x, draw_offset_y),
+            QPointF(
+                (-advance / 2 + draw_offset_x) / horizontal_scale,
+                draw_offset_y,
+            ),
             glyph,
         )
         painter.restore()
@@ -2068,6 +2219,28 @@ def _vertical_colored_label_foreground(
     pixels: np.ndarray,
     region: TextRegion,
 ) -> tuple[int, int, int] | None:
+    palette = _vertical_colored_label_palette(pixels, region)
+    return None if palette is None else palette[0]
+
+
+def _vertical_colored_label_background(
+    document: ImageDocument,
+    region: TextRegion,
+) -> tuple[int, int, int] | None:
+    channels = 4 if document.mode == "RGBA" else 3
+    pixels = np.frombuffer(document.pixels, dtype=np.uint8).reshape(
+        document.asset.height,
+        document.asset.width,
+        channels,
+    )[:, :, :3]
+    palette = _vertical_colored_label_palette(pixels, region)
+    return None if palette is None else palette[1]
+
+
+def _vertical_colored_label_palette(
+    pixels: np.ndarray,
+    region: TextRegion,
+) -> tuple[tuple[int, int, int], tuple[int, int, int]] | None:
     xs = np.asarray([point.x for point in region.polygon], dtype=float)
     ys = np.asarray([point.y for point in region.polygon], dtype=float)
     if np.ptp(ys) < np.ptp(xs) * 1.8:
@@ -2139,7 +2312,10 @@ def _vertical_colored_label_foreground(
     if not ranked:
         return None
     foreground = max(ranked, key=lambda item: item[0])[1]
-    return tuple(int(round(value)) for value in foreground)  # type: ignore[return-value]
+    return (
+        tuple(int(round(value)) for value in foreground),
+        tuple(int(round(value)) for value in background),
+    )  # type: ignore[return-value]
 
 
 def _estimate_font_weight(

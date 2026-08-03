@@ -123,6 +123,9 @@ def _infer(session: Any, image: np.ndarray, mask: np.ndarray) -> np.ndarray:
         .transpose(2, 0, 1)[None, ...]
         / 255.0
     )
+    # LaMa was trained with binary hole masks.  Rasterizers may leave
+    # anti-aliased edge values, but passing those grayscale values to the
+    # model causes partially erased text and gray halos in dense layouts.
     mask_tensor = (
         cv2.resize(mask, target_size, interpolation=cv2.INTER_NEAREST) > 0
     ).astype(np.float32)[None, None, ...]

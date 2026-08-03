@@ -61,7 +61,17 @@ class RapidOcrAdapter:
             code for code, profile in LANGUAGE_PROFILES.items() if profile is not None
         )
 
-    def recognize(self, document: ImageDocument, language_code: str) -> OcrResult:
+    def recognize(
+        self,
+        document: ImageDocument,
+        language_code: str,
+        fast: bool = False,
+    ) -> OcrResult:
+        """识别图片文字。
+
+        fast=True 时跳过瓦片恢复、密集重复修复与逐区域精修，
+        只做一次标准识别（适合快速预览，翻译流程保持完整路径）。
+        """
         try:
             profile = LANGUAGE_PROFILES[language_code]
         except KeyError as error:
@@ -87,22 +97,23 @@ class RapidOcrAdapter:
             return OcrResult((), language_code, profile.profile_id, elapsed_ms)
         if texts is None or scores is None or not (len(boxes) == len(texts) == len(scores)):
             raise OcrError("invalid_runtime_result", "RapidOCR 返回的文字框、文本和分数数量不一致")
-        boxes, texts, scores = _recover_high_resolution_regions(
-            engine,
-            image,
-            boxes,
-            texts,
-            scores,
-            self._confidence_threshold,
-        )
-        boxes, texts, scores = _recover_dense_repeated_regions(
-            engine,
-            image,
-            boxes,
-            texts,
-            scores,
-            self._confidence_threshold,
-        )
+        if not fast:
+            boxes, texts, scores = _recover_high_resolution_regions(
+                engine,
+                image,
+                boxes,
+                texts,
+                scores,
+                self._confidence_threshold,
+            )
+            boxes, texts, scores = _recover_dense_repeated_regions(
+                engine,
+                image,
+                boxes,
+                texts,
+                scores,
+                self._confidence_threshold,
+            )
         polygons = tuple(_engine_text_quad(box) for box in boxes)
         regions = []
         for index, (polygon, raw_text, raw_score) in enumerate(
@@ -112,7 +123,7 @@ class RapidOcrAdapter:
             if not text:
                 continue
             confidence = min(1.0, max(0.0, float(raw_score)))
-            if _should_refine_region(text):
+            if not fast and _should_refine_region(text):
                 try:
                     with self._lock:
                         text, confidence, polygon = _refine_region(

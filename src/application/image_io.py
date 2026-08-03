@@ -4,7 +4,13 @@ from pathlib import Path
 
 from src.application.image_limits import CurrentImageLimits
 from src.application.ports import ImageCodec
-from src.domain.image import ImageDocument, ImageFileFormat, ImageLimits, ImageValidationError
+from src.domain.image import (
+    ExportOptions,
+    ImageDocument,
+    ImageFileFormat,
+    ImageLimits,
+    ImageValidationError,
+)
 
 
 class ImportImage:
@@ -29,9 +35,17 @@ class ExportImage:
     def __init__(self, codec: ImageCodec) -> None:
         self._codec = codec
 
-    def execute(self, document: ImageDocument, target: Path) -> Path:
+    def execute(
+        self,
+        document: ImageDocument,
+        target: Path,
+        options: ExportOptions | None = None,
+    ) -> Path:
         if target.resolve() == document.asset.source_path.resolve():
             raise ImageValidationError("source_overwrite", "不能覆盖导入的原始图片")
         output_format = ImageFileFormat.from_output_suffix(target.suffix)
-        self._codec.save(document, target, output_format)
+        if options is None:
+            self._codec.save(document, target, output_format)
+        else:
+            self._codec.save(document, target, output_format, options)
         return target

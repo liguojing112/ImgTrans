@@ -419,3 +419,96 @@ class RepairTranslatedRegions:
         cancel = getattr(self._inpainting, "cancel", None)
         if cancel is not None:
             cancel()
+
+
+class RepairSelection:
+    """手动 AI 消除：对用户蒙版膨胀/羽化后调用修复服务。"""
+
+    def __init__(
+        self,
+        inpainting: InpaintingAdapter,
+        context_pixels: int = 96,
+        expansion_px: int = 3,
+        feather_px: int = 0,
+    ) -> None:
+        self._inpainting = inpainting
+        self._context_pixels = context_pixels
+        self._expansion_px = expansion_px
+        self._feather_px = feather_px
+
+    def expand_mask(
+        self,
+        mask: EraseMask,
+        expansion_px: int | None = None,
+        feather_px: int | None = None,
+    ) -> EraseMask:
+        """对蒙版做膨胀/羽化（与 execute 内部使用相同参数）。"""
+        return _expand_erase_mask(
+            mask,
+            self._expansion_px if expansion_px is None else expansion_px,
+            self._feather_px if feather_px is None else feather_px,
+        )
+
+    def execute(
+        self,
+        document: ImageDocument,
+        mask: EraseMask,
+        expansion_px: int | None = None,
+        feather_px: int | None = None,
+    ) -> InpaintingResult:
+        if mask.is_empty:
+            raise InpaintingError("empty_erase_mask", "请先框选或绘制消除区域")
+        reset_cancel = getattr(self._inpainting, "reset_cancel", None)
+        if reset_cancel is not None:
+            reset_cancel()
+        expanded = self.expand_mask(mask, expansion_px, feather_px)
+        return self._inpainting.inpaint(
+            InpaintingRequest(
+                document,
+                expanded,
+                self._context_pixels,
+            )
+        )
+
+    def cancel(self) -> None:
+        cancel = getattr(self._inpainting, "cancel", None)
+        if cancel is not None:
+            cancel()
+
+
+def _expand_erase_mask(
+    mask: EraseMask,
+    expansion_px: int,
+    feather_px: int,
+) -> EraseMask:
+    """膨胀蒙版（2~6px 避免残留文字边缘）；feather_px>0 时边缘高斯羽化。
+
+    返回新 EraseMask；无膨胀/羽化时原样返回。
+    """
+    if expansion_px <= 0 and feather_px <= 0:
+        return mask
+    import numpy as np
+
+    pixels = np.frombuffer(mask.pixels, dtype=np.uint8).reshape(
+        mask.height, mask.width
+    )
+    if expansion_px > 0:
+        import cv2
+
+        kernel = np.ones(
+            (expansion_px * 2 + 1, expansion_px * 2 + 1),
+            dtype=np.uint8,
+        )
+        pixels = cv2.dilate(pixels, kernel)
+    if feather_px > 0:
+        import cv2
+
+        sigma = max(0.5, feather_px / 2)
+        pixels = cv2.GaussianBlur(
+            pixels, (0, 0), sigmaX=sigma, sigmaY=sigma
+        )
+    return EraseMask(
+        mask.width,
+        mask.height,
+        pixels.astype(np.uint8).tobytes(),
+    )

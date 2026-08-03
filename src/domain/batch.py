@@ -10,6 +10,8 @@ from src.domain.job import ImageStage
 class BatchStatus(str, Enum):
     READY = "ready"
     RUNNING = "running"
+    PAUSING = "pausing"
+    PAUSED = "paused"
     COMPLETED = "completed"
     CANCELLED = "cancelled"
 

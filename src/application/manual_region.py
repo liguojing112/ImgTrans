@@ -20,7 +20,7 @@ from src.domain.manual_region import (
     ManualRegionSpec,
     box_to_quad,
 )
-from src.domain.layout import TextBox
+from src.domain.layout import CircularTextPath, TextBox
 from src.domain.ocr import OcrResult, TextRegion
 from src.domain.translation import (
     TranslationResult,
@@ -57,6 +57,7 @@ class ProcessManualRegion:
         ocr_language: str,
         selection: TranslationSelection,
         brand_terms: tuple[str, ...] = (),
+        preserve_numbers: bool = True,
     ) -> ManualRegionResult:
         _validate_box(source, spec.selection_box)
         _validate_box(source, spec.erase_box)
@@ -106,6 +107,7 @@ class ProcessManualRegion:
                 selection,
                 brand_terms,
                 allow_low_confidence=True,
+                preserve_numbers=preserve_numbers,
             )
             unit = translation.units[0]
             if not unit.should_erase_source:
@@ -134,10 +136,47 @@ class ProcessManualRegion:
             raise ManualRegionError("manual_layout_failed", "手动区域没有生成唯一译文图层")
         layer = text_layout.layers[0]
         if spec.circular_path is not None:
+            use_tangent_box = (
+                isinstance(spec.circular_path, CircularTextPath)
+                and _contains_latin(source_text)
+                and 0 < _cjk_character_count(translated_text) <= 2
+            )
+            text_box = (
+                replace(
+                    spec.text_box,
+                    height=spec.text_box.height
+                    + min(1.5, spec.text_box.height * 0.15),
+                )
+                if use_tangent_box
+                else spec.text_box
+            )
             layer = self._layout.reflow(
-                replace(layer, path=spec.circular_path),
+                replace(
+                    layer,
+                    box=text_box,
+                    path=None if use_tangent_box else spec.circular_path,
+                ),
                 layer.text,
             )
+            if (
+                isinstance(spec.circular_path, CircularTextPath)
+                and _contains_latin(source_text)
+                and _contains_cjk(translated_text)
+            ):
+                maximum_font_size = spec.text_box.height * (
+                    0.85 if use_tangent_box else 0.72
+                )
+                layer = replace(
+                    layer,
+                    style=replace(
+                        layer.style,
+                        font_size=min(
+                            layer.style.font_size,
+                            max(6.0, maximum_font_size),
+                        ),
+                        wrap=False,
+                    ),
+                )
         return ManualRegionResult(
             region_id,
             source_text,
@@ -157,3 +196,26 @@ def _validate_box(document: ImageDocument, box: TextBox) -> None:
     for point in box_to_quad(box):
         if not 0 <= point.x <= document.asset.width or not 0 <= point.y <= document.asset.height:
             raise ManualRegionError("manual_box_outside", "手动区域必须位于图片范围内")
+
+
+def _contains_latin(text: str) -> bool:
+    return any(
+        "A" <= character <= "Z" or "a" <= character <= "z"
+        for character in text
+    )
+
+
+def _contains_cjk(text: str) -> bool:
+    return any(
+        "\u3400" <= character <= "\u9fff"
+        or "\uf900" <= character <= "\ufaff"
+        for character in text
+    )
+
+
+def _cjk_character_count(text: str) -> int:
+    return sum(
+        "\u3400" <= character <= "\u9fff"
+        or "\uf900" <= character <= "\ufaff"
+        for character in text
+    )

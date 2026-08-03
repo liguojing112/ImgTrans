@@ -9,6 +9,7 @@ class ImageFileFormat(str, Enum):
     JPEG = "JPEG"
     PNG = "PNG"
     WEBP = "WEBP"
+    BMP = "BMP"
     GIF = "GIF"
     TIFF = "TIFF"
 
@@ -19,11 +20,14 @@ class ImageFileFormat(str, Enum):
             ".jpeg": cls.JPEG,
             ".png": cls.PNG,
             ".webp": cls.WEBP,
+            ".bmp": cls.BMP,
         }
         try:
             return mapping[suffix.lower()]
         except KeyError as error:
-            raise ImageValidationError("unsupported_input_format", "仅支持 JPG、PNG 和 WebP") from error
+            raise ImageValidationError(
+                "unsupported_input_format", "仅支持 JPG、PNG、WebP 和 BMP"
+            ) from error
 
     @classmethod
     def from_output_suffix(cls, suffix: str) -> "ImageFileFormat":
@@ -48,6 +52,31 @@ class ImageValidationError(ValueError):
     def __init__(self, code: str, message: str) -> None:
         super().__init__(message)
         self.code = code
+
+
+@dataclass(frozen=True, slots=True)
+class ExportOptions:
+    quality: int = 95
+    preserve_alpha: bool = True
+    background_rgb: tuple[int, int, int] = (255, 255, 255)
+    output_width: int | None = None
+    output_height: int | None = None
+
+    def __post_init__(self) -> None:
+        if not 1 <= self.quality <= 100:
+            raise ValueError("Export quality must be between 1 and 100")
+        if (
+            len(self.background_rgb) != 3
+            or any(not 0 <= value <= 255 for value in self.background_rgb)
+        ):
+            raise ValueError("Export background must be an RGB color")
+        if (self.output_width is None) != (self.output_height is None):
+            raise ValueError("Export dimensions must include both width and height")
+        if (
+            self.output_width is not None
+            and (self.output_width <= 0 or self.output_height <= 0)
+        ):
+            raise ValueError("Export dimensions must be positive")
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,12 +114,16 @@ class ImageLimits:
         if width < self.min_width or height < self.min_height:
             raise ImageValidationError(
                 "dimensions_too_small",
-                f"图片宽高不得小于 {self.min_width}×{self.min_height} px",
+                f"当前图片尺寸为 {width}×{height}，请上传 "
+                f"{self.min_width}×{self.min_height} 至 "
+                f"{self.max_width}×{self.max_height} 范围内的图片",
             )
         if width > self.max_width or height > self.max_height:
             raise ImageValidationError(
                 "dimensions_too_large",
-                f"图片宽高不得超过 {self.max_width}×{self.max_height} px",
+                f"当前图片尺寸为 {width}×{height}，请上传 "
+                f"{self.min_width}×{self.min_height} 至 "
+                f"{self.max_width}×{self.max_height} 范围内的图片",
             )
         if width * height > self.max_pixels:
             raise ImageValidationError(

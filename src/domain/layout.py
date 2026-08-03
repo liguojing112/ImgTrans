@@ -213,6 +213,11 @@ class TextStyle:
     font_fallback_reason: str | None = None
     font_stretch: int = 100
     font_weight: int = 400
+    line_height: float = 1.0
+    letter_spacing: float = 0.0
+    text_opacity: float = 1.0
+    background_rgb: tuple[int, int, int] | None = None
+    background_opacity: float = 0.0
 
     def __post_init__(self) -> None:
         if not self.font_family or self.font_size <= 0:
@@ -230,6 +235,19 @@ class TextStyle:
             raise ValueError("Font stretch must be between 50 and 200")
         if self.font_weight not in {400, 600, 700}:
             raise ValueError("Font weight must be 400, 600 or 700")
+        if not 0.7 <= self.line_height <= 3:
+            raise ValueError("Line height must be between 0.7 and 3")
+        if not -10 <= self.letter_spacing <= 50:
+            raise ValueError("Letter spacing must be between -10 and 50")
+        if not 0 <= self.text_opacity <= 1:
+            raise ValueError("Text opacity must be between zero and one")
+        if not 0 <= self.background_opacity <= 1:
+            raise ValueError("Text background opacity must be between zero and one")
+        if self.background_rgb is not None and (
+            len(self.background_rgb) != 3
+            or any(not 0 <= value <= 255 for value in self.background_rgb)
+        ):
+            raise ValueError("Text background must be an RGB color")
 
 
 @dataclass(frozen=True, slots=True)
@@ -240,6 +258,12 @@ class TextLayer:
     style: TextStyle
     overflow: bool = False
     path: TextPath | None = None
+    visible: bool = True
+    locked: bool = False
+    # Orthogonal canvas flips are kept as explicit layer transforms so the
+    # glyphs follow the image instead of merely moving their bounding boxes.
+    mirror_x: bool = False
+    mirror_y: bool = False
 
     def __post_init__(self) -> None:
         if not self.region_id:
