@@ -1,10 +1,143 @@
 {% extends "base.html" %}
 {% block content %}
+<style>
+.promo-card {
+  border: 1px solid #f0d9b5;
+  border-radius: 12px;
+  padding: 20px;
+  margin-bottom: 16px;
+  background: #fffaf5;
+}
+.promo-card h3 {
+  margin: 0 0 12px 0;
+  font-size: 18px;
+  color: #333;
+}
+.promo-card label {
+  display: block;
+  margin: 10px 0 4px;
+  font-weight: 600;
+  color: #444;
+}
+.promo-card input[type="text"],
+.promo-card input[type="number"],
+.promo-card input[type="datetime-local"],
+.promo-card select {
+  width: 100%;
+  max-width: 400px;
+  padding: 8px 12px;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  font-size: 14px;
+  box-sizing: border-box;
+}
+.promo-card .form-row {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.promo-card .form-row > div {
+  flex: 1;
+  min-width: 180px;
+}
+.promo-card .hint {
+  color: #888;
+  font-size: 12px;
+  margin-top: 4px;
+}
+.promo-card .btn-delete {
+  background: #d32f2f;
+  color: #fff;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 14px;
+}
+.promo-card .btn-submit {
+  background: #1976d2;
+  color: #fff;
+  border: none;
+  padding: 10px 24px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 14px;
+  margin-top: 12px;
+}
+.price-display .sale-price {
+  font-size: 24px;
+  font-weight: bold;
+  color: #ff4400;
+}
+.price-display .original-price {
+  font-size: 14px;
+  color: #999;
+  text-decoration: line-through;
+  margin-left: 8px;
+}
+</style>
+
 <h1>激活管理</h1>
+
 {% if issued_codes %}<section class="card warning"><h2>仅显示一次的新激活码</h2><ul>{% for value in issued_codes %}<li><code>{{ value }}</code></li>{% endfor %}</ul><p>离开本页后无法再次查看。</p></section>{% endif %}
-<section class="card"><h2>新建方案</h2><form method="post" action="/admin/activation/plans" class="form-grid">
-<input type="hidden" name="csrf_token" value="{{ csrf_token }}"><label>名称<input name="name" required></label><label>金额（最小货币单位）<input name="amount_minor" type="number" min="0" required></label><label>货币<input name="currency" value="CNY" pattern="[A-Z]{3}" required></label><label>有效天数<input name="duration_days" type="number" min="1" max="3650" required></label><input type="hidden" name="enabled" value="true"><button>创建方案</button></form></section>
-<section class="card"><h2>方案</h2><table><tr><th>ID</th><th>名称</th><th>金额</th><th>有效期</th><th>状态</th><th>修改</th></tr>{% for item in plans %}<tr><td>{{ item.plan_id }}</td><td>{{ item.values.name }}</td><td>{{ item.values.amount_minor }} {{ item.values.currency }}</td><td>{{ item.values.duration_days }} 天</td><td>{{ "启用" if item.values.enabled else "停用" }}</td><td><form method="post" action="/admin/activation/plans/{{ item.plan_id }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="name" value="{{ item.values.name }}"><input type="hidden" name="amount_minor" value="{{ item.values.amount_minor }}"><input type="hidden" name="currency" value="{{ item.values.currency }}"><input type="hidden" name="duration_days" value="{{ item.values.duration_days }}"><input type="hidden" name="enabled" value="{{ 'false' if item.values.enabled else 'true' }}"><button>{{ "停用" if item.values.enabled else "启用" }}</button></form></td></tr>{% endfor %}</table></section>
+
+<div class="promo-card">
+  <h3>新建方案</h3>
+  <form method="post" action="/admin/activation/plans">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <div class="form-row">
+      <div>
+        <label>名称</label>
+        <input name="name" required>
+      </div>
+      <div>
+        <label>类型</label>
+        <select name="plan_type" id="plan_type">
+          <option value="duration">时长包</option>
+          <option value="quota">次数包</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-row">
+      <div>
+        <label>原价（分）</label>
+        <input name="amount_minor" type="number" min="0" required>
+      </div>
+      <div>
+        <label>货币</label>
+        <input name="currency" value="CNY" pattern="[A-Z]{3}" required style="max-width:120px;">
+      </div>
+      <div>
+        <label>有效天数（时长包）</label>
+        <input name="duration_days" type="number" min="1" max="3650" value="30">
+      </div>
+      <div>
+        <label>次数（次数包）</label>
+        <input name="quota" type="number" min="0" value="0">
+      </div>
+    </div>
+    <h3 style="margin-top:20px;">促销设置</h3>
+    <div class="form-row">
+      <div>
+        <label>促销价（分，留空无促销）</label>
+        <input name="sale_amount_minor" type="number" min="0">
+        <div class="hint">促销价必须低于原价</div>
+      </div>
+      <div>
+        <label>促销截止时间</label>
+        <input name="sale_ends_at" type="datetime-local">
+      </div>
+    </div>
+    <div>
+      <label>权益描述</label>
+      <input name="benefits" maxlength="500" placeholder="如：含30天图片翻译 + 100次商品详情生成">
+    </div>
+    <input type="hidden" name="enabled" value="true">
+    <button type="submit" class="btn-submit">创建方案</button>
+  </form>
+</div>
+
+<section class="card"><h2>方案</h2><table><tr><th>ID</th><th>名称</th><th>价格</th><th>类型</th><th>时长/次数</th><th>权益</th><th>状态</th><th>修改</th></tr>{% for item in plans %}<tr><td>{{ item.plan_id }}</td><td>{{ item.values.name }}</td><td><span class="price-display">{% if item.values.sale_amount_minor %}<span class="sale-price">¥{{ "%.2f"|format(item.values.sale_amount_minor / 100) }}</span><span class="original-price">¥{{ "%.2f"|format(item.values.amount_minor / 100) }}</span>{% else %}¥{{ "%.2f"|format(item.values.amount_minor / 100) }}{% endif %}</span></td><td>{{ "次数包" if item.values.plan_type == "quota" else "时长包" }}</td><td>{% if item.values.plan_type == "quota" %}{{ item.values.quota }} 次{% else %}{{ item.values.duration_days }} 天{% endif %}</td><td>{{ item.values.benefits or "-" }}</td><td>{{ "启用" if item.values.enabled else "停用" }}</td><td><form method="post" action="/admin/activation/plans/{{ item.plan_id }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="name" value="{{ item.values.name }}"><input type="hidden" name="amount_minor" value="{{ item.values.amount_minor }}"><input type="hidden" name="currency" value="{{ item.values.currency }}"><input type="hidden" name="duration_days" value="{{ item.values.duration_days }}"><input type="hidden" name="plan_type" value="{{ item.values.plan_type }}"><input type="hidden" name="quota" value="{{ item.values.quota }}"><input type="hidden" name="sale_amount_minor" value="{{ item.values.sale_amount_minor or '' }}"><input type="hidden" name="sale_ends_at" value="{{ item.values.sale_ends_at or '' }}"><input type="hidden" name="benefits" value="{{ item.values.benefits }}"><input type="hidden" name="enabled" value="{{ 'false' if item.values.enabled else 'true' }}"><button>{{ "停用" if item.values.enabled else "启用" }}</button></form></td></tr>{% endfor %}</table></section>
 <section class="card"><h2>手工发码</h2>{% if activation_configured %}<form method="post" action="/admin/activation/codes" class="form-grid"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><label>方案<select name="plan_id">{% for item in plans if item.values.enabled %}<option value="{{ item.plan_id }}">{{ item.values.name }}</option>{% endfor %}</select></label><label>数量<input name="count" type="number" min="1" max="100" value="1"></label><button>生成</button></form>{% else %}<p class="error">激活服务未配置，无法发码。</p>{% endif %}</section>
-<section class="card"><h2>激活码记录</h2><table><tr><th>ID</th><th>方案</th><th>状态</th><th>绑定</th><th>过期时间</th><th>操作</th></tr>{% for item in codes %}<tr><td>{{ item.code_id }}</td><td>{{ item.plan_id }}</td><td>{{ "已停用" if item.disabled else ("已绑定" if item.bound else "未绑定") }}</td><td>{{ "是" if item.bound else "否" }}</td><td>{{ item.expires_at or "-" }}</td><td>{% if not item.disabled %}<form method="post" action="/admin/activation/codes/{{ item.code_id }}/disable"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button>停用</button></form>{% endif %}</td></tr>{% endfor %}</table></section>
+<section class="card"><h2>激活码记录</h2><table><tr><th>ID</th><th>方案</th><th>状态</th><th>绑定</th><th>过期时间</th><th>剩余次数</th><th>操作</th></tr>{% for item in codes %}<tr><td>{{ item.code_id }}</td><td>{{ item.plan_id }}</td><td>{{ "已停用" if item.disabled else ("已绑定" if item.bound else "未绑定") }}</td><td>{{ "是" if item.bound else "否" }}</td><td>{{ item.expires_at or "-" }}</td><td>{{ item.quota_remaining }}/{{ item.quota_total }}</td><td>{% if not item.disabled %}<form method="post" action="/admin/activation/codes/{{ item.code_id }}/disable"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button>停用</button></form>{% endif %}</td></tr>{% endfor %}</table></section>
 {% endblock %}

@@ -18,8 +18,10 @@ from server.api.activation import activation_router, admin_activation_router
 from server.api.correlation import CORRELATION_HEADER, normalize_correlation_id
 from server.api.image_limits import admin_image_limits_router, client_config_router
 from server.api.models import admin_models_router, model_manifest_router
+from server.api.payment import admin_payment_router, payment_router
 from server.api.routes import health_router, v1_router
 from server.api.translation import translation_router
+from server.api.usage import usage_router
 from server.application.image_limits import GetClientConfig, ManageImageLimits
 from server.application.activation import (
     ActivateDevice,
@@ -30,10 +32,24 @@ from server.application.activation import (
     UnavailableDeviceTokenAuthorizer,
 )
 from server.application.audit import AuditManagementAction
+from server.application.admin_users import ManageAdminUsers
 from server.application.models import GetModelManifest, ManageModelReleases, ObjectStorageSigner
+from server.application.payment import (
+    CreatePaymentOrder,
+    GetPaymentOrder,
+    HandlePaymentCallback,
+    ListPaymentOrders,
+)
+from server.application.usage import ManageUsage
 from server.application.translation import TranslateText, TranslationProvider
 from server.config import ServerSettings
 from server.infrastructure.database import Database
+from server.infrastructure.admin_user_repository import SqlAlchemyAdminUserRepository
+from server.infrastructure.payment_repository import SqlAlchemyPaymentRepository
+from server.infrastructure.wechat_pay_gateway import (
+    UnavailableWechatGateway,
+    WechatPayV3Gateway,
+)
 from server.infrastructure.image_limits_repository import (
     SqlAlchemyImageLimitRepository,
 )
@@ -54,6 +70,11 @@ from server.domain.models import (
     ModelReleaseConflict,
     ModelReleaseError,
     ModelReleaseNotFound,
+)
+from server.domain.payment import (
+    PaymentConflict,
+    PaymentError,
+    PaymentNotFound,
 )
 from server.infrastructure.microsoft_translator import (
     MicrosoftTranslatorAdapter,
@@ -93,12 +114,28 @@ def create_app(
     app.state.rate_limiter = InMemoryRateLimiter()
     audit_repository = SqlAlchemyAuditRepository(database)
     app.state.audit_management = AuditManagementAction(audit_repository)
+    admin_user_repository = SqlAlchemyAdminUserRepository(database)
+    app.state.manage_admin_users = ManageAdminUsers(admin_user_repository)
+    if (
+        settings.admin_session_secret is not None
+        and settings.admin_username is not None
+        and settings.admin_password_hash is not None
+    ):
+        if not app.state.manage_admin_users.has_super():
+            try:
+                app.state.manage_admin_users.create_super_from_env(
+                    settings.admin_username,
+                    settings.admin_password_hash,
+                )
+            except Exception:
+                logging.getLogger("imgtrans.server").exception(
+                    "seed_admin_user_failed"
+                )
     app.state.admin_security = (
         AdminSecurity(
-            settings.admin_username or "",
-            settings.admin_password_hash or "",
-            settings.admin_session_secret or "",
+            settings.admin_session_secret,
             settings.admin_session_ttl_seconds,
+            authenticate=app.state.manage_admin_users.authenticate,
         )
         if settings.admin_session_secret is not None
         else None
@@ -139,6 +176,7 @@ def create_app(
         activation_hasher,
     )
     app.state.device_authorization_enabled = activation_hasher is not None
+    app.state.manage_usage = ManageUsage(activation_repository, activation_hasher)
     if activation_hasher is not None:
         app.state.activate_device = ActivateDevice(
             activation_repository,
@@ -151,6 +189,24 @@ def create_app(
     else:
         app.state.activate_device = None
         app.state.authorize_device_token = UnavailableDeviceTokenAuthorizer()
+    payment_repository = SqlAlchemyPaymentRepository(database)
+    payment_gateway = (
+        WechatPayV3Gateway(settings)
+        if settings.wechat_pay_configured
+        else UnavailableWechatGateway()
+    )
+    app.state.create_payment_order = CreatePaymentOrder(
+        payment_gateway,
+        app.state.manage_activation_plans,
+        payment_repository,
+    )
+    app.state.handle_payment_callback = HandlePaymentCallback(
+        payment_gateway,
+        payment_repository,
+        app.state.manage_activation_codes.issue,
+    )
+    app.state.get_payment_order = GetPaymentOrder(payment_repository)
+    app.state.list_payment_orders = ListPaymentOrders(payment_repository)
     if translation_provider is None:
         translation_provider = (
             MicrosoftTranslatorAdapter(
@@ -267,7 +323,7 @@ def create_app(
             str(error),
         )
 
-    for error_type in (ActivationError, ImageLimitError, ModelReleaseError):
+    for error_type in (ActivationError, ImageLimitError, ModelReleaseError, PaymentError):
         app.add_exception_handler(error_type, domain_error)
 
     app.include_router(health_router)
@@ -279,6 +335,9 @@ def create_app(
     app.include_router(admin_models_router)
     app.include_router(activation_router)
     app.include_router(admin_activation_router)
+    app.include_router(payment_router)
+    app.include_router(admin_payment_router)
+    app.include_router(usage_router)
     app.mount(
         "/admin/static",
         StaticFiles(directory=Path(__file__).parent / "admin" / "static"),

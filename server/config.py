@@ -42,6 +42,13 @@ class ServerSettings:
     admin_password_hash: str | None = field(default=None, repr=False)
     admin_session_secret: str | None = field(default=None, repr=False)
     admin_session_ttl_seconds: int = 28_800
+    wechat_appid: str | None = None
+    wechat_mchid: str | None = None
+    wechat_apiv3_key: str | None = field(default=None, repr=False)
+    wechat_private_key: str | None = field(default=None, repr=False)
+    wechat_serial_no: str | None = None
+    wechat_platform_cert: str | None = field(default=None, repr=False)
+    wechat_notify_url: str | None = None
 
     @classmethod
     def from_env(
@@ -265,6 +272,22 @@ class ServerSettings:
             admin_password_hash=admin_password_hash,
             admin_session_secret=admin_session_secret,
             admin_session_ttl_seconds=admin_session_ttl_seconds,
+            wechat_appid=_optional_text(values.get("IMGTRANS_WECHAT_APPID")),
+            wechat_mchid=_optional_text(values.get("IMGTRANS_WECHAT_MCHID")),
+            wechat_apiv3_key=_optional_secret(
+                values.get("IMGTRANS_WECHAT_APIV3_KEY"),
+                "IMGTRANS_WECHAT_APIV3_KEY",
+            ),
+            wechat_private_key=_optional_text(values.get("IMGTRANS_WECHAT_PRIVATE_KEY")),
+            wechat_serial_no=_optional_text(values.get("IMGTRANS_WECHAT_SERIAL_NO")),
+            wechat_platform_cert=_optional_text(
+                values.get("IMGTRANS_WECHAT_PLATFORM_CERT")
+            ),
+            wechat_notify_url=_optional_url(
+                values.get("IMGTRANS_WECHAT_NOTIFY_URL"),
+                "IMGTRANS_WECHAT_NOTIFY_URL",
+                require_https=production,
+            ),
         )
 
     def public_summary(self) -> dict[str, str | int | bool]:
@@ -279,7 +302,22 @@ class ServerSettings:
             "object_storage_configured": self.object_storage_endpoint is not None,
             "activation_configured": self.activation_secret is not None,
             "admin_console_configured": self.admin_session_secret is not None,
+            "wechat_pay_configured": self.wechat_pay_configured,
         }
+
+    @property
+    def wechat_pay_configured(self) -> bool:
+        return all(
+            (
+                self.wechat_appid,
+                self.wechat_mchid,
+                self.wechat_apiv3_key,
+                self.wechat_private_key,
+                self.wechat_serial_no,
+                self.wechat_platform_cert,
+                self.wechat_notify_url,
+            )
+        )
 
 
 def _parse_bool(value: str, name: str) -> bool:

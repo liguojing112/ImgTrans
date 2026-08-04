@@ -13,11 +13,15 @@
   </header>
   {% if username %}
   <nav>
-    <a href="/admin/image-limits">图片限制</a>
-    <a href="/admin/models">模型</a>
-    <a href="/admin/translation">翻译服务</a>
-    <a href="/admin/activation">激活</a>
-    <a href="/admin/audit">审计</a>
+    {% if 'image_limits' in permissions %}<a href="/admin/image-limits">图片限制</a>{% endif %}
+    {% if 'models' in permissions %}<a href="/admin/models">模型</a>{% endif %}
+    {% if 'translation' in permissions %}<a href="/admin/translation">翻译服务</a>{% endif %}
+    {% if 'activation' in permissions %}<a href="/admin/activation">激活</a>{% endif %}
+    {% if 'usage' in permissions %}<a href="/admin/usage">用量</a>{% endif %}
+    {% if 'payments' in permissions %}<a href="/admin/payments">订单</a>{% endif %}
+    {% if 'audit' in permissions %}<a href="/admin/audit">审计</a>{% endif %}
+    {% if 'users' in permissions %}<a href="/admin/users">账号管理</a>{% endif %}
+    <a href="/admin/change-password">修改密码</a>
     <form method="post" action="/admin/logout">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <button type="submit">退出</button>

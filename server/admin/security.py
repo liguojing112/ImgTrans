@@ -9,6 +9,13 @@ import json
 import re
 import secrets
 import time
+from collections.abc import Callable
+
+from server.domain.admin_users import (
+    AdminUser,
+    format_permissions,
+    parse_permissions,
+)
 
 
 SESSION_COOKIE = "imgtrans_admin_session"
@@ -24,47 +31,49 @@ class AdminSession:
     username: str
     nonce: str
     expires_at: datetime
+    role: str = "super"
+    permissions: frozenset[str] = frozenset()
 
 
 class AdminSecurity:
+    """管理后台会话与 CSRF 安全 — 认证委托给注入的 authenticate 回调。"""
+
     def __init__(
         self,
-        username: str,
-        password_hash: str,
         session_secret: str,
         session_ttl_seconds: int,
+        authenticate: Callable[[str, str], AdminUser | None] | None = None,
     ) -> None:
-        if not re.fullmatch(r"[A-Za-z0-9._-]{1,64}", username):
-            raise AdminSecurityError("Administrator username is invalid")
         if len(session_secret) < 32:
             raise AdminSecurityError("Administrator session secret is too short")
-        _parse_password_hash(password_hash)
         if not 900 <= session_ttl_seconds <= 86_400:
             raise AdminSecurityError("Administrator session TTL is invalid")
-        self._username = username
-        self._password_hash = password_hash
         self._secret = session_secret.encode("utf-8")
         self._session_ttl_seconds = session_ttl_seconds
-
-    @property
-    def username(self) -> str:
-        return self._username
+        self._authenticate = authenticate
 
     @property
     def session_ttl_seconds(self) -> int:
         return self._session_ttl_seconds
 
-    def verify_credentials(self, username: str, password: str) -> bool:
-        username_ok = hmac.compare_digest(username, self._username)
-        password_ok = verify_password(password, self._password_hash)
-        return username_ok and password_ok
+    def verify_credentials(self, username: str, password: str) -> AdminUser | None:
+        if self._authenticate is None:
+            return None
+        return self._authenticate(username, password)
 
-    def create_session(self) -> str:
+    def create_session(
+        self,
+        username: str,
+        role: str,
+        permissions: frozenset[str],
+    ) -> str:
         payload = {
             "v": 1,
-            "u": self._username,
+            "u": username,
             "n": secrets.token_urlsafe(24),
             "exp": int(time.time()) + self._session_ttl_seconds,
+            "r": role,
+            "p": format_permissions(permissions),
         }
         encoded = _b64encode(
             json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
@@ -79,21 +88,28 @@ class AdminSecurity:
             return None
         try:
             payload = json.loads(_b64decode(encoded))
-            if set(payload) != {"v", "u", "n", "exp"}:
+            if set(payload) != {"v", "u", "n", "exp", "r", "p"}:
                 return None
-            if payload["v"] != 1 or payload["u"] != self._username:
+            if payload["v"] != 1:
                 return None
-            if not isinstance(payload["n"], str) or len(payload["n"]) > 128:
+            if not isinstance(payload["u"], str) or not isinstance(payload["n"], str):
                 return None
+            if len(payload["u"]) > 64 or len(payload["n"]) > 128:
+                return None
+            if payload["r"] not in {"super", "sub"}:
+                return None
+            permissions = parse_permissions(str(payload["p"]))
             expires = int(payload["exp"])
         except (ValueError, TypeError, UnicodeDecodeError, json.JSONDecodeError):
             return None
         if expires <= int(time.time()):
             return None
         return AdminSession(
-            username=self._username,
+            username=payload["u"],
             nonce=payload["n"],
             expires_at=datetime.fromtimestamp(expires, timezone.utc),
+            role=payload["r"],
+            permissions=permissions,
         )
 
     def create_login_nonce(self) -> tuple[str, str]:
@@ -172,4 +188,3 @@ def _b64encode(value: bytes) -> str:
 def _b64decode(value: str) -> bytes:
     padding = "=" * (-len(value) % 4)
     return base64.b64decode(value + padding, altchars=b"-_", validate=True)
-

@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>用量记录</h1>
+<section class="card"><h2>商品详情次数消耗</h2>
+<table>
+<tr><th>ID</th><th>激活码</th><th>消耗次数</th><th>时间</th></tr>
+{% for record in records %}
+<tr><td>{{ record.usage_id }}</td><td>{{ record.code_id }}</td><td>{{ record.amount }}</td><td>{{ record.created_at.strftime("%Y-%m-%d %H:%M:%S") }}</td></tr>
+{% else %}
+<tr><td colspan="4">暂无用量记录</td></tr>
+{% endfor %}
+</table></section>
+{% endblock %}

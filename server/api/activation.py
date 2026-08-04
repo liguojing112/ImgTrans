@@ -26,6 +26,11 @@ class ActivationPlanPayload(StrictContract):
     currency: str = Field(default="CNY", pattern=r"^[A-Z]{3}$")
     duration_days: int = Field(ge=1, le=3650)
     enabled: bool = True
+    plan_type: Literal["duration", "quota"] = "duration"
+    quota: int = Field(default=0, ge=0, le=1_000_000)
+    sale_amount_minor: int | None = Field(default=None, ge=0, le=1_000_000_000_000)
+    sale_ends_at: datetime | None = None
+    benefits: str = Field(default="", max_length=500)
 
     def to_domain(self) -> ActivationPlanValues:
         return ActivationPlanValues(**self.model_dump())
@@ -68,6 +73,8 @@ class ActivationCodeResponse(StrictContract):
     activated_at: datetime | None
     expires_at: datetime | None
     disabled_at: datetime | None
+    quota_total: int
+    quota_remaining: int
 
 
 class ActivationCodeListResponse(StrictContract):
@@ -94,6 +101,14 @@ class ActivateDeviceResponse(StrictContract):
     expires_at: datetime
     access_token: str
     token_type: Literal["Bearer"]
+    quota_total: int
+    quota_remaining: int
+
+
+class UnbindDeviceRequest(StrictContract):
+    activation_code: str = Field(
+        pattern=r"^IT-(?:[A-HJ-NP-Z2-9]{4}-){7}[A-HJ-NP-Z2-9]{4}$"
+    )
 
 
 activation_router = APIRouter(prefix="/v1/activations", tags=["activation"])
@@ -128,7 +143,29 @@ def activate_device(
         expires_at=grant.activation.expires_at,
         access_token=grant.access_token,
         token_type="Bearer",
+        quota_total=grant.activation.quota_total,
+        quota_remaining=grant.activation.quota_remaining,
     )
+
+
+@activation_router.post("/unbind")
+def unbind_device(
+    payload: UnbindDeviceRequest,
+    request: Request,
+    response: Response,
+) -> dict:
+    enforce_rate_limit(request, "activation-unbind", limit=5, window_seconds=300)
+    _require_activation_enabled(request)
+    try:
+        unbound = request.app.state.manage_activation_codes.unbind(
+            payload.activation_code
+        )
+    except ActivationError as error:
+        raise _domain_http_error(error) from error
+    if not unbound:
+        raise HTTPException(status_code=404, detail="激活码无效或已停用")
+    response.headers["Cache-Control"] = "no-store"
+    return {"unbound": True}
 
 
 @admin_activation_router.post(
@@ -265,6 +302,11 @@ def _plan_response(plan: ActivationPlan) -> ActivationPlanResponse:
             "currency": plan.values.currency,
             "duration_days": plan.values.duration_days,
             "enabled": plan.values.enabled,
+            "plan_type": plan.values.plan_type,
+            "quota": plan.values.quota,
+            "sale_amount_minor": plan.values.sale_amount_minor,
+            "sale_ends_at": plan.values.sale_ends_at,
+            "benefits": plan.values.benefits,
         },
     )
 
@@ -289,4 +331,6 @@ def _code_response(code: ActivationCode) -> ActivationCodeResponse:
         activated_at=code.activated_at,
         expires_at=code.expires_at,
         disabled_at=code.disabled_at,
+        quota_total=code.quota_total,
+        quota_remaining=code.quota_remaining,
     )

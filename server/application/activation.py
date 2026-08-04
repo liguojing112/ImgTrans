@@ -13,6 +13,7 @@ from server.domain.activation import (
     ActivationPlan,
     ActivationPlanValues,
     DeviceActivation,
+    UsageRecord,
 )
 
 
@@ -31,6 +32,7 @@ class ActivationRepository(Protocol):
         self,
         plan_id: int,
         duration_days: int,
+        quota_total: int,
         code_digests: tuple[str, ...],
     ) -> tuple[ActivationCode, ...]: ...
 
@@ -47,6 +49,18 @@ class ActivationRepository(Protocol):
     ) -> DeviceActivation: ...
 
     def authorize_token(self, token_digest: str, now: datetime) -> bool: ...
+
+    def resolve_token(self, token_digest: str) -> ActivationCode | None: ...
+
+    def unbind(self, code_digest: str) -> bool: ...
+
+    def get_usage(self, token_digest: str) -> tuple[int, int]: ...
+
+    def consume_quota(
+        self, token_digest: str, amount: int, now: datetime
+    ) -> tuple[bool, int]: ...
+
+    def list_usage(self, limit: int = 100) -> list[UsageRecord]: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -130,6 +144,7 @@ class ManageActivationCodes:
                 activations = self._repository.create_codes(
                     plan.plan_id,
                     plan.values.duration_days,
+                    plan.values.quota,
                     digests,
                 )
             except ActivationConflict:
@@ -145,6 +160,12 @@ class ManageActivationCodes:
 
     def disable(self, code_id: str) -> ActivationCode:
         return self._repository.disable_code(code_id, datetime.now(timezone.utc))
+
+    def unbind(self, activation_code: str) -> bool:
+        """自助解绑：清设备/token 绑定，保留次数与时长额度。"""
+        if self._hasher is None:
+            raise ActivationConflict("Activation service is not configured")
+        return self._repository.unbind(self._hasher.digest_code(activation_code))
 
     def _generate_code(self) -> str:
         raw = "".join(self._random_choice(self._ALPHABET) for _ in range(32))

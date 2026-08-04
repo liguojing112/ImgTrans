@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>订单</h1>
+<section class="card"><h2>支付订单</h2>
+<table>
+<tr><th>订单号</th><th>套餐</th><th>金额</th><th>状态</th><th>激活码</th><th>创建时间</th><th>支付时间</th></tr>
+{% for order in orders %}
+<tr>
+<td>{{ order.order_id }}</td>
+<td>#{{ order.plan_id }}</td>
+<td>{{ order.amount_minor }} {{ order.currency }}</td>
+<td>{{ "已支付" if order.status.value == "paid" else ("已取消" if order.status.value == "cancelled" else "待支付") }}</td>
+<td>{{ order.code_id or "-" }}</td>
+<td>{{ order.created_at.strftime("%Y-%m-%d %H:%M") }}</td>
+<td>{{ order.paid_at.strftime("%Y-%m-%d %H:%M") if order.paid_at else "-" }}</td>
+</tr>
+{% else %}
+<tr><td colspan="7">暂无订单</td></tr>
+{% endfor %}
+</table></section>
+{% endblock %}

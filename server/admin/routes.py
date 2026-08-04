@@ -15,6 +15,11 @@ from server.admin.security import (
     AdminSession,
 )
 from server.domain.activation import ActivationPlanValues
+from server.domain.admin_users import (
+    AdminUserError,
+    MODULE_PERMISSIONS,
+    PERMISSION_LABELS,
+)
 from server.domain.image_limits import ImageLimitValues
 from server.domain.models import ModelReleaseSpec
 from server.api.rate_limit import enforce_rate_limit
@@ -78,7 +83,7 @@ async def login(request: Request) -> Response:
         form.get("username", ""),
         form.get("password", ""),
     )
-    if not credentials_valid:
+    if credentials_valid is None:
         nonce, csrf_token = security.create_login_nonce()
         response = _render(
             "login.html",
@@ -101,7 +106,11 @@ async def login(request: Request) -> Response:
     response = RedirectResponse("/admin", status_code=303)
     response.set_cookie(
         SESSION_COOKIE,
-        security.create_session(),
+        security.create_session(
+            credentials_valid.username,
+            credentials_valid.role,
+            credentials_valid.permissions,
+        ),
         max_age=security.session_ttl_seconds,
         httponly=True,
         secure=_secure_cookie(request),
@@ -109,8 +118,11 @@ async def login(request: Request) -> Response:
         path="/admin",
     )
     response.delete_cookie(LOGIN_NONCE_COOKIE, path="/admin")
-    request.state.admin_actor = security.username
+    request.state.admin_actor = credentials_valid.username
     request.state.audit_action = "login"
+    manage = getattr(request.app.state, "manage_admin_users", None)
+    if manage is not None:
+        manage.record_login(credentials_valid.user_id)
     return response
 
 
@@ -139,12 +151,14 @@ def dashboard(request: Request) -> Response:
 @admin_router.get("/image-limits", response_class=HTMLResponse)
 def image_limits_page(request: Request) -> Response:
     session = _require_session(request)
+    _require_permission(request, session, "image_limits")
     return _image_limits_response(request, session)
 
 
 @admin_router.post("/image-limits/drafts")
 async def create_image_limit_draft(request: Request) -> Response:
-    _, form = await _protected_form(request)
+    session, form = await _protected_form(request)
+    _require_permission(request, session, "image_limits")
     values = ImageLimitValues(
         min_width=_integer(form, "min_width"),
         min_height=_integer(form, "min_height"),
@@ -158,14 +172,16 @@ async def create_image_limit_draft(request: Request) -> Response:
 
 @admin_router.post("/image-limits/{version}/publish")
 async def publish_image_limits(version: int, request: Request) -> Response:
-    await _protected_form(request)
+    session, _ = await _protected_form(request)
+    _require_permission(request, session, "image_limits")
     request.app.state.manage_image_limits.publish(version)
     return _redirect("/admin/image-limits")
 
 
 @admin_router.post("/image-limits/{version}/rollback")
 async def rollback_image_limits(version: int, request: Request) -> Response:
-    await _protected_form(request)
+    session, _ = await _protected_form(request)
+    _require_permission(request, session, "image_limits")
     request.app.state.manage_image_limits.rollback(version)
     return _redirect("/admin/image-limits")
 
@@ -173,12 +189,14 @@ async def rollback_image_limits(version: int, request: Request) -> Response:
 @admin_router.get("/models", response_class=HTMLResponse)
 def models_page(request: Request) -> Response:
     session = _require_session(request)
+    _require_permission(request, session, "models")
     return _models_response(request, session)
 
 
 @admin_router.post("/models/releases")
 async def create_model_release(request: Request) -> Response:
-    _, form = await _protected_form(request)
+    session, form = await _protected_form(request)
+    _require_permission(request, session, "models")
     request.app.state.manage_model_releases.create(
         ModelReleaseSpec(
             model_id=_required(form, "model_id"),
@@ -197,14 +215,16 @@ async def create_model_release(request: Request) -> Response:
 
 @admin_router.post("/models/releases/{release_id}/publish")
 async def publish_model_release(release_id: int, request: Request) -> Response:
-    await _protected_form(request)
+    session, _ = await _protected_form(request)
+    _require_permission(request, session, "models")
     request.app.state.manage_model_releases.publish(release_id)
     return _redirect("/admin/models")
 
 
 @admin_router.post("/models/releases/{release_id}/withdraw")
 async def withdraw_model_release(release_id: int, request: Request) -> Response:
-    await _protected_form(request)
+    session, _ = await _protected_form(request)
+    _require_permission(request, session, "models")
     request.app.state.manage_model_releases.withdraw(release_id)
     return _redirect("/admin/models")
 
@@ -212,12 +232,14 @@ async def withdraw_model_release(release_id: int, request: Request) -> Response:
 @admin_router.get("/translation", response_class=HTMLResponse)
 def translation_page(request: Request) -> Response:
     session = _require_session(request)
+    _require_permission(request, session, "translation")
     return _translation_response(request, session)
 
 
 @admin_router.post("/translation/test", response_class=HTMLResponse)
 async def test_translation_connection(request: Request) -> Response:
     session, _ = await _protected_form(request)
+    _require_permission(request, session, "translation")
     result = await run_in_threadpool(
         request.app.state.translate_text.execute,
         TranslationTextRequest(
@@ -260,19 +282,22 @@ def _translation_response(
 @admin_router.get("/activation", response_class=HTMLResponse)
 def activation_page(request: Request) -> Response:
     session = _require_session(request)
+    _require_permission(request, session, "activation")
     return _activation_response(request, session)
 
 
 @admin_router.post("/activation/plans")
 async def create_activation_plan(request: Request) -> Response:
-    _, form = await _protected_form(request)
+    session, form = await _protected_form(request)
+    _require_permission(request, session, "activation")
     request.app.state.manage_activation_plans.create(_plan_values(form))
     return _redirect("/admin/activation")
 
 
 @admin_router.post("/activation/plans/{plan_id}")
 async def update_activation_plan(plan_id: int, request: Request) -> Response:
-    _, form = await _protected_form(request)
+    session, form = await _protected_form(request)
+    _require_permission(request, session, "activation")
     request.app.state.manage_activation_plans.update(plan_id, _plan_values(form))
     return _redirect("/admin/activation")
 
@@ -280,6 +305,7 @@ async def update_activation_plan(plan_id: int, request: Request) -> Response:
 @admin_router.post("/activation/codes", response_class=HTMLResponse)
 async def issue_activation_codes(request: Request) -> Response:
     session, form = await _protected_form(request)
+    _require_permission(request, session, "activation")
     if not request.app.state.device_authorization_enabled:
         raise HTTPException(status_code=503, detail="Activation service is not configured")
     issued = request.app.state.manage_activation_codes.issue(
@@ -297,7 +323,8 @@ async def issue_activation_codes(request: Request) -> Response:
 
 @admin_router.post("/activation/codes/{code_id}/disable")
 async def disable_activation_code(code_id: str, request: Request) -> Response:
-    await _protected_form(request)
+    session, _ = await _protected_form(request)
+    _require_permission(request, session, "activation")
     request.app.state.manage_activation_codes.disable(code_id)
     return _redirect("/admin/activation")
 
@@ -305,6 +332,7 @@ async def disable_activation_code(code_id: str, request: Request) -> Response:
 @admin_router.get("/audit", response_class=HTMLResponse)
 def audit_page(request: Request) -> Response:
     session = _require_session(request)
+    _require_permission(request, session, "audit")
     return _render_protected(
         "audit.html",
         request,
@@ -312,6 +340,169 @@ def audit_page(request: Request) -> Response:
         title="操作审计",
         events=request.app.state.audit_management.list_recent(),
     )
+
+
+# —— 订单管理（payments 权限） ——
+
+
+@admin_router.get("/payments", response_class=HTMLResponse)
+def payments_page(request: Request) -> Response:
+    session = _require_session(request)
+    _require_permission(request, session, "payments")
+    listing = getattr(request.app.state, "list_payment_orders", None)
+    orders = listing.execute() if listing is not None else ()
+    return _render_protected(
+        "payments.html",
+        request,
+        session,
+        title="订单",
+        orders=orders,
+    )
+
+
+# —— 用量记录（usage 权限） ——
+
+
+@admin_router.get("/usage", response_class=HTMLResponse)
+def usage_page(request: Request) -> Response:
+    session = _require_session(request)
+    _require_permission(request, session, "usage")
+    manage = getattr(request.app.state, "manage_usage", None)
+    records = manage.list_usage() if manage is not None else ()
+    return _render_protected(
+        "usage.html",
+        request,
+        session,
+        title="用量记录",
+        records=records,
+    )
+
+
+# —— 账号管理（仅超管 / users 权限） ——
+
+
+def _manage_users(request: Request):
+    manage = getattr(request.app.state, "manage_admin_users", None)
+    if manage is None:
+        raise HTTPException(status_code=503, detail="用户管理未配置")
+    return manage
+
+
+def _selected_permissions(form: dict[str, str]) -> frozenset[str]:
+    return frozenset(
+        key for key in MODULE_PERMISSIONS if form.get(f"perm_{key}") == "true"
+    )
+
+
+@admin_router.get("/users", response_class=HTMLResponse)
+def users_page(request: Request) -> Response:
+    session = _require_session(request)
+    _require_permission(request, session, "users")
+    return _render_protected(
+        "users.html",
+        request,
+        session,
+        title="账号管理",
+        users=_manage_users(request).list_all(),
+        permission_labels=PERMISSION_LABELS,
+    )
+
+
+@admin_router.post("/users")
+async def create_admin_user(request: Request) -> Response:
+    session, form = await _protected_form(request)
+    _require_permission(request, session, "users")
+    try:
+        _manage_users(request).create_subuser(
+            form.get("username", ""),
+            form.get("password", ""),
+            _selected_permissions(form),
+        )
+    except AdminUserError as error:
+        raise HTTPException(status_code=422, detail=str(error))
+    request.state.audit_action = "create_admin_user"
+    return _redirect("/admin/users")
+
+
+@admin_router.post("/users/{user_id}/permissions")
+async def update_admin_user_permissions(user_id: int, request: Request) -> Response:
+    session, form = await _protected_form(request)
+    _require_permission(request, session, "users")
+    try:
+        _manage_users(request).set_permissions(user_id, _selected_permissions(form))
+    except AdminUserError as error:
+        raise HTTPException(status_code=422, detail=str(error))
+    request.state.audit_action = "update_admin_user_permissions"
+    return _redirect("/admin/users")
+
+
+@admin_router.post("/users/{user_id}/enable")
+async def enable_admin_user(user_id: int, request: Request) -> Response:
+    session, _ = await _protected_form(request)
+    _require_permission(request, session, "users")
+    try:
+        _manage_users(request).set_enabled(user_id, True)
+    except AdminUserError as error:
+        raise HTTPException(status_code=422, detail=str(error))
+    request.state.audit_action = "enable_admin_user"
+    return _redirect("/admin/users")
+
+
+@admin_router.post("/users/{user_id}/disable")
+async def disable_admin_user(user_id: int, request: Request) -> Response:
+    session, _ = await _protected_form(request)
+    _require_permission(request, session, "users")
+    try:
+        _manage_users(request).set_enabled(user_id, False)
+    except AdminUserError as error:
+        raise HTTPException(status_code=422, detail=str(error))
+    request.state.audit_action = "disable_admin_user"
+    return _redirect("/admin/users")
+
+
+@admin_router.post("/users/{user_id}/reset-password")
+async def reset_admin_user_password(user_id: int, request: Request) -> Response:
+    session, form = await _protected_form(request)
+    _require_permission(request, session, "users")
+    try:
+        _manage_users(request).reset_password(user_id, form.get("password", ""))
+    except AdminUserError as error:
+        raise HTTPException(status_code=422, detail=str(error))
+    request.state.audit_action = "reset_admin_user_password"
+    return _redirect("/admin/users")
+
+
+@admin_router.get("/change-password", response_class=HTMLResponse)
+def change_password_page(request: Request) -> Response:
+    session = _require_session(request)
+    return _render_protected(
+        "change_password.html",
+        request,
+        session,
+        title="修改密码",
+        error=None,
+    )
+
+
+@admin_router.post("/change-password")
+async def change_own_password(request: Request) -> Response:
+    session, form = await _protected_form(request)
+    try:
+        _manage_users(request).change_own_password(
+            session.username,
+            form.get("current_password", ""),
+            form.get("new_password", ""),
+        )
+    except AdminUserError as error:
+        return _render_protected(
+            "change_password.html",
+            request,
+            session,
+            title="修改密码",
+            error=str(error),
+        )
+    request.state.audit_action = "change_password"
+    return _redirect("/admin")
 
 
 def _security(request: Request) -> AdminSecurity:
@@ -334,6 +525,11 @@ def _require_session(request: Request) -> AdminSession:
         )
     request.state.admin_actor = session.username
     return session
+
+
+def _require_permission(request: Request, session: AdminSession, permission: str) -> None:
+    if session.role != "super" and permission not in session.permissions:
+        raise HTTPException(status_code=403, detail="无权限访问该模块")
 
 
 async def _protected_form(
@@ -410,6 +606,8 @@ def _render_protected(
         template,
         request,
         username=session.username,
+        role=session.role,
+        permissions=session.permissions,
         csrf_token=_security(request).csrf_token(session),
         **context,
     )
@@ -448,12 +646,32 @@ def _integer(form: dict[str, str], name: str) -> int:
 
 
 def _plan_values(form: dict[str, str]) -> ActivationPlanValues:
+    from datetime import datetime, timezone
+
+    plan_type = form.get("plan_type", "duration")
+    sale_amount_raw = form.get("sale_amount_minor", "").strip()
+    sale_ends_raw = form.get("sale_ends_at", "").strip()
+    sale_ends_at = None
+    if sale_ends_raw:
+        try:
+            sale_ends_at = datetime.fromisoformat(sale_ends_raw)
+            if sale_ends_at.tzinfo is None:
+                sale_ends_at = sale_ends_at.replace(tzinfo=timezone.utc)
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail="促销截止时间格式无效") from error
     return ActivationPlanValues(
         name=_required(form, "name"),
         amount_minor=_integer(form, "amount_minor"),
         currency=_required(form, "currency"),
         duration_days=_integer(form, "duration_days"),
         enabled=form.get("enabled") == "true",
+        plan_type=plan_type,
+        quota=_integer(form, "quota") if plan_type == "quota" else 0,
+        sale_amount_minor=(
+            _integer(form, "sale_amount_minor") if sale_amount_raw else None
+        ),
+        sale_ends_at=sale_ends_at,
+        benefits=form.get("benefits", ""),
     )
 
 

@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>账号管理</h1>
+<section class="card"><h2>新建客服子账号</h2>
+<form method="post" action="/admin/users" class="form-grid">
+<input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+<label>用户名<input name="username" pattern="[A-Za-z0-9._-]{1,64}" required></label>
+<label>初始密码（至少 12 位）<input name="password" type="password" minlength="12" required></label>
+<fieldset><legend>权限（可勾选多个）</legend>
+{% for key, label in permission_labels.items() %}<label class="checkbox"><input type="checkbox" name="perm_{{ key }}" value="true"> {{ label }}</label>{% endfor %}
+</fieldset>
+<button>创建账号</button>
+</form></section>
+<section class="card"><h2>账号列表</h2>
+<table>
+<tr><th>用户名</th><th>类型</th><th>权限</th><th>状态</th><th>权限设置</th><th>操作</th></tr>
+{% for user in users %}
+<tr>
+<td>{{ user.username }}</td>
+<td>{{ "超管" if user.is_super else "子账号" }}</td>
+<td>{% if user.is_super %}全部{% else %}{% for key, label in permission_labels.items() %}{{ label if key in user.permissions else "" }}{% endfor %}{% endif %}</td>
+<td>{{ "启用" if user.enabled else "已停用" }}</td>
+<td>
+{% if not user.is_super %}
+<form method="post" action="/admin/users/{{ user.user_id }}/permissions">
+<input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+{% for key, label in permission_labels.items() %}<label class="checkbox"><input type="checkbox" name="perm_{{ key }}" value="true" {{ "checked" if key in user.permissions }}> {{ label }}</label>{% endfor %}
+<button>保存权限</button>
+</form>
+{% else %}-{% endif %}
+</td>
+<td>
+{% if not user.is_super %}
+{% if user.enabled %}
+<form method="post" action="/admin/users/{{ user.user_id }}/disable"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button>停用</button></form>
+{% else %}
+<form method="post" action="/admin/users/{{ user.user_id }}/enable"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button>启用</button></form>
+{% endif %}
+<form method="post" action="/admin/users/{{ user.user_id }}/reset-password"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><label>新密码<input name="password" type="password" minlength="12" required></label><button>重置密码</button></form>
+{% else %}-{% endif %}
+</td>
+</tr>
+{% endfor %}
+</table></section>
+{% endblock %}
