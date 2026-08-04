@@ -21,6 +21,7 @@
     {% if 'payments' in permissions %}<a href="/admin/payments">订单</a>{% endif %}
     {% if 'audit' in permissions %}<a href="/admin/audit">审计</a>{% endif %}
     {% if 'users' in permissions %}<a href="/admin/users">账号管理</a>{% endif %}
+    {% if role == 'super' %}<a href="/admin/settings">第三方配置</a>{% endif %}
     <a href="/admin/change-password">修改密码</a>
     <form method="post" action="/admin/logout">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">

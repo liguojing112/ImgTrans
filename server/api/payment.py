@@ -59,10 +59,19 @@ def list_payable_plans(request: Request) -> list[dict]:
             "sale_ends_at": item.values.sale_ends_at,
             "benefits": item.values.benefits,
             "is_on_sale": item.values.is_on_sale(now),
+            "wechat_pay_configured": _wechat_pay_configured(request),
         }
         for item in plans
         if item.values.enabled
     ]
+
+
+def _wechat_pay_configured(request: Request) -> bool:
+    manage = getattr(request.app.state, "manage_service_settings", None)
+    if manage is None:
+        settings = getattr(request.app.state, "settings", None)
+        return bool(settings and settings.wechat_pay_configured)
+    return bool(manage.get_public().get("wechat_pay_configured"))
 
 
 @payment_router.post("/orders", status_code=201)

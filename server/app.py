@@ -40,12 +40,17 @@ from server.application.payment import (
     HandlePaymentCallback,
     ListPaymentOrders,
 )
+from server.application.service_settings import ManageServiceSettings
 from server.application.usage import ManageUsage
 from server.application.translation import TranslateText, TranslationProvider
 from server.config import ServerSettings
 from server.infrastructure.database import Database
 from server.infrastructure.admin_user_repository import SqlAlchemyAdminUserRepository
 from server.infrastructure.payment_repository import SqlAlchemyPaymentRepository
+from server.infrastructure.secrets_cipher import SecretsCipher
+from server.infrastructure.service_settings_repository import (
+    SqlAlchemyServiceSettingsRepository,
+)
 from server.infrastructure.wechat_pay_gateway import (
     UnavailableWechatGateway,
     WechatPayV3Gateway,
@@ -190,11 +195,33 @@ def create_app(
         app.state.activate_device = None
         app.state.authorize_device_token = UnavailableDeviceTokenAuthorizer()
     payment_repository = SqlAlchemyPaymentRepository(database)
-    payment_gateway = (
-        WechatPayV3Gateway(settings)
-        if settings.wechat_pay_configured
-        else UnavailableWechatGateway()
+
+    # 第三方服务配置（微信密钥加密存数据库，可运行期切换）
+    service_settings_repository = SqlAlchemyServiceSettingsRepository(database)
+    settings_cipher = SecretsCipher.load(
+        Path(__file__).resolve().parent.parent / "config" / "settings-key.bin"
     )
+    app.state.manage_service_settings = ManageServiceSettings(
+        settings_cipher, service_settings_repository
+    )
+
+    def _wechat_config_provider():
+        database_config = app.state.manage_service_settings.load_wechat_settings()
+        if database_config:
+            return database_config
+        if settings.wechat_pay_configured:
+            return {
+                "appid": settings.wechat_appid,
+                "mchid": settings.wechat_mchid,
+                "apiv3_key": settings.wechat_apiv3_key,
+                "private_key": settings.wechat_private_key,
+                "serial_no": settings.wechat_serial_no,
+                "platform_cert": settings.wechat_platform_cert,
+                "notify_url": settings.wechat_notify_url,
+            }
+        return None
+
+    payment_gateway = WechatPayV3Gateway(_wechat_config_provider)
     app.state.create_payment_order = CreatePaymentOrder(
         payment_gateway,
         app.state.manage_activation_plans,

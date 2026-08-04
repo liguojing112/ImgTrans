@@ -1,17 +1,22 @@
 """微信支付 API v3 网关 — 基于 wechatpayv3 SDK。
 
-SDK 懒加载：仅在真实配置并首次调用时导入，避免未安装时影响启动。
-业务层通过 application.payment 的 WechatPayGateway Protocol 依赖倒置。
+配置通过 provider 动态读取（优先数据库后台配置，其次环境变量），
+支持运行期切换，无需重启服务。
 """
 
 from __future__ import annotations
+
+from typing import Callable
 
 from server.domain.payment import PaymentConflict
 
 
 class WechatPayV3Gateway:
-    def __init__(self, settings) -> None:
-        self._settings = settings
+    def __init__(
+        self,
+        config_provider: Callable[[], dict | None],
+    ) -> None:
+        self._provider = config_provider
         self._client = None
 
     def native_prepay(self, order_id: str, amount_minor: int, description: str) -> str:
@@ -30,24 +35,40 @@ class WechatPayV3Gateway:
         return result if isinstance(result, dict) else {}
 
     def _pay(self):
-        if self._client is None:
+        config = self._provider()
+        if not config or not all(
+            (
+                config.get("appid"),
+                config.get("mchid"),
+                config.get("apiv3_key"),
+                config.get("private_key"),
+                config.get("serial_no"),
+                config.get("platform_cert"),
+                config.get("notify_url"),
+            )
+        ):
+            raise PaymentConflict("微信支付未配置")
+        # 配置变化时重建客户端（记录上次配置签名）
+        signature = tuple(config[key] for key in ("mchid", "apiv3_key", "serial_no", "notify_url"))
+        if self._client is None or getattr(self, "_signature", None) != signature:
             from wechatpayv3 import WeChatPay, WeChatPayType
 
             self._client = WeChatPay(
                 wechatpay_type=WeChatPayType.NATIVE,
-                mchid=self._settings.wechat_mchid,
-                private_key=self._settings.wechat_private_key,
-                cert_serial_no=self._settings.wechat_serial_no,
-                apiv3_key=self._settings.wechat_apiv3_key,
-                appid=self._settings.wechat_appid,
-                notify_url=self._settings.wechat_notify_url,
+                mchid=config["mchid"],
+                private_key=config["private_key"],
+                cert_serial_no=config["serial_no"],
+                apiv3_key=config["apiv3_key"],
+                appid=config["appid"],
+                notify_url=config["notify_url"],
                 cert_dir=None,
             )
+            self._signature = signature
         return self._client
 
 
 class UnavailableWechatGateway:
-    """微信支付未配置时的占位实现。"""
+    """微信支付未配置时的占位实现（兼容旧引用）。"""
 
     def native_prepay(self, order_id: str, amount_minor: int, description: str) -> str:
         raise PaymentConflict("微信支付未配置")

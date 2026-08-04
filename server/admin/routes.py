@@ -360,6 +360,51 @@ def payments_page(request: Request) -> Response:
     )
 
 
+# —— 第三方配置（仅超管） ——
+
+
+def _require_super(session: AdminSession) -> None:
+    if session.role != "super":
+        raise HTTPException(status_code=403, detail="仅超管可访问")
+
+
+@admin_router.get("/settings", response_class=HTMLResponse)
+def settings_page(request: Request) -> Response:
+    session = _require_session(request)
+    _require_super(session)
+    manage = getattr(request.app.state, "manage_service_settings", None)
+    public = manage.get_public() if manage is not None else {}
+    return _render_protected(
+        "settings.html",
+        request,
+        session,
+        title="第三方配置",
+        settings=public,
+    )
+
+
+@admin_router.post("/settings")
+async def save_settings(request: Request) -> Response:
+    session, form = await _protected_form(request)
+    _require_super(session)
+    manage = getattr(request.app.state, "manage_service_settings", None)
+    if manage is None:
+        raise HTTPException(status_code=503, detail="第三方配置未启用")
+    manage.save_wechat(
+        {
+            "wechat_appid": form.get("wechat_appid", ""),
+            "wechat_mchid": form.get("wechat_mchid", ""),
+            "wechat_apiv3_key": form.get("wechat_apiv3_key", ""),
+            "wechat_private_key": form.get("wechat_private_key", ""),
+            "wechat_serial_no": form.get("wechat_serial_no", ""),
+            "wechat_platform_cert": form.get("wechat_platform_cert", ""),
+            "wechat_notify_url": form.get("wechat_notify_url", ""),
+        }
+    )
+    request.state.audit_action = "update_service_settings"
+    return _redirect("/admin/settings")
+
+
 # —— 用量记录（usage 权限） ——
 
 
