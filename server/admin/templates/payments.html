@@ -2,6 +2,12 @@
 {% block content %}
 <h1>订单</h1>
 <section class="card"><h2>支付订单</h2>
+<form method="get" action="/admin/payments" class="search-row">
+  <input name="q" value="{{ search }}" placeholder="按订单号或激活码搜索">
+  <button>搜索</button>
+  {% if search %}<a href="/admin/payments">清除</a>{% endif %}
+</form>
+<p class="muted">共 {{ total }} 条订单</p>
 <table>
 <tr><th>订单号</th><th>套餐</th><th>金额</th><th>状态</th><th>激活码</th><th>创建时间</th><th>支付时间</th></tr>
 {% for order in orders %}
@@ -10,12 +16,30 @@
 <td>#{{ order.plan_id }}</td>
 <td>{{ order.amount_minor }} {{ order.currency }}</td>
 <td>{{ "已支付" if order.status.value == "paid" else ("已取消" if order.status.value == "cancelled" else "待支付") }}</td>
-<td>{{ order.code_id or "-" }}</td>
+<td>{% if order.activation_code %}<code>{{ order.activation_code }}</code> <button onclick="copyText('{{ order.activation_code }}', this)">复制</button>{% if 'activation' in permissions %}{% if code_states.get(order.code_id) %}<form method="post" action="/admin/activation/codes/{{ order.code_id }}/enable"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button>启用</button></form>{% else %}<form method="post" action="/admin/activation/codes/{{ order.code_id }}/disable"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button>停用</button></form>{% endif %}{% endif %}{% else %}{{ order.code_id or "-" }}{% endif %}</td>
 <td>{{ order.created_at.strftime("%Y-%m-%d %H:%M") }}</td>
 <td>{{ order.paid_at.strftime("%Y-%m-%d %H:%M") if order.paid_at else "-" }}</td>
 </tr>
 {% else %}
 <tr><td colspan="7">暂无订单</td></tr>
 {% endfor %}
-</table></section>
+</table>
+{% if pages > 1 %}
+<div class="pagination">
+  {% if page > 1 %}<a href="/admin/payments?page={{ page - 1 }}{% if search %}&amp;q={{ search }}{% endif %}">上一页</a>{% endif %}
+  <span>第 {{ page }} / {{ pages }} 页</span>
+  {% if page < pages %}<a href="/admin/payments?page={{ page + 1 }}{% if search %}&amp;q={{ search }}{% endif %}">下一页</a>{% endif %}
+</div>
+{% endif %}
+</section>
+<script>
+function copyText(text, btn) {
+  function done() { const old = btn.textContent; btn.textContent = '已复制'; setTimeout(() => btn.textContent = old, 1200); }
+  function fallback() {
+    const ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta);
+    ta.select(); document.execCommand('copy'); document.body.removeChild(ta); done();
+  }
+  if (navigator.clipboard && window.isSecureContext) { navigator.clipboard.writeText(text).then(done, fallback); } else { fallback(); }
+}
+</script>
 {% endblock %}

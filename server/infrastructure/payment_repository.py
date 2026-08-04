@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from sqlalchemy import BigInteger, DateTime, Integer, String, select, update
+from sqlalchemy import BigInteger, DateTime, Integer, String, func, or_, select, update
 from sqlalchemy.orm import Mapped, mapped_column
 
 from server.domain.payment import PaymentOrder, PaymentStatus
@@ -82,6 +82,34 @@ class SqlAlchemyPaymentRepository:
                 .limit(limit)
             ).all()
             return [_to_order(record) for record in records]
+
+    def list_page(
+        self,
+        page: int = 1,
+        page_size: int = 50,
+        search: str | None = None,
+    ) -> tuple[list[PaymentOrder], int]:
+        """分页查询订单，可按订单号或激活码搜索。返回 (订单列表, 总数)。"""
+        with self._database.session() as session:
+            statement = select(PaymentOrderRecord)
+            if search:
+                like = f"%{search.strip()}%"
+                statement = statement.where(
+                    or_(
+                        PaymentOrderRecord.order_id.ilike(like),
+                        PaymentOrderRecord.activation_code.ilike(like),
+                    )
+                )
+            total = (
+                session.scalar(select(func.count()).select_from(statement.subquery()))
+                or 0
+            )
+            records = session.scalars(
+                statement.order_by(PaymentOrderRecord.created_at.desc())
+                .offset((page - 1) * page_size)
+                .limit(page_size)
+            ).all()
+            return [_to_order(record) for record in records], total
 
 
 def _to_order(record: PaymentOrderRecord) -> PaymentOrder:

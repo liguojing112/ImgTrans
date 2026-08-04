@@ -2,8 +2,8 @@
 {% block content %}
 <h1>管理概览</h1>
 <div class="grid">
-  {% for key, value in settings.items() %}
-  <section class="card"><strong>{{ key }}</strong><p>{{ value }}</p></section>
+  {% for label, value in settings %}
+  <section class="card"><strong>{{ label }}</strong><p>{% if value is boolean %}{{ "是" if value else "否" }}{% else %}{{ value }}{% endif %}</p></section>
   {% endfor %}
 </div>
 {% endblock %}

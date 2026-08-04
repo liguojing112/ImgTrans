@@ -24,6 +24,8 @@ class ActivationRepository(Protocol):
         self, plan_id: int, values: ActivationPlanValues
     ) -> ActivationPlan: ...
 
+    def delete_plan(self, plan_id: int) -> None: ...
+
     def list_plans(self) -> tuple[ActivationPlan, ...]: ...
 
     def get_plan(self, plan_id: int) -> ActivationPlan: ...
@@ -34,11 +36,24 @@ class ActivationRepository(Protocol):
         duration_days: int,
         quota_total: int,
         code_digests: tuple[str, ...],
+        plaintexts: tuple[str, ...] = (),
     ) -> tuple[ActivationCode, ...]: ...
 
-    def list_codes(self) -> tuple[ActivationCode, ...]: ...
+    def list_codes(self, code_digest: str | None = None) -> tuple[ActivationCode, ...]: ...
+
+    def list_codes_page(
+        self,
+        page: int = 1,
+        page_size: int = 50,
+        status: str | None = None,
+        code_digest: str | None = None,
+    ) -> tuple[tuple[ActivationCode, ...], int]: ...
+
+    def list_code_states(self, code_ids) -> dict[str, bool]: ...
 
     def disable_code(self, code_id: str, now: datetime) -> ActivationCode: ...
+
+    def enable_code(self, code_id: str) -> ActivationCode: ...
 
     def activate(
         self,
@@ -61,6 +76,13 @@ class ActivationRepository(Protocol):
     ) -> tuple[bool, int]: ...
 
     def list_usage(self, limit: int = 100) -> list[UsageRecord]: ...
+
+    def list_usage_page(
+        self,
+        page: int = 1,
+        page_size: int = 50,
+        code_digest: str | None = None,
+    ) -> tuple[list[UsageRecord], int]: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -110,6 +132,9 @@ class ManageActivationPlans:
     ) -> ActivationPlan:
         return self._repository.update_plan(plan_id, values)
 
+    def delete(self, plan_id: int) -> None:
+        return self._repository.delete_plan(plan_id)
+
     def list_all(self) -> tuple[ActivationPlan, ...]:
         return self._repository.list_plans()
 
@@ -146,6 +171,7 @@ class ManageActivationCodes:
                     plan.values.duration_days,
                     plan.values.quota,
                     digests,
+                    plaintext,
                 )
             except ActivationConflict:
                 continue
@@ -155,11 +181,33 @@ class ManageActivationCodes:
             )
         raise ActivationConflict("Unable to allocate unique activation codes")
 
-    def list_all(self) -> tuple[ActivationCode, ...]:
+    def list_all(self, plaintext: str | None = None) -> tuple[ActivationCode, ...]:
+        """列出激活码；plaintext 为激活码明文时精确匹配定位该码。"""
+        if plaintext and self._hasher is not None:
+            return self._repository.list_codes(self._hasher.digest_code(plaintext.strip()))
         return self._repository.list_codes()
+
+    def list_page(
+        self,
+        page: int = 1,
+        page_size: int = 50,
+        status: str | None = None,
+        plaintext: str | None = None,
+    ) -> tuple[tuple[ActivationCode, ...], int]:
+        """分页查询激活码，支持状态筛选与明文定位。返回 (激活码, 总数)。"""
+        digest = None
+        if plaintext and self._hasher is not None:
+            digest = self._hasher.digest_code(plaintext.strip())
+        return self._repository.list_codes_page(page, page_size, status, digest)
+
+    def states(self, code_ids) -> dict[str, bool]:
+        return self._repository.list_code_states(code_ids)
 
     def disable(self, code_id: str) -> ActivationCode:
         return self._repository.disable_code(code_id, datetime.now(timezone.utc))
+
+    def enable(self, code_id: str) -> ActivationCode:
+        return self._repository.enable_code(code_id)
 
     def unbind(self, activation_code: str) -> bool:
         """自助解绑：清设备/token 绑定，保留次数与时长额度。"""

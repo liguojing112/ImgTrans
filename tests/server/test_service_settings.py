@@ -11,6 +11,7 @@ os.environ["IMGTRANS_SETTINGS_ENCRYPTION_KEY"] = "test-settings-encryption-key-1
 
 from server.admin.security import hash_admin_password
 from server.app import create_app
+from server.application.service_settings import DEFAULT_WECHAT_NOTIFY_URL
 from server.config import ServerSettings
 from server.infrastructure.database import Base, Database
 from server.infrastructure.secrets_cipher import SecretsCipher
@@ -119,6 +120,20 @@ def test_load_wechat_settings_decrypts_full() -> None:
     assert loaded["apiv3_key"] == WECHAT["wechat_apiv3_key"]
     assert loaded["private_key"] == WECHAT["wechat_private_key"]
     assert loaded["platform_cert"] == WECHAT["wechat_platform_cert"]
+    # 回调 URL 固定写死，忽略表单提交值
+    assert loaded["notify_url"] == DEFAULT_WECHAT_NOTIFY_URL
+
+
+def test_notify_url_is_fixed_and_ignores_submitted_value() -> None:
+    app = _app()
+    manage = app.state.manage_service_settings
+    submitted = dict(WECHAT, wechat_notify_url="https://evil.example.com/notify")
+    manage.save_wechat(submitted)
+    public = manage.get_public()
+    assert public["wechat_notify_url"] == DEFAULT_WECHAT_NOTIFY_URL
+    assert "evil.example.com" not in public["wechat_notify_url"]
+    loaded = manage.load_wechat_settings()
+    assert loaded["notify_url"] == DEFAULT_WECHAT_NOTIFY_URL
 
 
 def test_settings_page_super_only() -> None:

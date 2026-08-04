@@ -19,3 +19,12 @@ td form { display: inline; }
 .error { color: #b42318; }
 .warning { border-color: #f59e0b; background: #fffbeb; }
 .muted { color: #667085; }
+.search-row { display: flex; align-items: center; gap: .5rem; margin-bottom: .75rem; }
+.search-row input { flex: 1; max-width: 360px; }
+.search-row a { color: #1d4ed8; text-decoration: none; }
+.pagination { display: flex; align-items: center; gap: 1rem; margin-top: .75rem; }
+.pagination a { color: #1d4ed8; text-decoration: none; }
+.pagination span { color: #667085; }
+.tabs { display: flex; gap: .25rem; margin-bottom: .75rem; border-bottom: 1px solid #dfe4ea; }
+.tabs a { padding: .5rem .9rem; text-decoration: none; color: #444; border: 1px solid transparent; border-bottom: none; border-radius: .35rem .35rem 0 0; }
+.tabs a.active { background: #fff; border-color: #dfe4ea; color: #1d4ed8; font-weight: 600; }

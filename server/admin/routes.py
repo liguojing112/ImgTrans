@@ -14,7 +14,7 @@ from server.admin.security import (
     AdminSecurity,
     AdminSession,
 )
-from server.domain.activation import ActivationPlanValues
+from server.domain.activation import ActivationConflict, ActivationPlanValues
 from server.domain.admin_users import (
     AdminUserError,
     MODULE_PERMISSIONS,
@@ -136,15 +136,34 @@ async def logout(request: Request) -> Response:
     return response
 
 
+_DASHBOARD_LABELS = {
+    "environment": "运行环境",
+    "host": "服务地址",
+    "port": "端口",
+    "log_level": "日志级别",
+    "docs_enabled": "API 文档",
+    "client_config_ttl_seconds": "客户端配置缓存（秒）",
+    "translator_configured": "翻译服务",
+    "object_storage_configured": "对象存储",
+    "activation_configured": "激活服务",
+    "admin_console_configured": "管理后台",
+    "wechat_pay_configured": "微信支付",
+}
+
+
 @admin_router.get("", response_class=HTMLResponse)
 def dashboard(request: Request) -> Response:
     session = _require_session(request)
+    summary = request.app.state.settings.public_summary()
     return _render_protected(
         "dashboard.html",
         request,
         session,
         title="管理概览",
-        settings=request.app.state.settings.public_summary(),
+        settings=[
+            (_DASHBOARD_LABELS.get(key, key), value)
+            for key, value in summary.items()
+        ],
     )
 
 
@@ -167,6 +186,7 @@ async def create_image_limit_draft(request: Request) -> Response:
         max_bytes=_integer(form, "max_bytes"),
     )
     request.app.state.manage_image_limits.create_draft(values)
+    request.state.audit_action = "create_image_limit_draft"
     return _redirect("/admin/image-limits")
 
 
@@ -175,6 +195,7 @@ async def publish_image_limits(version: int, request: Request) -> Response:
     session, _ = await _protected_form(request)
     _require_permission(request, session, "image_limits")
     request.app.state.manage_image_limits.publish(version)
+    request.state.audit_action = "publish_image_limits"
     return _redirect("/admin/image-limits")
 
 
@@ -183,6 +204,7 @@ async def rollback_image_limits(version: int, request: Request) -> Response:
     session, _ = await _protected_form(request)
     _require_permission(request, session, "image_limits")
     request.app.state.manage_image_limits.rollback(version)
+    request.state.audit_action = "rollback_image_limits"
     return _redirect("/admin/image-limits")
 
 
@@ -210,6 +232,7 @@ async def create_model_release(request: Request) -> Response:
             sha256=_required(form, "sha256"),
         )
     )
+    request.state.audit_action = "create_model_release"
     return _redirect("/admin/models")
 
 
@@ -218,6 +241,7 @@ async def publish_model_release(release_id: int, request: Request) -> Response:
     session, _ = await _protected_form(request)
     _require_permission(request, session, "models")
     request.app.state.manage_model_releases.publish(release_id)
+    request.state.audit_action = "publish_model_release"
     return _redirect("/admin/models")
 
 
@@ -226,6 +250,7 @@ async def withdraw_model_release(release_id: int, request: Request) -> Response:
     session, _ = await _protected_form(request)
     _require_permission(request, session, "models")
     request.app.state.manage_model_releases.withdraw(release_id)
+    request.state.audit_action = "withdraw_model_release"
     return _redirect("/admin/models")
 
 
@@ -255,6 +280,7 @@ async def test_translation_connection(request: Request) -> Response:
         if item.translated_text is not None
         else f"连接失败：{item.error_code}"
     )
+    request.state.audit_action = "test_translation"
     return _translation_response(request, session, connectivity_result)
 
 
@@ -291,6 +317,7 @@ async def create_activation_plan(request: Request) -> Response:
     session, form = await _protected_form(request)
     _require_permission(request, session, "activation")
     request.app.state.manage_activation_plans.create(_plan_values(form))
+    request.state.audit_action = "create_activation_plan"
     return _redirect("/admin/activation")
 
 
@@ -299,6 +326,19 @@ async def update_activation_plan(plan_id: int, request: Request) -> Response:
     session, form = await _protected_form(request)
     _require_permission(request, session, "activation")
     request.app.state.manage_activation_plans.update(plan_id, _plan_values(form))
+    request.state.audit_action = "update_activation_plan"
+    return _redirect("/admin/activation")
+
+
+@admin_router.post("/activation/plans/{plan_id}/delete")
+async def delete_activation_plan(plan_id: int, request: Request) -> Response:
+    session, _ = await _protected_form(request)
+    _require_permission(request, session, "activation")
+    try:
+        request.app.state.manage_activation_plans.delete(plan_id)
+    except ActivationConflict as error:
+        raise HTTPException(status_code=409, detail=str(error))
+    request.state.audit_action = "delete_activation_plan"
     return _redirect("/admin/activation")
 
 
@@ -312,6 +352,7 @@ async def issue_activation_codes(request: Request) -> Response:
         _integer(form, "plan_id"),
         _integer(form, "count"),
     )
+    request.state.audit_action = "issue_activation_codes"
     response = _activation_response(
         request,
         session,
@@ -326,7 +367,47 @@ async def disable_activation_code(code_id: str, request: Request) -> Response:
     session, _ = await _protected_form(request)
     _require_permission(request, session, "activation")
     request.app.state.manage_activation_codes.disable(code_id)
+    request.state.audit_action = "disable_activation_code"
     return _redirect("/admin/activation")
+
+
+@admin_router.post("/activation/codes/{code_id}/enable")
+async def enable_activation_code(code_id: str, request: Request) -> Response:
+    session, _ = await _protected_form(request)
+    _require_permission(request, session, "activation")
+    request.app.state.manage_activation_codes.enable(code_id)
+    request.state.audit_action = "enable_activation_code"
+    return _redirect("/admin/activation")
+
+
+_AUDIT_LABELS = {
+    "login": "登录",
+    "logout": "退出",
+    "update_service_settings": "更新第三方配置",
+    "create_admin_user": "新建账号",
+    "update_admin_user_permissions": "修改账号权限",
+    "enable_admin_user": "启用账号",
+    "disable_admin_user": "停用账号",
+    "reset_admin_user_password": "重置密码",
+    "change_password": "修改密码",
+    "create_activation_plan": "新建方案",
+    "update_activation_plan": "修改方案",
+    "delete_activation_plan": "删除方案",
+    "issue_activation_codes": "手工发码",
+    "disable_activation_code": "停用激活码",
+    "enable_activation_code": "启用激活码",
+    "create_image_limit_draft": "新建图片限制草稿",
+    "publish_image_limits": "发布图片限制",
+    "rollback_image_limits": "回滚图片限制",
+    "create_model_release": "新建模型草稿",
+    "publish_model_release": "发布模型",
+    "withdraw_model_release": "撤回模型",
+    "test_translation": "测试翻译连接",
+    "post": "表单提交",
+    "get": "查看",
+    "put": "修改",
+    "delete": "删除",
+}
 
 
 @admin_router.get("/audit", response_class=HTMLResponse)
@@ -339,6 +420,7 @@ def audit_page(request: Request) -> Response:
         session,
         title="操作审计",
         events=request.app.state.audit_management.list_recent(),
+        audit_labels=_AUDIT_LABELS,
     )
 
 
@@ -350,13 +432,28 @@ def payments_page(request: Request) -> Response:
     session = _require_session(request)
     _require_permission(request, session, "payments")
     listing = getattr(request.app.state, "list_payment_orders", None)
-    orders = listing.execute() if listing is not None else ()
+    page = max(1, _query_int(request, "page", 1))
+    search = (request.query_params.get("q") or "").strip() or None
+    orders, total = (
+        listing.execute(page, _PAGE_SIZE, search)
+        if listing is not None
+        else ((), 0)
+    )
+    pages = max(1, -(-total // _PAGE_SIZE))
+    code_states = request.app.state.manage_activation_codes.states(
+        tuple(order.code_id for order in orders if order.code_id)
+    )
     return _render_protected(
         "payments.html",
         request,
         session,
         title="订单",
         orders=orders,
+        page=page,
+        pages=pages,
+        total=total,
+        search=search or "",
+        code_states=code_states,
     )
 
 
@@ -413,13 +510,24 @@ def usage_page(request: Request) -> Response:
     session = _require_session(request)
     _require_permission(request, session, "usage")
     manage = getattr(request.app.state, "manage_usage", None)
-    records = manage.list_usage() if manage is not None else ()
+    page = max(1, _query_int(request, "page", 1))
+    search = (request.query_params.get("q") or "").strip() or None
+    records, total = (
+        manage.list_page(page, _PAGE_SIZE, search)
+        if manage is not None
+        else ((), 0)
+    )
+    pages = max(1, -(-total // _PAGE_SIZE))
     return _render_protected(
         "usage.html",
         request,
         session,
         title="用量记录",
         records=records,
+        page=page,
+        pages=pages,
+        total=total,
+        search=search or "",
     )
 
 
@@ -629,15 +737,27 @@ def _activation_response(
     *,
     issued_codes: tuple[str, ...] = (),
 ) -> HTMLResponse:
+    page = max(1, _query_int(request, "page", 1))
+    status = (request.query_params.get("status") or "").strip() or None
+    search = (request.query_params.get("q") or "").strip()
+    codes, total = request.app.state.manage_activation_codes.list_page(
+        page, _PAGE_SIZE, status, search or None
+    )
+    pages = max(1, -(-total // _PAGE_SIZE))
     return _render_protected(
         "activation.html",
         request,
         session,
         title="激活管理",
         plans=request.app.state.manage_activation_plans.list_all(),
-        codes=request.app.state.manage_activation_codes.list_all(),
+        codes=codes,
         issued_codes=issued_codes,
         activation_configured=request.app.state.device_authorization_enabled,
+        search=search,
+        status=status or "all",
+        page=page,
+        pages=pages,
+        total=total,
     )
 
 
@@ -681,6 +801,19 @@ def _required(form: dict[str, str], name: str) -> str:
     if not value:
         raise HTTPException(status_code=422, detail=f"{name} is required")
     return value
+
+
+_PAGE_SIZE = 50
+
+
+def _query_int(request: Request, name: str, default: int) -> int:
+    raw = request.query_params.get(name)
+    if raw is None:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return default
 
 
 def _integer(form: dict[str, str], name: str) -> int:

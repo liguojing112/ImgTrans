@@ -87,6 +87,7 @@ class ActivationCode:
     disabled_at: datetime | None
     quota_total: int = 0
     quota_remaining: int = 0
+    plaintext: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,4 +106,5 @@ class UsageRecord:
     code_id: str
     amount: int
     created_at: datetime
+    plaintext: str | None = None
 

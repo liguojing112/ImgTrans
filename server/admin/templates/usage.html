@@ -2,12 +2,27 @@
 {% block content %}
 <h1>用量记录</h1>
 <section class="card"><h2>商品详情次数消耗</h2>
+<form method="get" action="/admin/usage" class="search-row">
+  <input name="q" value="{{ search }}" placeholder="输入激活码明文搜索定位">
+  <button>搜索</button>
+  {% if search %}<a href="/admin/usage">清除搜索</a>{% endif %}
+</form>
+<p class="muted">共 {{ total }} 条用量记录</p>
 <table>
 <tr><th>ID</th><th>激活码</th><th>消耗次数</th><th>时间</th></tr>
 {% for record in records %}
-<tr><td>{{ record.usage_id }}</td><td>{{ record.code_id }}</td><td>{{ record.amount }}</td><td>{{ record.created_at.strftime("%Y-%m-%d %H:%M:%S") }}</td></tr>
+<tr><td>{{ record.usage_id }}</td><td><code>{{ record.plaintext or record.code_id }}</code></td><td>{{ record.amount }}</td><td>{{ record.created_at.strftime("%Y-%m-%d %H:%M:%S") }}</td></tr>
 {% else %}
 <tr><td colspan="4">暂无用量记录</td></tr>
 {% endfor %}
-</table></section>
+</table>
+{% if search and not records %}<p class="muted">未找到匹配的用量记录</p>{% endif %}
+{% if pages > 1 %}
+<div class="pagination">
+  {% if page > 1 %}<a href="/admin/usage?page={{ page - 1 }}{% if search %}&amp;q={{ search }}{% endif %}">上一页</a>{% endif %}
+  <span>第 {{ page }} / {{ pages }} 页</span>
+  {% if page < pages %}<a href="/admin/usage?page={{ page + 1 }}{% if search %}&amp;q={{ search }}{% endif %}">下一页</a>{% endif %}
+</div>
+{% endif %}
+</section>
 {% endblock %}

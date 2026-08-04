@@ -8,15 +8,20 @@ from server.infrastructure.service_settings_repository import (
     SqlAlchemyServiceSettingsRepository,
 )
 
+# 支付回调 URL 固定写死，不允许在后台修改
+DEFAULT_WECHAT_NOTIFY_URL = "https://imgtrans.rchtop.top/v1/payments/notify"
+
 
 class ManageServiceSettings:
     def __init__(
         self,
         cipher: SecretsCipher,
         repository: SqlAlchemyServiceSettingsRepository,
+        notify_url: str = DEFAULT_WECHAT_NOTIFY_URL,
     ) -> None:
         self._cipher = cipher
         self._repository = repository
+        self._notify_url = notify_url
 
     def get_public(self) -> dict:
         """后台/客户端可见的公开配置 — 敏感字段只返回是否已配置。"""
@@ -26,7 +31,7 @@ class ManageServiceSettings:
                 "wechat_appid": "",
                 "wechat_mchid": "",
                 "wechat_serial_no": "",
-                "wechat_notify_url": "",
+                "wechat_notify_url": self._notify_url,
                 "wechat_apiv3_key_configured": False,
                 "wechat_private_key_configured": False,
                 "wechat_platform_cert_configured": False,
@@ -36,7 +41,7 @@ class ManageServiceSettings:
             "wechat_appid": row.wechat_appid or "",
             "wechat_mchid": row.wechat_mchid or "",
             "wechat_serial_no": row.wechat_serial_no or "",
-            "wechat_notify_url": row.wechat_notify_url or "",
+            "wechat_notify_url": self._notify_url,
             "wechat_apiv3_key_configured": bool(row.wechat_apiv3_key_cipher),
             "wechat_private_key_configured": bool(row.wechat_private_key_cipher),
             "wechat_platform_cert_configured": bool(row.wechat_platform_cert_cipher),
@@ -62,7 +67,8 @@ class ManageServiceSettings:
                 values.get("wechat_platform_cert", ""),
                 current.wechat_platform_cert_cipher if current else None,
             ),
-            wechat_notify_url=_strip(values.get("wechat_notify_url", "")),
+            # 回调 URL 固定写死，忽略表单提交值
+            wechat_notify_url=self._notify_url,
         )
         self._repository.save(row)
         return self.get_public()
@@ -80,7 +86,7 @@ class ManageServiceSettings:
                 "private_key": self._cipher.decrypt(row.wechat_private_key_cipher),
                 "serial_no": row.wechat_serial_no,
                 "platform_cert": self._cipher.decrypt(row.wechat_platform_cert_cipher),
-                "notify_url": row.wechat_notify_url,
+                "notify_url": self._notify_url,
             }
         except ValueError:
             return None
@@ -103,7 +109,6 @@ class ManageServiceSettings:
             and row.wechat_private_key_cipher
             and row.wechat_serial_no
             and row.wechat_platform_cert_cipher
-            and row.wechat_notify_url
         )
 
 

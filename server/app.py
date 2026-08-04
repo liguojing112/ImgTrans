@@ -40,7 +40,10 @@ from server.application.payment import (
     HandlePaymentCallback,
     ListPaymentOrders,
 )
-from server.application.service_settings import ManageServiceSettings
+from server.application.service_settings import (
+    DEFAULT_WECHAT_NOTIFY_URL,
+    ManageServiceSettings,
+)
 from server.application.usage import ManageUsage
 from server.application.translation import TranslateText, TranslationProvider
 from server.config import ServerSettings
@@ -169,7 +172,12 @@ def create_app(
         model_repository,
         object_storage_signer,
     )
-    activation_repository = SqlAlchemyActivationRepository(database)
+    settings_cipher = SecretsCipher.load(
+        Path(__file__).resolve().parent.parent / "config" / "settings-key.bin"
+    )
+    activation_repository = SqlAlchemyActivationRepository(
+        database, cipher=settings_cipher
+    )
     app.state.manage_activation_plans = ManageActivationPlans(activation_repository)
     activation_hasher = (
         ActivationSecretHasher(settings.activation_secret)
@@ -198,11 +206,10 @@ def create_app(
 
     # 第三方服务配置（微信密钥加密存数据库，可运行期切换）
     service_settings_repository = SqlAlchemyServiceSettingsRepository(database)
-    settings_cipher = SecretsCipher.load(
-        Path(__file__).resolve().parent.parent / "config" / "settings-key.bin"
-    )
     app.state.manage_service_settings = ManageServiceSettings(
-        settings_cipher, service_settings_repository
+        settings_cipher,
+        service_settings_repository,
+        notify_url=settings.wechat_notify_url or DEFAULT_WECHAT_NOTIFY_URL,
     )
 
     def _wechat_config_provider():

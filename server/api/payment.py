@@ -127,6 +127,7 @@ def list_orders(request: Request) -> list[dict]:
     listing = getattr(request.app.state, "list_payment_orders", None)
     if listing is None:
         raise HTTPException(status_code=503, detail="支付服务未配置")
+    orders, _ = listing.execute(page=1, page_size=1000)
     return [
         {
             "order_id": order.order_id,
@@ -138,5 +139,5 @@ def list_orders(request: Request) -> list[dict]:
             "created_at": order.created_at.isoformat(),
             "paid_at": order.paid_at.isoformat() if order.paid_at else None,
         }
-        for order in listing.execute()
+        for order in orders
     ]

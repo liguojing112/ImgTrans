@@ -14,6 +14,10 @@
   width: 100%; max-width: 460px; padding: 10px 12px;
   border: 1px solid #d0d0d0; border-radius: 8px; font-size: 14px; box-sizing: border-box;
 }
+.cfg-card input[disabled] {
+  background: #f2f2f2; color: #999; cursor: not-allowed;
+  border-color: #e0e0e0;
+}
 .cfg-card textarea {
   width: 100%; max-width: 640px; padding: 10px 12px; min-height: 120px;
   border: 1px solid #d0d0d0; border-radius: 8px; font-size: 12px;
@@ -48,8 +52,8 @@
     <label>微信支付平台公钥（PEM 全文）</label>
     <textarea name="wechat_platform_cert" placeholder="{{ '已配置（留空保持不变）' if settings.wechat_platform_cert_configured else '粘贴 -----BEGIN PUBLIC KEY----- 全文' }}"></textarea>
     <label>支付回调 URL</label>
-    <input name="wechat_notify_url" type="text" value="{{ settings.wechat_notify_url }}">
-    <div class="hint">必须为 HTTPS，如 https://imgtrans.rchtop.top/v1/payments/notify</div>
+    <input name="wechat_notify_url" type="text" value="{{ settings.wechat_notify_url }}" disabled>
+    <div class="hint">固定回调地址，由系统指定，不可修改</div>
     <button type="submit" class="btn-submit">保存配置</button>
   </form>
 </div>

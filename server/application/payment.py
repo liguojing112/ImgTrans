@@ -34,6 +34,9 @@ class PaymentRepository(Protocol):
         self, order_id: str, code_id: str, activation_code: str, now: datetime
     ) -> None: ...
     def list_recent(self, limit: int = 100) -> list[PaymentOrder]: ...
+    def list_page(
+        self, page: int = 1, page_size: int = 50, search: str | None = None
+    ) -> tuple[list[PaymentOrder], int]: ...
 
 
 class CreatePaymentOrder:
@@ -123,5 +126,7 @@ class ListPaymentOrders:
     def __init__(self, order_repository: PaymentRepository) -> None:
         self._orders = order_repository
 
-    def execute(self, limit: int = 100) -> list[PaymentOrder]:
-        return self._orders.list_recent(limit)
+    def execute(
+        self, page: int = 1, page_size: int = 50, search: str | None = None
+    ) -> tuple[list[PaymentOrder], int]:
+        return self._orders.list_page(page, page_size, search)

@@ -274,7 +274,8 @@ def test_all_management_pages_render_and_secrets_are_not_exposed() -> None:
             assert issued.headers["Cache-Control"] == "no-store"
             later = await client.get("/admin/activation")
             audit = await client.get("/admin/audit")
-            assert plaintext not in later.text
+            # 明文加密入库后，激活码记录区持久显示明文（供管理员核对/复制）
+            assert plaintext in later.text
             assert plaintext not in audit.text
             assert "code_digest" not in later.text
             assert "token_digest" not in later.text

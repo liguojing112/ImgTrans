@@ -35,3 +35,15 @@ class ManageUsage:
 
     def list_usage(self, limit: int = 100) -> list[UsageRecord]:
         return self._repository.list_usage(limit)
+
+    def list_page(
+        self,
+        page: int = 1,
+        page_size: int = 50,
+        plaintext: str | None = None,
+    ) -> tuple[list[UsageRecord], int]:
+        """分页查询用量记录，可按激活码明文定位。返回 (记录, 总数)。"""
+        digest = None
+        if plaintext and self._hasher is not None:
+            digest = self._hasher.digest_code(plaintext.strip())
+        return self._repository.list_usage_page(page, page_size, digest)

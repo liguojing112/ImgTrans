@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 from threading import Lock
 from uuid import uuid4
 
-from sqlalchemy import BigInteger, Boolean, CheckConstraint, DateTime, ForeignKey, Integer, String, UniqueConstraint, select, update
+from sqlalchemy import BigInteger, Boolean, CheckConstraint, DateTime, ForeignKey, Integer, String, UniqueConstraint, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -19,6 +19,7 @@ from server.domain.activation import (
     UsageRecord,
 )
 from server.infrastructure.database import Base, Database
+from server.infrastructure.secrets_cipher import SecretsCipher
 
 
 class ActivationPlanRecord(Base):
@@ -70,6 +71,9 @@ class ActivationCodeRecord(Base):
     disabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     quota_total: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     quota_remaining: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    code_plaintext_cipher: Mapped[str | None] = mapped_column(
+        String(500), nullable=True
+    )
 
 
 class UsageRecordRecord(Base):
@@ -86,8 +90,11 @@ class UsageRecordRecord(Base):
 
 
 class SqlAlchemyActivationRepository:
-    def __init__(self, database: Database) -> None:
+    def __init__(
+        self, database: Database, cipher: SecretsCipher | None = None
+    ) -> None:
         self._database = database
+        self._cipher = cipher
         self._activation_lock = Lock()
 
     def create_plan(self, values: ActivationPlanValues) -> ActivationPlan:
@@ -132,6 +139,23 @@ class SqlAlchemyActivationRepository:
             session.flush()
             return _plan_to_domain(record)
 
+    def delete_plan(self, plan_id: int) -> None:
+        with self._database.session() as session:
+            record = session.get(ActivationPlanRecord, plan_id)
+            if record is None:
+                raise ActivationNotFound("Activation plan was not found")
+            count = (
+                session.scalar(
+                    select(func.count())
+                    .select_from(ActivationCodeRecord)
+                    .where(ActivationCodeRecord.plan_id == plan_id)
+                )
+                or 0
+            )
+            if count:
+                raise ActivationConflict("该方案下已有激活码，无法删除")
+            session.delete(record)
+
     def list_plans(self) -> tuple[ActivationPlan, ...]:
         with self._database.session() as session:
             records = session.scalars(
@@ -152,6 +176,7 @@ class SqlAlchemyActivationRepository:
         duration_days: int,
         quota_total: int,
         code_digests: tuple[str, ...],
+        plaintexts: tuple[str, ...] = (),
     ) -> tuple[ActivationCode, ...]:
         try:
             with self._database.session() as session:
@@ -161,6 +186,11 @@ class SqlAlchemyActivationRepository:
                 if not plan.enabled:
                     raise ActivationConflict("Disabled activation plans cannot issue codes")
                 now = _utc_now()
+                plaintext_ciphers = (
+                    tuple(self._cipher.encrypt(value) for value in plaintexts)
+                    if self._cipher is not None and plaintexts
+                    else (None,) * len(code_digests)
+                )
                 records = tuple(
                     ActivationCodeRecord(
                         code_id=str(uuid4()),
@@ -169,23 +199,87 @@ class SqlAlchemyActivationRepository:
                         quota_total=quota_total,
                         quota_remaining=quota_total,
                         code_digest=digest,
+                        code_plaintext_cipher=plaintext_cipher,
                         disabled=False,
                         created_at=now,
                     )
-                    for digest in code_digests
+                    for digest, plaintext_cipher in zip(
+                        code_digests, plaintext_ciphers, strict=True
+                    )
                 )
                 session.add_all(records)
                 session.flush()
-                return tuple(_code_to_domain(record) for record in records)
+                return tuple(
+                    _code_to_domain(record, self._cipher) for record in records
+                )
         except IntegrityError as error:
             raise ActivationConflict("Activation code collision") from error
 
-    def list_codes(self) -> tuple[ActivationCode, ...]:
-        with self._database.session() as session:
-            records = session.scalars(
-                select(ActivationCodeRecord).order_by(ActivationCodeRecord.created_at.desc())
+    def list_codes(self, code_digest: str | None = None) -> tuple[ActivationCode, ...]:
+        statement = select(ActivationCodeRecord).order_by(
+            ActivationCodeRecord.created_at.desc()
+        )
+        if code_digest:
+            statement = statement.where(
+                ActivationCodeRecord.code_digest == code_digest
             )
-            return tuple(_code_to_domain(record) for record in records)
+        with self._database.session() as session:
+            records = session.scalars(statement)
+            return tuple(_code_to_domain(record, self._cipher) for record in records)
+
+    def list_codes_page(
+        self,
+        page: int = 1,
+        page_size: int = 50,
+        status: str | None = None,
+        code_digest: str | None = None,
+    ) -> tuple[tuple[ActivationCode, ...], int]:
+        """分页查询激活码，可按状态筛选、按摘要精确定位。返回 (激活码, 总数)。"""
+        statement = select(ActivationCodeRecord)
+        if status == "bound":
+            statement = statement.where(
+                ActivationCodeRecord.device_digest.is_not(None),
+                ActivationCodeRecord.disabled.is_(False),
+            )
+        elif status == "unbound":
+            statement = statement.where(
+                ActivationCodeRecord.device_digest.is_(None),
+                ActivationCodeRecord.disabled.is_(False),
+            )
+        elif status == "disabled":
+            statement = statement.where(ActivationCodeRecord.disabled.is_(True))
+        if code_digest:
+            statement = statement.where(
+                ActivationCodeRecord.code_digest == code_digest
+            )
+        with self._database.session() as session:
+            total = (
+                session.scalar(
+                    select(func.count()).select_from(statement.subquery())
+                )
+                or 0
+            )
+            records = session.scalars(
+                statement.order_by(ActivationCodeRecord.created_at.desc())
+                .offset((page - 1) * page_size)
+                .limit(page_size)
+            )
+            return tuple(
+                _code_to_domain(record, self._cipher) for record in records
+            ), total
+
+    def list_code_states(self, code_ids) -> dict[str, bool]:
+        """批量返回 code_id → disabled 状态（供订单页显示启停）。"""
+        ids = tuple(cid for cid in code_ids if cid)
+        if not ids:
+            return {}
+        with self._database.session() as session:
+            rows = session.execute(
+                select(
+                    ActivationCodeRecord.code_id, ActivationCodeRecord.disabled
+                ).where(ActivationCodeRecord.code_id.in_(ids))
+            )
+            return {code_id: disabled for code_id, disabled in rows}
 
     def disable_code(self, code_id: str, now: datetime) -> ActivationCode:
         with self._database.session() as session:
@@ -197,7 +291,18 @@ class SqlAlchemyActivationRepository:
                 record.disabled_at = now
                 record.token_digest = None
             session.flush()
-            return _code_to_domain(record)
+            return _code_to_domain(record, self._cipher)
+
+    def enable_code(self, code_id: str) -> ActivationCode:
+        with self._database.session() as session:
+            record = session.get(ActivationCodeRecord, code_id)
+            if record is None:
+                raise ActivationNotFound("Activation code was not found")
+            if record.disabled:
+                record.disabled = False
+                record.disabled_at = None
+            session.flush()
+            return _code_to_domain(record, self._cipher)
 
     def activate(
         self,
@@ -284,7 +389,7 @@ class SqlAlchemyActivationRepository:
                     ActivationCodeRecord.token_digest == token_digest
                 )
             )
-            return _code_to_domain(record) if record is not None else None
+            return _code_to_domain(record, self._cipher) if record is not None else None
 
     def unbind(self, code_digest: str) -> bool:
         """自助解绑：清设备与 token 绑定，保留次数/时长额度。"""
@@ -355,6 +460,46 @@ class SqlAlchemyActivationRepository:
                 for record in records
             ]
 
+    def list_usage_page(
+        self,
+        page: int = 1,
+        page_size: int = 50,
+        code_digest: str | None = None,
+    ) -> tuple[list[UsageRecord], int]:
+        """分页查询用量记录，可按激活码摘要精确过滤。返回 (记录, 总数)。"""
+        statement = select(
+            UsageRecordRecord, ActivationCodeRecord.code_plaintext_cipher
+        ).join(
+            ActivationCodeRecord,
+            UsageRecordRecord.code_id == ActivationCodeRecord.code_id,
+        )
+        if code_digest:
+            statement = statement.where(
+                ActivationCodeRecord.code_digest == code_digest
+            )
+        with self._database.session() as session:
+            total = (
+                session.scalar(
+                    select(func.count()).select_from(statement.subquery())
+                )
+                or 0
+            )
+            rows = session.execute(
+                statement.order_by(UsageRecordRecord.created_at.desc())
+                .offset((page - 1) * page_size)
+                .limit(page_size)
+            ).all()
+            return [
+                UsageRecord(
+                    usage_id=record.usage_id,
+                    code_id=record.code_id,
+                    amount=record.amount,
+                    created_at=_as_utc(record.created_at) or record.created_at,
+                    plaintext=_decrypt_plaintext(self._cipher, plaintext_cipher),
+                )
+                for record, plaintext_cipher in rows
+            ], total
+
 
 def _plan_to_domain(record: ActivationPlanRecord) -> ActivationPlan:
     return ActivationPlan(
@@ -376,7 +521,9 @@ def _plan_to_domain(record: ActivationPlanRecord) -> ActivationPlan:
     )
 
 
-def _code_to_domain(record: ActivationCodeRecord) -> ActivationCode:
+def _code_to_domain(
+    record: ActivationCodeRecord, cipher: SecretsCipher | None = None
+) -> ActivationCode:
     return ActivationCode(
         code_id=record.code_id,
         plan_id=record.plan_id,
@@ -389,7 +536,19 @@ def _code_to_domain(record: ActivationCodeRecord) -> ActivationCode:
         disabled_at=_as_utc(record.disabled_at),
         quota_total=record.quota_total,
         quota_remaining=record.quota_remaining,
+        plaintext=_decrypt_plaintext(cipher, record.code_plaintext_cipher),
     )
+
+
+def _decrypt_plaintext(
+    cipher: SecretsCipher | None, token: str | None
+) -> str | None:
+    if cipher is None or not token:
+        return None
+    try:
+        return cipher.decrypt(token)
+    except ValueError:
+        return None
 
 
 def _as_utc(value: datetime | None) -> datetime | None:
