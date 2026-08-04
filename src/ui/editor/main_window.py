@@ -96,6 +96,12 @@ class EditorMainWindow(QMainWindow):
         translation_service_label: str = "翻译服务：可用",
         translation_service_available: bool = True,
         manual_translation_adapter: object | None = None,
+        activate_device=None,
+        activation_status=None,
+        clear_activation=None,
+        payment_client=None,
+        quota_client=None,
+        access_token=None,
     ) -> None:
         super().__init__()
         self.setProperty("editorStyle", True)
@@ -132,6 +138,13 @@ class EditorMainWindow(QMainWindow):
         self._translation_service_label = translation_service_label
         self._translation_service_available = translation_service_available
         self._manual_translation_adapter = manual_translation_adapter
+        self._activate_device = activate_device
+        self._activation_status = activation_status
+        self._clear_activation = clear_activation
+        self._payment_client = payment_client
+        self._quota_client = quota_client
+        self._access_token = access_token
+        self._activation_dialog = None
         self._quick_save_path: Path | None = None
         self._source_undo: list[ImageDocument] = []
         self._source_redo: list[ImageDocument] = []
@@ -233,6 +246,60 @@ class EditorMainWindow(QMainWindow):
             lambda: self._editor_page.view.apply_zoom(1.0 / 1.15)
         )
         view_menu.addAction(zoom_out_action)
+
+        account_menu = menu.addMenu("账户")
+        self.activation_action = QAction("激活…", self)
+        self.activation_action.setEnabled(
+            self._activate_device is not None
+            and self._activation_status is not None
+            and self._clear_activation is not None
+        )
+        self.activation_action.triggered.connect(self.show_activation_dialog)
+        account_menu.addAction(self.activation_action)
+
+    def show_activation_dialog(self) -> None:
+        if (
+            self._activate_device is None
+            or self._activation_status is None
+            or self._clear_activation is None
+            or self._task_runner is None
+        ):
+            return
+        from src.ui.activation_dialog import ActivationDialog
+
+        dialog = ActivationDialog(
+            self._activate_device,
+            self._activation_status,
+            self._clear_activation,
+            self._task_runner,
+            self,
+            purchase_available=self._payment_client is not None,
+            unbind=self._quota_client.unbind if self._quota_client is not None else None,
+        )
+        dialog.purchase_requested.connect(self._open_purchase_dialog)
+        dialog.finished.connect(lambda: self._release_activation_dialog(dialog))
+        self._activation_dialog = dialog
+        dialog.show()
+
+    def _open_purchase_dialog(self) -> None:
+        if self._payment_client is None:
+            return
+        from src.ui.purchase_dialog import PurchaseDialog
+
+        purchase = PurchaseDialog(self._payment_client, self._task_runner, self)
+
+        def _on_completed(code: str) -> None:
+            dialog = self._activation_dialog
+            if dialog is not None:
+                dialog.code_edit.setText(code)
+                dialog.request_activation()
+
+        purchase.purchase_completed.connect(_on_completed)
+        purchase.show()
+
+    def _release_activation_dialog(self, dialog) -> None:
+        if self._activation_dialog is dialog:
+            self._activation_dialog = None
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:
         urls = event.mimeData().urls()
@@ -428,6 +495,10 @@ class EditorMainWindow(QMainWindow):
             self._show_current_terminology
         )
         batch = self._editor_page.batch_panel
+        batch.set_target_language(controls.selected_target_language)
+        controls.target_language.currentIndexChanged.connect(
+            lambda *_: batch.set_target_language(controls.selected_target_language)
+        )
         batch.add_requested.connect(self._choose_batch_images)
         batch.add_folder_requested.connect(self._choose_batch_folder)
         batch.remove_requested.connect(batch.remove_selected_sources)
@@ -591,7 +662,7 @@ class EditorMainWindow(QMainWindow):
         if not sources:
             return
         ctrl = self._editor_page.translate_controls
-        selection = self._translation_selection()
+        selection = self._translation_selection(panel.selected_target_language)
         panel.set_available(True, True)
         self.statusBar().showMessage(f"正在批量处理 {len(sources)} 张图片…")
         self._task_runner.submit(
@@ -608,7 +679,7 @@ class EditorMainWindow(QMainWindow):
                     else None
                 ),
                 preserve_numbers=ctrl.should_preserve_numbers,
-                ocr_mode=ctrl.selected_ocr_mode,
+                ocr_mode=panel.selected_ocr_mode,
                 high_recall_options=ctrl.configured_high_recall_options,
             ),
             self._on_batch_finished,
@@ -1061,6 +1132,8 @@ class EditorMainWindow(QMainWindow):
             ocr_adapter=getattr(self._recognize_text, "_adapter", self._recognize_text),
             llm_config_store=config_store,
             llm_adapter=llm_adapter,
+            quota_client=self._quota_client,
+            access_token=self._access_token,
         )
         win.back_requested.connect(self._on_product_back)
         self._product_window = win
@@ -2969,12 +3042,14 @@ class EditorMainWindow(QMainWindow):
         self._model.selected_layer_id = None
         self.statusBar().showMessage("已保留该区域原文")
 
-    def _translation_selection(self) -> TranslationSelection:
+    def _translation_selection(
+        self, target_language: str | None = None
+    ) -> TranslationSelection:
         ctrl = self._editor_page.translate_controls
         mode = TranslationMode(ctrl.selected_mode)
         return TranslationSelection(
             mode=mode,
-            target_language=ctrl.selected_target_language,
+            target_language=target_language or ctrl.selected_target_language,
             source_language=(
                 ctrl.selected_source_language
                 if mode is TranslationMode.SPECIFIC_LANGUAGE

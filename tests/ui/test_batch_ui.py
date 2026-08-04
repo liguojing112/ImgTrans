@@ -58,9 +58,20 @@ class _CompletedBatch:
     def __init__(self) -> None:
         self.cancelled = False
         self.brand_terms: tuple[str, ...] = ()
+        self.selection = None
 
-    def execute(self, sources, ocr_language, selection, brand_terms=(), on_update=None):
-        del ocr_language, selection
+    def execute(
+        self,
+        sources,
+        ocr_language,
+        selection,
+        brand_terms=(),
+        on_update=None,
+        **kwargs,
+    ):
+        del ocr_language
+        self.selection = selection
+        self.ocr_mode = kwargs.get("ocr_mode")
         self.brand_terms = brand_terms
         snapshot = BatchSnapshot(
             "batch-ui",
@@ -140,6 +151,36 @@ def test_batch_panel_exposes_a_dedicated_export_button() -> None:
         panel.close()
 
 
+def test_batch_numeric_controls_use_external_stepper_buttons() -> None:
+    QApplication.instance() or QApplication(["batch-stepper-ui"])
+    panel = BatchPanel()
+    try:
+        assert panel.resize_value.buttonSymbols().name == "NoButtons"
+        assert panel.quality.buttonSymbols().name == "NoButtons"
+        assert panel.watermark_opacity.buttonSymbols().name == "NoButtons"
+        panel.resize_mode.setCurrentIndex(1)
+        panel.resize_value.setValue(50)
+        panel._resize_plus.click()
+        assert panel.resize_value.value() == 51
+        panel._resize_minus.click()
+        assert panel.resize_value.value() == 50
+    finally:
+        panel.close()
+
+
+def test_batch_panel_exposes_high_recall_ocr_mode() -> None:
+    QApplication.instance() or QApplication(["batch-ocr-mode-ui"])
+    panel = BatchPanel()
+    try:
+        assert panel.selected_ocr_mode.value == "standard"
+        index = panel.ocr_mode.findData("high_recall")
+        assert index >= 0
+        panel.ocr_mode.setCurrentIndex(index)
+        assert panel.selected_ocr_mode.value == "high_recall"
+    finally:
+        panel.close()
+
+
 def test_main_window_runs_previews_and_selectively_exports_batch(tmp_path: Path) -> None:
     application = QApplication.instance() or QApplication(["batch-main-ui"])
     document = _document(tmp_path)
@@ -165,11 +206,16 @@ def test_main_window_runs_previews_and_selectively_exports_batch(tmp_path: Path)
     window.show()
     sources = (tmp_path / "one.png", tmp_path / "two.png")
     window.batch_panel.add_sources(sources)
+    target_index = window.batch_panel.target_language.findData("ja")
+    assert target_index >= 0
+    window.batch_panel.target_language.setCurrentIndex(target_index)
     window.translation_panel.brand_terms.setText("Alpha，Beta, Alpha")
     window._set_busy(False, "ready")
     window.request_batch()
     application.processEvents()
     assert scheduler.brand_terms == ("Alpha", "Beta")
+    assert scheduler.selection.target_language == "ja"
+    assert scheduler.ocr_mode.value == "standard"
     assert window._batch_snapshot.completed_count == 2
     assert window.batch_panel.selected_result_ids == ("item-0", "item-1")
     window.request_batch_preview("item-0")

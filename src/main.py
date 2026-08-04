@@ -111,6 +111,20 @@ def _create_translation_adapter(
     raise ValueError("IMGTRANS_TRANSLATION_MODE must be mock or server")
 
 
+def _create_payment_client(base_url: str):
+    if not base_url:
+        return None
+    from src.infrastructure.payment_client import PaymentClient
+    return PaymentClient(base_url)
+
+
+def _create_quota_client(base_url: str):
+    if not base_url:
+        return None
+    from src.infrastructure.quota_client import QuotaClient
+    return QuotaClient(base_url)
+
+
 def create_main_window() -> MainWindow:
     logger = configure_logging()
     product = ProductInfo(name="图片翻译", version=__version__, milestone="M4")
@@ -249,6 +263,7 @@ def create_main_window() -> MainWindow:
             activation.current_session if activation is not None else None
         ),
         clear_activation=activation.clear if activation is not None else None,
+        payment_client=_create_payment_client(backend_url),
     )
     if remote_image_limits is not None:
         QTimer.singleShot(0, window.request_image_limits_refresh)
@@ -437,6 +452,16 @@ def _create_editor_window() -> EditorMainWindow:
         ),
         translation_service_available=True,
         manual_translation_adapter=translation_adapter,
+        activate_device=activation.activate if activation is not None else None,
+        activation_status=(
+            activation.current_session if activation is not None else None
+        ),
+        clear_activation=activation.clear if activation is not None else None,
+        payment_client=_create_payment_client(backend_url),
+        quota_client=_create_quota_client(backend_url),
+        access_token=(
+            activation.access_token if activation is not None else None
+        ),
     )
 
 

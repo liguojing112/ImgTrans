@@ -17,10 +17,14 @@ from PySide6.QtWidgets import (
     QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
+    QAbstractSpinBox,
 )
 
 from src.domain.batch import BatchItemSnapshot, BatchItemStatus, BatchSnapshot, BatchStatus
 from src.domain.job import ImageStage
+from src.domain.language import SUPPORTED_LANGUAGE_CODES
+from src.domain.ocr import OcrMode
+from src.ui.languages import LANGUAGE_LABELS
 
 
 _STATUS_LABELS = {
@@ -38,6 +42,38 @@ _STAGE_LABELS = {
     ImageStage.LAYOUT: "排版",
     ImageStage.RENDERING: "渲染",
 }
+
+
+def _external_stepper(spin: QSpinBox) -> tuple[QHBoxLayout, QPushButton, QPushButton]:
+    """Keep spinbox values editable while placing clear +/- controls outside."""
+    spin.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
+    spin.setMinimumWidth(120)
+    row = QHBoxLayout()
+    row.setContentsMargins(0, 0, 0, 0)
+    row.setSpacing(6)
+    minus = QPushButton("-")
+    plus = QPushButton("+")
+    for button in (minus, plus):
+        button.setObjectName("batchStepperButton")
+        button.setFixedSize(34, 30)
+        button.setStyleSheet(
+            "QPushButton#batchStepperButton {"
+            "background: #2b2b3d; color: #e7e7f3; "
+            "border: 1px solid #5d6284; border-radius: 4px; "
+            "font-size: 16px; padding: 0; }"
+            "QPushButton#batchStepperButton:hover {"
+            "background: #3a3a55; border-color: #7c83ad; }"
+            "QPushButton#batchStepperButton:pressed {"
+            "background: #202032; border-color: #8f96c4; }"
+            "QPushButton#batchStepperButton:disabled {"
+            "background: #252536; color: #686878; border-color: #3d3d5c; }"
+        )
+    minus.clicked.connect(lambda: spin.setValue(spin.value() - spin.singleStep()))
+    plus.clicked.connect(lambda: spin.setValue(spin.value() + spin.singleStep()))
+    row.addWidget(spin, 1)
+    row.addWidget(minus)
+    row.addWidget(plus)
+    return row, minus, plus
 
 
 class BatchPanel(QFrame):
@@ -75,6 +111,31 @@ class BatchPanel(QFrame):
         hint.setWordWrap(True)
         layout.addWidget(title)
         layout.addWidget(hint)
+
+        target_row = QHBoxLayout()
+        target_row.addWidget(QLabel("目标语言"))
+        self.target_language = QComboBox()
+        self.target_language.setObjectName("batchTargetLanguage")
+        self.target_language.setMinimumWidth(180)
+        for code in SUPPORTED_LANGUAGE_CODES:
+            self.target_language.addItem(
+                f"{LANGUAGE_LABELS.get(code, code)} ({code})", code
+            )
+        target_index = self.target_language.findData("en")
+        if target_index >= 0:
+            self.target_language.setCurrentIndex(target_index)
+        target_row.addWidget(self.target_language)
+        target_row.addSpacing(18)
+        target_row.addWidget(QLabel("OCR模式"))
+        self.ocr_mode = QComboBox()
+        self.ocr_mode.setObjectName("batchOcrMode")
+        self.ocr_mode.addItem("标准 OCR", OcrMode.STANDARD.value)
+        self.ocr_mode.addItem(
+            "高召回 OCR（圆环/旋转文字）", OcrMode.HIGH_RECALL.value
+        )
+        target_row.addWidget(self.ocr_mode)
+        target_row.addStretch(1)
+        layout.addLayout(target_row)
 
         source_actions = QHBoxLayout()
         self.add_button = QPushButton("添加图片")
@@ -186,6 +247,9 @@ class BatchPanel(QFrame):
         self.resize_value.setRange(10, 100)
         self.resize_value.setValue(100)
         self.resize_value.setSuffix("%")
+        resize_stepper, self._resize_minus, self._resize_plus = _external_stepper(
+            self.resize_value
+        )
         self.resize_mode.currentIndexChanged.connect(
             self._sync_resize_control
         )
@@ -193,10 +257,13 @@ class BatchPanel(QFrame):
         self.quality.setRange(1, 100)
         self.quality.setValue(90)
         self.quality.setSuffix("%")
+        quality_stepper, self._quality_minus, self._quality_plus = _external_stepper(
+            self.quality
+        )
         compression.addWidget(self.resize_mode)
-        compression.addWidget(self.resize_value)
+        compression.addLayout(resize_stepper, 1)
         compression.addWidget(QLabel("质量"))
-        compression.addWidget(self.quality)
+        compression.addLayout(quality_stepper, 1)
         layout.addLayout(compression)
 
         watermark = QHBoxLayout()
@@ -214,6 +281,9 @@ class BatchPanel(QFrame):
         self.watermark_opacity.setRange(1, 100)
         self.watermark_opacity.setValue(55)
         self.watermark_opacity.setSuffix("%")
+        opacity_stepper, self._opacity_minus, self._opacity_plus = _external_stepper(
+            self.watermark_opacity
+        )
         self.watermark_tiled = QCheckBox("平铺")
         self.watermark_position = QComboBox()
         for label, value in (
@@ -236,7 +306,7 @@ class BatchPanel(QFrame):
         watermark.addWidget(self.watermark_kind)
         watermark.addWidget(self.watermark_value, stretch=1)
         watermark.addWidget(self.watermark_image_button)
-        watermark.addWidget(self.watermark_opacity)
+        watermark.addLayout(opacity_stepper)
         watermark.addWidget(self.watermark_tiled)
         watermark.addWidget(self.watermark_position)
         layout.addLayout(watermark)
@@ -265,6 +335,19 @@ class BatchPanel(QFrame):
     @property
     def selected_output_suffix(self) -> str:
         return str(self.output_format.currentData())
+
+    @property
+    def selected_target_language(self) -> str:
+        return str(self.target_language.currentData() or "en")
+
+    @property
+    def selected_ocr_mode(self) -> OcrMode:
+        return OcrMode(str(self.ocr_mode.currentData() or OcrMode.STANDARD.value))
+
+    def set_target_language(self, language_code: str) -> None:
+        index = self.target_language.findData(language_code)
+        if index >= 0:
+            self.target_language.setCurrentIndex(index)
 
     @property
     def batch_export_config(self) -> dict[str, object]:
@@ -447,6 +530,9 @@ class BatchPanel(QFrame):
     def _sync_resize_control(self) -> None:
         mode = str(self.resize_mode.currentData())
         self.resize_value.setEnabled(mode != "original")
+        enabled = mode != "original"
+        self._resize_minus.setEnabled(enabled)
+        self._resize_plus.setEnabled(enabled)
         if mode == "percent":
             self.resize_value.setRange(10, 100)
             self.resize_value.setSuffix("%")

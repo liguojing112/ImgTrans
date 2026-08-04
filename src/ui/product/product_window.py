@@ -65,6 +65,8 @@ class ProductWindow(QMainWindow):
         ocr_adapter: object,
         llm_config_store: JsonLLMConfigStore,
         llm_adapter: LLMAdapter,
+        quota_client=None,
+        access_token=None,
     ) -> None:
         super().__init__()
         self.setProperty("editorStyle", True)
@@ -78,6 +80,8 @@ class ProductWindow(QMainWindow):
         self._ocr = ocr_adapter
         self._llm_config_store = llm_config_store
         self._llm = llm_adapter
+        self._quota_client = quota_client
+        self._access_token = access_token
         self._project_id: str | None = None
         self._project_store: ProjectStore | None = None
 
@@ -438,6 +442,17 @@ class ProductWindow(QMainWindow):
 
     # —— 文案生成 ——
 
+    def _ensure_quota(self) -> None:
+        """生成前原子扣减一次商品详情次数；不足则抛错中止。"""
+        if self._quota_client is None:
+            return  # 未配置用量服务，不强制
+        token = self._access_token() if self._access_token else None
+        if not token:
+            raise RuntimeError("请先激活应用后再使用商品详情生成")
+        info = self._quota_client.consume(token)
+        if not info.consumed:
+            raise RuntimeError("商品详情次数不足，请购买次数包")
+
     def _on_generate(self) -> None:
         fact = self._step_analysis.current_fact()
         if fact is None:
@@ -454,6 +469,7 @@ class ProductWindow(QMainWindow):
         self._model.copywriting_started.emit()
 
         def _run():
+            self._ensure_quota()
             return self._generate_copywriting.execute(fact, info, settings)
 
         def _on_success(result):

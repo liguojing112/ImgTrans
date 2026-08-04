@@ -54,11 +54,13 @@ class ActivationCoordinator:
                     self._session_key,
                     json.dumps(
                         {
-                            "schema_version": 1,
+                            "schema_version": 2,
                             "plan_id": session.plan_id,
                             "activated_at": session.activated_at.isoformat(),
                             "expires_at": session.expires_at.isoformat(),
                             "access_token": session.access_token,
+                            "quota_total": session.quota_total,
+                            "quota_remaining": session.quota_remaining,
                         },
                         separators=(",", ":"),
                     ),
@@ -134,21 +136,29 @@ def _backend_scope(base_url: str) -> str:
 def _decode_session(encoded: str) -> ActivationSession | None:
     try:
         payload = json.loads(encoded)
-        if not isinstance(payload, Mapping) or set(payload) != {
+        if not isinstance(payload, Mapping) or not {
             "schema_version",
             "plan_id",
             "activated_at",
             "expires_at",
             "access_token",
-        }:
+        }.issubset(payload):
             return None
-        if payload["schema_version"] != 1:
+        version = payload["schema_version"]
+        if version == 1:
+            quota_total = quota_remaining = 0
+        elif version == 2:
+            quota_total = int(payload.get("quota_total", 0))
+            quota_remaining = int(payload.get("quota_remaining", 0))
+        else:
             return None
         session = ActivationSession(
             plan_id=payload["plan_id"],
             activated_at=datetime.fromisoformat(payload["activated_at"]),
             expires_at=datetime.fromisoformat(payload["expires_at"]),
             access_token=payload["access_token"],
+            quota_total=quota_total,
+            quota_remaining=quota_remaining,
         )
         if session.expires_at <= datetime.now(timezone.utc):
             return None

@@ -40,6 +40,8 @@ def test_http_activation_client_sends_only_code_and_device_and_parses_grant(monk
                 "expires_at": (now + timedelta(days=30)).isoformat(),
                 "access_token": "itd_new_device_token_123456",
                 "token_type": "Bearer",
+                "quota_total": 100,
+                "quota_remaining": 100,
             }
         )
 
@@ -56,6 +58,8 @@ def test_http_activation_client_sends_only_code_and_device_and_parses_grant(monk
     assert "Authorization" not in dict(request.header_items())
     assert session.plan_id == 9
     assert session.access_token == "itd_new_device_token_123456"
+    assert session.quota_total == 100
+    assert session.quota_remaining == 100
 
 
 def test_http_activation_client_rejects_unexpected_response(monkeypatch) -> None:

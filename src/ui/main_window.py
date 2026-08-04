@@ -124,6 +124,7 @@ class MainWindow(QMainWindow):
         activate_device: Callable[[str], ActivationSession] | None = None,
         activation_status: Callable[[], ActivationSession | None] | None = None,
         clear_activation: Callable[[], None] | None = None,
+        payment_client=None,
     ) -> None:
         super().__init__()
         self.startup = startup
@@ -152,6 +153,7 @@ class MainWindow(QMainWindow):
         self._activate_device = activate_device
         self._activation_status = activation_status
         self._clear_activation = clear_activation
+        self._payment_client = payment_client
         self._task_runner = task_runner
         self._current_document: ImageDocument | None = None
         self._source_document: ImageDocument | None = None
@@ -374,12 +376,30 @@ class MainWindow(QMainWindow):
             self._clear_activation,
             self._task_runner,
             self,
+            purchase_available=self._payment_client is not None,
         )
         dialog.activated.connect(self._activation_succeeded)
         dialog.activation_cleared.connect(self._activation_cleared)
+        dialog.purchase_requested.connect(self._open_purchase_dialog)
         dialog.finished.connect(lambda: self._release_activation_dialog(dialog))
         self._activation_dialog = dialog
         dialog.show()
+
+    def _open_purchase_dialog(self) -> None:
+        if self._payment_client is None or self._task_runner is None:
+            return
+        from src.ui.purchase_dialog import PurchaseDialog
+
+        purchase = PurchaseDialog(self._payment_client, self._task_runner, self)
+
+        def _on_completed(code: str) -> None:
+            dialog = self._activation_dialog
+            if dialog is not None:
+                dialog.code_edit.setText(code)
+                dialog.request_activation()
+
+        purchase.purchase_completed.connect(_on_completed)
+        purchase.show()
 
     def request_activation_check(self) -> None:
         if (
@@ -494,6 +514,10 @@ class MainWindow(QMainWindow):
         self._session_changes.clear_batch()
         ocr_language = self.ocr_panel.selected_language_code
         selection = self.translation_panel.selection
+        selection = replace(
+            selection,
+            target_language=self.batch_panel.selected_target_language,
+        )
         brand_terms = self.translation_panel.configured_brand_terms
         previous_batch_id = (
             self._batch_snapshot.batch_id if self._batch_snapshot is not None else None
@@ -508,6 +532,8 @@ class MainWindow(QMainWindow):
                 selection,
                 brand_terms,
                 self.batch_snapshot_changed.emit,
+                ocr_mode=self.batch_panel.selected_ocr_mode,
+                high_recall_options=self.ocr_panel.high_recall_options,
             )
 
         self._batch_snapshot = None

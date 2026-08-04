@@ -29,6 +29,7 @@ class TaskRunner(Protocol):
 class ActivationDialog(QDialog):
     activated = Signal(object)
     activation_cleared = Signal()
+    purchase_requested = Signal()
 
     def __init__(
         self,
@@ -37,6 +38,8 @@ class ActivationDialog(QDialog):
         clear_activation: Callable[[], None],
         task_runner: TaskRunner,
         parent=None,
+        purchase_available: bool = False,
+        unbind: Callable[[str], bool] | None = None,
     ) -> None:
         super().__init__(parent)
         self._activate = activate
@@ -44,6 +47,8 @@ class ActivationDialog(QDialog):
         self._clear_activation = clear_activation
         self._task_runner = task_runner
         self._has_session = False
+        self._purchase_available = purchase_available
+        self._unbind = unbind
         self.setObjectName("activationDialog")
         self.setWindowTitle("应用激活")
         self.setMinimumWidth(470)
@@ -68,6 +73,22 @@ class ActivationDialog(QDialog):
         layout.addWidget(self.status_label)
 
         self.buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        if unbind is not None:
+            self.unbind_button = QPushButton("解绑换机")
+            self.unbind_button.setObjectName("unbindDeviceButton")
+            self.unbind_button.setToolTip("输入激活码解绑本机，换机后可重新激活该码")
+            self.unbind_button.clicked.connect(self.request_unbind)
+            self.buttons.addButton(
+                self.unbind_button, QDialogButtonBox.ButtonRole.ActionRole
+            )
+        if purchase_available:
+            self.purchase_button = QPushButton("扫码购买")
+            self.purchase_button.setObjectName("purchaseActivationButton")
+            self.purchase_button.setToolTip("微信扫码支付自动获得激活码")
+            self.purchase_button.clicked.connect(self.purchase_requested.emit)
+            self.buttons.addButton(
+                self.purchase_button, QDialogButtonBox.ButtonRole.ActionRole
+            )
         self.activate_button = QPushButton("激活")
         self.activate_button.setObjectName("activateDeviceButton")
         self.clear_button = QPushButton("清除本机激活")
@@ -99,8 +120,37 @@ class ActivationDialog(QDialog):
         else:
             self._has_session = True
             expires = session.expires_at.astimezone().strftime("%Y-%m-%d %H:%M")
-            self.status_label.setText(f"已激活，有效期至 {expires}")
+            if session.quota_total > 0:
+                self.status_label.setText(
+                    f"已激活，有效期至 {expires}\n商品详情剩余次数：{session.quota_remaining}/{session.quota_total}"
+                )
+            else:
+                self.status_label.setText(f"已激活，有效期至 {expires}")
         self._set_busy(False)
+
+    def request_unbind(self) -> None:
+        if self._unbind is None:
+            return
+        code = self.code_edit.text().strip()
+        if not code:
+            self.status_label.setText("请输入要解绑的激活码")
+            return
+        from PySide6.QtWidgets import QMessageBox
+
+        reply = QMessageBox.question(
+            self,
+            "解绑换机",
+            "解绑后本机激活将失效，该激活码可在其他设备重新激活。\n确定要解绑吗？",
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        self._set_busy(True)
+        self.status_label.setText("正在解绑…")
+        self._task_runner.submit(
+            lambda: self._unbind(code),
+            lambda _ok: (self.code_edit.clear(), self.status_label.setText("解绑成功，可换机重新激活")),
+            self._operation_failed,
+        )
 
     def request_activation(self) -> None:
         code = self.code_edit.text().strip()
@@ -144,3 +194,5 @@ class ActivationDialog(QDialog):
         self.code_edit.setEnabled(not busy)
         self.activate_button.setEnabled(not busy)
         self.clear_button.setEnabled(not busy and self._has_session)
+        if hasattr(self, "unbind_button"):
+            self.unbind_button.setEnabled(not busy)

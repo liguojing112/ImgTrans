@@ -70,6 +70,8 @@ def _parse_response(encoded: bytes) -> ActivationSession:
             "expires_at",
             "access_token",
             "token_type",
+            "quota_total",
+            "quota_remaining",
         }:
             raise ValueError
         if payload["status"] != "active" or payload["token_type"] != "Bearer":
@@ -79,6 +81,8 @@ def _parse_response(encoded: bytes) -> ActivationSession:
             activated_at=datetime.fromisoformat(payload["activated_at"].replace("Z", "+00:00")),
             expires_at=datetime.fromisoformat(payload["expires_at"].replace("Z", "+00:00")),
             access_token=payload["access_token"],
+            quota_total=payload["quota_total"],
+            quota_remaining=payload["quota_remaining"],
         )
     except (UnicodeDecodeError, ValueError, TypeError, KeyError, json.JSONDecodeError) as error:
         raise ActivationError(

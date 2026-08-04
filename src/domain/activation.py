@@ -16,6 +16,8 @@ class ActivationSession:
     activated_at: datetime
     expires_at: datetime
     access_token: str = field(repr=False)
+    quota_total: int = 0
+    quota_remaining: int = 0
 
     def __post_init__(self) -> None:
         if isinstance(self.plan_id, bool) or not isinstance(self.plan_id, int) or self.plan_id <= 0:
@@ -28,6 +30,8 @@ class ActivationSession:
             ord(character) < 32 for character in self.access_token
         ):
             raise ValueError("Activation access token is invalid")
+        if min(self.quota_total, self.quota_remaining) < 0:
+            raise ValueError("Activation quota must not be negative")
 
     @property
     def active(self) -> bool:
