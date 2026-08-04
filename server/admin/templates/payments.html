@@ -16,7 +16,7 @@
 <td>#{{ order.plan_id }}</td>
 <td>{{ order.amount_minor }} {{ order.currency }}</td>
 <td>{{ "已支付" if order.status.value == "paid" else ("已取消" if order.status.value == "cancelled" else "待支付") }}</td>
-<td>{% if order.activation_code %}<code>{{ order.activation_code }}</code> <button onclick="copyText('{{ order.activation_code }}', this)">复制</button>{% if 'activation' in permissions %}{% if code_states.get(order.code_id) %}<form method="post" action="/admin/activation/codes/{{ order.code_id }}/enable"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button>启用</button></form>{% else %}<form method="post" action="/admin/activation/codes/{{ order.code_id }}/disable"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button>停用</button></form>{% endif %}{% endif %}{% else %}{{ order.code_id or "-" }}{% endif %}</td>
+<td>{% if order.activation_code %}<code>{{ order.activation_code }}</code> <button data-copy="{{ order.activation_code }}">复制</button>{% if 'activation' in permissions %}{% if code_states.get(order.code_id) %}<form method="post" action="/admin/activation/codes/{{ order.code_id }}/enable"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button>启用</button></form>{% else %}<form method="post" action="/admin/activation/codes/{{ order.code_id }}/disable"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button>停用</button></form>{% endif %}{% endif %}{% else %}{{ order.code_id or "-" }}{% endif %}</td>
 <td>{{ order.created_at.strftime("%Y-%m-%d %H:%M") }}</td>
 <td>{{ order.paid_at.strftime("%Y-%m-%d %H:%M") if order.paid_at else "-" }}</td>
 </tr>
@@ -32,14 +32,4 @@
 </div>
 {% endif %}
 </section>
-<script>
-function copyText(text, btn) {
-  function done() { const old = btn.textContent; btn.textContent = '已复制'; setTimeout(() => btn.textContent = old, 1200); }
-  function fallback() {
-    const ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta);
-    ta.select(); document.execCommand('copy'); document.body.removeChild(ta); done();
-  }
-  if (navigator.clipboard && window.isSecureContext) { navigator.clipboard.writeText(text).then(done, fallback); } else { fallback(); }
-}
-</script>
 {% endblock %}
