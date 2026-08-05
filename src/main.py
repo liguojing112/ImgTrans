@@ -267,6 +267,9 @@ def create_main_window() -> MainWindow:
         ),
         clear_activation=activation.clear if activation is not None else None,
         payment_client=_create_payment_client(backend_url),
+        codec=codec,
+        quota_client=_create_quota_client(backend_url),
+        access_token=activation.access_token if activation is not None else None,
     )
     if remote_image_limits is not None:
         QTimer.singleShot(0, window.request_image_limits_refresh)

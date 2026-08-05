@@ -125,6 +125,9 @@ class MainWindow(QMainWindow):
         activation_status: Callable[[], ActivationSession | None] | None = None,
         clear_activation: Callable[[], None] | None = None,
         payment_client=None,
+        codec=None,
+        quota_client=None,
+        access_token=None,
     ) -> None:
         super().__init__()
         self.startup = startup
@@ -154,6 +157,9 @@ class MainWindow(QMainWindow):
         self._activation_status = activation_status
         self._clear_activation = clear_activation
         self._payment_client = payment_client
+        self._codec = codec
+        self._quota_client = quota_client
+        self._access_token = access_token
         self._task_runner = task_runner
         self._current_document: ImageDocument | None = None
         self._source_document: ImageDocument | None = None
@@ -456,6 +462,36 @@ class MainWindow(QMainWindow):
         )
         self.activation_action.triggered.connect(self.show_activation_dialog)
         account_menu.addAction(self.activation_action)
+
+    def _enter_product(self) -> None:
+        """打开商品详情生成窗口。"""
+        from src.ui.product.product_window import ProductWindow
+        from src.infrastructure.llm_config import JsonLLMConfigStore
+        from src.infrastructure.llm_adapter import LLMAdapter
+
+        data_dir = getattr(self.startup, "data_dir", None)
+        config_store = JsonLLMConfigStore(data_dir / "config" / "llm-config.json")
+        llm_adapter = LLMAdapter(config_store.load())
+        win = ProductWindow(
+            task_runner=self._task_runner,
+            codec=self._codec,
+            ocr_adapter=getattr(self._recognize_text, "_adapter", self._recognize_text),
+            llm_config_store=config_store,
+            llm_adapter=llm_adapter,
+            quota_client=self._quota_client,
+            access_token=self._access_token,
+        )
+        win.back_requested.connect(self._on_product_back)
+        self._product_window = win
+        self.hide()
+        win.show()
+
+    def _on_product_back(self) -> None:
+        product_window = getattr(self, "_product_window", None)
+        if product_window is not None:
+            product_window.close()
+            self._product_window = None
+        self.show()
 
     def _model_update_finished(self, result: ModelUpdateResult) -> None:
         self._model_update_running = False
@@ -1077,6 +1113,11 @@ class MainWindow(QMainWindow):
         self.auto_button.clicked.connect(self.request_workflow)
         self.auto_button.setEnabled(False)
         header.addWidget(self.auto_button)
+        self.product_button = QPushButton("商品详情生成")
+        self.product_button.setObjectName("headerProductButton")
+        self.product_button.clicked.connect(self._enter_product)
+        self.product_button.setEnabled(self._codec is not None)
+        header.addWidget(self.product_button)
         header.addWidget(self.export_button)
         version = QLabel(f"v{self.startup.product.version}")
         version.setObjectName("versionLabel")
