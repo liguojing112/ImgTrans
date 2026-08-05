@@ -103,6 +103,7 @@ class EditorMainWindow(QMainWindow):
         quota_client=None,
         access_token=None,
         refresh_image_limits=None,
+        backend_url=None,
     ) -> None:
         super().__init__()
         self.setProperty("editorStyle", True)
@@ -146,6 +147,7 @@ class EditorMainWindow(QMainWindow):
         self._quota_client = quota_client
         self._access_token = access_token
         self._refresh_image_limits = refresh_image_limits
+        self._backend_url = backend_url
         if self._refresh_image_limits is not None:
             QTimer.singleShot(0, self._apply_image_limits_refresh)
         self._activation_dialog = None
@@ -1116,25 +1118,15 @@ class EditorMainWindow(QMainWindow):
         self.__product_window = value
 
     def _enter_product(self) -> None:
-        """打开商品详情生成窗口。"""
+        """打开商品详情生成窗口（LLM 由服务端代理）。"""
         from src.ui.product.product_window import ProductWindow
-        from src.infrastructure.llm_config import JsonLLMConfigStore
-        from src.infrastructure.llm_adapter import LLMAdapter
-        from src.platform.paths import PlatformPaths
-        startup = getattr(self, "_startup", None)
-        data_dir = (
-            PlatformPaths.discover().data_dir
-            if startup is None
-            else getattr(startup, "data_dir", PlatformPaths.discover().data_dir)
-        )
-        config_store = JsonLLMConfigStore(data_dir / "config" / "llm-config.json")
-        llm_config = config_store.load()
-        llm_adapter = LLMAdapter(llm_config)
+        from src.infrastructure.server_llm_adapter import ServerLLMAdapter
+
+        llm_adapter = ServerLLMAdapter(self._backend_url, self._access_token)
         win = ProductWindow(
             task_runner=self._task_runner,
             codec=self._codec,
             ocr_adapter=getattr(self._recognize_text, "_adapter", self._recognize_text),
-            llm_config_store=config_store,
             llm_adapter=llm_adapter,
             quota_client=self._quota_client,
             access_token=self._access_token,

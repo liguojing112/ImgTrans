@@ -36,6 +36,8 @@ class ManageServiceSettings:
                 "wechat_private_key_configured": False,
                 "wechat_platform_cert_configured": False,
                 "wechat_pay_configured": False,
+                "glm_configured": False,
+                "glm_model": "",
             }
         return {
             "wechat_appid": row.wechat_appid or "",
@@ -46,6 +48,8 @@ class ManageServiceSettings:
             "wechat_private_key_configured": bool(row.wechat_private_key_cipher),
             "wechat_platform_cert_configured": bool(row.wechat_platform_cert_cipher),
             "wechat_pay_configured": self._is_complete(row),
+            "glm_configured": bool(row.glm_api_key_cipher),
+            "glm_model": row.glm_model or "",
         }
 
     def save_wechat(self, values: dict) -> dict:
@@ -69,9 +73,46 @@ class ManageServiceSettings:
             ),
             # 回调 URL 固定写死，忽略表单提交值
             wechat_notify_url=self._notify_url,
+            glm_api_key_cipher=current.glm_api_key_cipher if current else None,
+            glm_model=current.glm_model if current else None,
         )
         self._repository.save(row)
         return self.get_public()
+
+    def save_glm(self, values: dict) -> dict:
+        """保存 GLM（商品详情生成）配置。API 密钥留空则保留原值；返回公开配置。"""
+        current = self._repository.load()
+        if current is None:
+            current = ServiceSettingsRow()
+        row = ServiceSettingsRow(
+            wechat_appid=current.wechat_appid,
+            wechat_mchid=current.wechat_mchid,
+            wechat_apiv3_key_cipher=current.wechat_apiv3_key_cipher,
+            wechat_private_key_cipher=current.wechat_private_key_cipher,
+            wechat_serial_no=current.wechat_serial_no,
+            wechat_platform_cert_cipher=current.wechat_platform_cert_cipher,
+            wechat_notify_url=self._notify_url,
+            glm_api_key_cipher=self._encrypt_or_keep(
+                values.get("glm_api_key", ""),
+                current.glm_api_key_cipher,
+            ),
+            glm_model=_strip(values.get("glm_model", "")),
+        )
+        self._repository.save(row)
+        return self.get_public()
+
+    def load_glm_settings(self) -> dict | None:
+        """解密出 GLM 配置供网关使用；未配置/解密失败返回 None。"""
+        row = self._repository.load()
+        if row is None or not row.glm_api_key_cipher:
+            return None
+        try:
+            api_key = self._cipher.decrypt(row.glm_api_key_cipher)
+        except ValueError:
+            return None
+        if not api_key:
+            return None
+        return {"api_key": api_key, "model": row.glm_model or ""}
 
     def load_wechat_settings(self) -> dict | None:
         """解密出完整微信配置，供支付网关使用；未配置/解密失败返回 None。"""

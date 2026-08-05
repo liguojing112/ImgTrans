@@ -128,6 +128,7 @@ class MainWindow(QMainWindow):
         codec=None,
         quota_client=None,
         access_token=None,
+        backend_url=None,
     ) -> None:
         super().__init__()
         self.startup = startup
@@ -160,6 +161,7 @@ class MainWindow(QMainWindow):
         self._codec = codec
         self._quota_client = quota_client
         self._access_token = access_token
+        self._backend_url = backend_url
         self._task_runner = task_runner
         self._current_document: ImageDocument | None = None
         self._source_document: ImageDocument | None = None
@@ -464,19 +466,15 @@ class MainWindow(QMainWindow):
         account_menu.addAction(self.activation_action)
 
     def _enter_product(self) -> None:
-        """打开商品详情生成窗口。"""
+        """打开商品详情生成窗口（LLM 由服务端代理）。"""
         from src.ui.product.product_window import ProductWindow
-        from src.infrastructure.llm_config import JsonLLMConfigStore
-        from src.infrastructure.llm_adapter import LLMAdapter
+        from src.infrastructure.server_llm_adapter import ServerLLMAdapter
 
-        data_dir = getattr(self.startup, "data_dir", None)
-        config_store = JsonLLMConfigStore(data_dir / "config" / "llm-config.json")
-        llm_adapter = LLMAdapter(config_store.load())
+        llm_adapter = ServerLLMAdapter(self._backend_url, self._access_token)
         win = ProductWindow(
             task_runner=self._task_runner,
             codec=self._codec,
             ocr_adapter=getattr(self._recognize_text, "_adapter", self._recognize_text),
-            llm_config_store=config_store,
             llm_adapter=llm_adapter,
             quota_client=self._quota_client,
             access_token=self._access_token,

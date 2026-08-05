@@ -19,6 +19,7 @@ from server.api.correlation import CORRELATION_HEADER, normalize_correlation_id
 from server.api.image_limits import admin_image_limits_router, client_config_router
 from server.api.models import admin_models_router, model_manifest_router
 from server.api.payment import admin_payment_router, payment_router
+from server.api.product_llm import llm_router
 from server.api.routes import health_router, v1_router
 from server.api.translation import translation_router
 from server.api.usage import usage_router
@@ -58,6 +59,7 @@ from server.infrastructure.wechat_pay_gateway import (
     UnavailableWechatGateway,
     WechatPayV3Gateway,
 )
+from server.infrastructure.glm_gateway import GlmGateway
 from server.infrastructure.image_limits_repository import (
     SqlAlchemyImageLimitRepository,
 )
@@ -229,6 +231,19 @@ def create_app(
         return None
 
     payment_gateway = WechatPayV3Gateway(_wechat_config_provider)
+
+    def _glm_config_provider():
+        database_config = app.state.manage_service_settings.load_glm_settings()
+        if database_config:
+            return database_config
+        if settings.glm_api_key:
+            return {
+                "api_key": settings.glm_api_key,
+                "model": settings.glm_model or "",
+            }
+        return None
+
+    app.state.glm_gateway = GlmGateway(_glm_config_provider)
     app.state.create_payment_order = CreatePaymentOrder(
         payment_gateway,
         app.state.manage_activation_plans,
@@ -370,6 +385,7 @@ def create_app(
     app.include_router(activation_router)
     app.include_router(admin_activation_router)
     app.include_router(payment_router)
+    app.include_router(llm_router)
     app.include_router(admin_payment_router)
     app.include_router(usage_router)
     app.mount(

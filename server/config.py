@@ -49,6 +49,8 @@ class ServerSettings:
     wechat_serial_no: str | None = None
     wechat_platform_cert: str | None = field(default=None, repr=False)
     wechat_notify_url: str | None = None
+    glm_api_key: str | None = field(default=None, repr=False)
+    glm_model: str | None = None
 
     @classmethod
     def from_env(
@@ -288,6 +290,8 @@ class ServerSettings:
                 "IMGTRANS_WECHAT_NOTIFY_URL",
                 require_https=production,
             ),
+            glm_api_key=_optional_text(values.get("IMGTRANS_GLM_API_KEY")),
+            glm_model=_optional_text(values.get("IMGTRANS_GLM_MODEL")),
         )
 
     def public_summary(self) -> dict[str, str | int | bool]:

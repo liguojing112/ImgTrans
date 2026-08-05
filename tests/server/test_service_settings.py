@@ -194,3 +194,30 @@ def test_plans_expose_wechat_pay_configured() -> None:
             assert plans[0]["wechat_pay_configured"] is True
 
     _run(scenario)
+
+
+def test_glm_settings_roundtrip() -> None:
+    app = _app()
+    manage = app.state.manage_service_settings
+    manage.save_glm({"glm_api_key": "glm-test-key-123456", "glm_model": "glm-4v-flash"})
+    loaded = manage.load_glm_settings()
+    assert loaded["api_key"] == "glm-test-key-123456"
+    assert loaded["model"] == "glm-4v-flash"
+
+
+def test_glm_no_plaintext_in_public() -> None:
+    app = _app()
+    manage = app.state.manage_service_settings
+    public = manage.save_glm({"glm_api_key": "glm-secret-key-789", "glm_model": "glm-4v"})
+    assert public["glm_configured"] is True
+    assert "glm-secret-key-789" not in str(public)
+
+
+def test_glm_blank_keeps_previous() -> None:
+    app = _app()
+    manage = app.state.manage_service_settings
+    manage.save_glm({"glm_api_key": "glm-secret-key-789", "glm_model": "glm-4v"})
+    manage.save_glm({"glm_api_key": "", "glm_model": "glm-5v"})
+    loaded = manage.load_glm_settings()
+    assert loaded["api_key"] == "glm-secret-key-789"
+    assert loaded["model"] == "glm-5v"

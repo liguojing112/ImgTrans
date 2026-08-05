@@ -38,6 +38,7 @@
   {% else %}<p class="status">未配置微信支付（扫码购买将不可用）</p>{% endif %}
   <form method="post" action="/admin/settings">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="section" value="wechat">
     <label>商户号（MchID）</label>
     <input name="wechat_mchid" type="text" value="{{ settings.wechat_mchid }}">
     <label>AppID</label>
@@ -54,6 +55,22 @@
     <label>支付回调 URL</label>
     <input name="wechat_notify_url" type="text" value="{{ settings.wechat_notify_url }}" disabled>
     <div class="hint">固定回调地址，由系统指定，不可修改</div>
+    <button type="submit" class="btn-submit">保存配置</button>
+  </form>
+</div>
+<div class="cfg-card">
+  <h3>GLM（商品详情生成）</h3>
+  {% if settings.glm_configured %}<p class="status">✓ GLM 已配置</p>
+  {% else %}<p class="status">未配置 GLM（商品详情生成将不可用）</p>{% endif %}
+  <form method="post" action="/admin/settings">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="section" value="glm">
+    <label>API 密钥</label>
+    <input name="glm_api_key" type="password" placeholder="{{ '已配置（留空保持不变）' if settings.glm_configured else '粘贴 GLM API 密钥' }}">
+    <div class="hint">密钥不回显，留空则保持不变。商品详情生成的文案由该密钥承担费用。</div>
+    <label>模型</label>
+    <input name="glm_model" type="text" value="{{ settings.glm_model }}" placeholder="如 glm-4v-flash">
+    <div class="hint">留空使用默认模型 glm-4v-flash</div>
     <button type="submit" class="btn-submit">保存配置</button>
   </form>
 </div>

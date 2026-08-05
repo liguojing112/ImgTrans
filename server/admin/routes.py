@@ -500,17 +500,26 @@ async def save_settings(request: Request) -> Response:
     manage = getattr(request.app.state, "manage_service_settings", None)
     if manage is None:
         raise HTTPException(status_code=503, detail="第三方配置未启用")
-    manage.save_wechat(
-        {
-            "wechat_appid": form.get("wechat_appid", ""),
-            "wechat_mchid": form.get("wechat_mchid", ""),
-            "wechat_apiv3_key": form.get("wechat_apiv3_key", ""),
-            "wechat_private_key": form.get("wechat_private_key", ""),
-            "wechat_serial_no": form.get("wechat_serial_no", ""),
-            "wechat_platform_cert": form.get("wechat_platform_cert", ""),
-            "wechat_notify_url": form.get("wechat_notify_url", ""),
-        }
-    )
+    section = form.get("section", "wechat")
+    if section == "glm":
+        manage.save_glm(
+            {
+                "glm_api_key": form.get("glm_api_key", ""),
+                "glm_model": form.get("glm_model", ""),
+            }
+        )
+    else:
+        manage.save_wechat(
+            {
+                "wechat_appid": form.get("wechat_appid", ""),
+                "wechat_mchid": form.get("wechat_mchid", ""),
+                "wechat_apiv3_key": form.get("wechat_apiv3_key", ""),
+                "wechat_private_key": form.get("wechat_private_key", ""),
+                "wechat_serial_no": form.get("wechat_serial_no", ""),
+                "wechat_platform_cert": form.get("wechat_platform_cert", ""),
+                "wechat_notify_url": form.get("wechat_notify_url", ""),
+            }
+        )
     request.state.audit_action = "update_service_settings"
     return _redirect("/admin/settings")
 

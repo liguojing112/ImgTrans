@@ -36,7 +36,6 @@ from src.application.product_analysis import AnalyzeProduct
 from src.application.copywriting import GenerateCopywriting
 from src.application.product_export import ExportCopywriting
 from src.domain.product_info import ProductProject
-from src.infrastructure.llm_config import JsonLLMConfigStore
 from src.infrastructure.llm_adapter import LLMAdapter
 from src.infrastructure.project_store import ProjectStore
 from src.ui.editor.theme import EDITOR_DARK_THEME
@@ -45,7 +44,6 @@ from src.ui.product.step_source import StepSource
 from src.ui.product.step_analysis import StepAnalysis
 from src.ui.product.step_copywriting import StepCopywriting
 from src.ui.product.widgets.step_indicator import StepIndicator
-from src.ui.product.widgets.llm_settings_dialog import LlmSettingsDialog
 
 
 class ProductWindow(QMainWindow):
@@ -63,7 +61,6 @@ class ProductWindow(QMainWindow):
         task_runner: object,
         codec: object,
         ocr_adapter: object,
-        llm_config_store: JsonLLMConfigStore,
         llm_adapter: LLMAdapter,
         quota_client=None,
         access_token=None,
@@ -78,7 +75,6 @@ class ProductWindow(QMainWindow):
         self._task_runner = task_runner
         self._codec = codec
         self._ocr = ocr_adapter
-        self._llm_config_store = llm_config_store
         self._llm = llm_adapter
         self._quota_client = quota_client
         self._access_token = access_token
@@ -103,13 +99,6 @@ class ProductWindow(QMainWindow):
         self._auto_save_timer = QTimer(self)
         self._auto_save_timer.timeout.connect(self._on_auto_save)
         self._auto_save_timer.start(self._AUTO_SAVE_INTERVAL)
-
-        llm_config = self._llm_config_store.load()
-        if not llm_config.api_key:
-            QMessageBox.information(
-                self, "提示",
-                "检测到尚未配置 LLM API。\n请先在「设置 → LLM API 设置」中配置 API Key。"
-            )
 
     def _build_ui(self) -> None:
         central = QWidget()
@@ -136,18 +125,6 @@ class ProductWindow(QMainWindow):
         top_layout.addWidget(title)
 
         top_layout.addStretch()
-
-        llm_btn = QPushButton("LLM 设置")
-        llm_btn.setToolTip("配置 LLM API Key 和模型")
-        llm_btn.setStyleSheet(
-            "QPushButton {"
-            "  background: #363650; color: #e0e0f0; font-size: 12px;"
-            "  padding: 4px 12px; border: 1px solid #3d3d5c; border-radius: 4px;"
-            "}"
-            "QPushButton:hover { background: #4d4d6e; border-color: #3973db; }"
-        )
-        llm_btn.clicked.connect(self._open_llm_settings)
-        top_layout.addWidget(llm_btn)
 
         save_btn = QPushButton("💾 保存")
         save_btn.setToolTip("保存当前项目")
@@ -204,11 +181,6 @@ class ProductWindow(QMainWindow):
         delete_action = QAction("删除项目...", self)
         delete_action.triggered.connect(self._on_delete_project)
         file_menu.addAction(delete_action)
-
-        settings_menu = menu.addMenu("设置")
-        llm_action = QAction("LLM API 设置...", self)
-        llm_action.triggered.connect(self._open_llm_settings)
-        settings_menu.addAction(llm_action)
 
     def _connect_signals(self) -> None:
         self._step_indicator.step_clicked.connect(self._on_step_clicked)
@@ -828,25 +800,6 @@ class ProductWindow(QMainWindow):
             store.delete(self._project_id)
             self._project_id = None
             self.statusBar().showMessage("项目已删除")
-
-    # —— LLM 设置 ——
-
-    def _open_llm_settings(self) -> None:
-        config = self._llm_config_store.load()
-        self._llm_dialog = LlmSettingsDialog(config)
-        self._llm_dialog.setWindowModality(Qt.WindowModality.ApplicationModal)
-        self._llm_dialog.finished.connect(self._on_llm_settings_closed)
-        self._llm_dialog.show()
-
-    def _on_llm_settings_closed(self, result: int) -> None:
-        from PySide6.QtWidgets import QDialog
-        if result == QDialog.DialogCode.Accepted:
-            new_config = self._llm_dialog.result()
-            if new_config:
-                self._llm_config_store.save(new_config)
-                self._llm.update_config(new_config)
-                self.statusBar().showMessage("LLM 配置已保存")
-        self._llm_dialog = None
 
     # —— 错误分类 ——
 
