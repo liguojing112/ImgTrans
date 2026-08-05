@@ -147,7 +147,7 @@ class EditorMainWindow(QMainWindow):
         self._access_token = access_token
         self._refresh_image_limits = refresh_image_limits
         if self._refresh_image_limits is not None:
-            QTimer.singleShot(0, self._refresh_image_limits)
+            QTimer.singleShot(0, self._apply_image_limits_refresh)
         self._activation_dialog = None
         self._quick_save_path: Path | None = None
         self._source_undo: list[ImageDocument] = []
@@ -1255,6 +1255,26 @@ class EditorMainWindow(QMainWindow):
     def _on_import_failed(self, error: Exception) -> None:
         title, msg, suggestion = classify_error(error)
         self.statusBar().showMessage(f"{title}：{msg}。{suggestion}")
+
+    def _apply_image_limits_refresh(self) -> None:
+        """启动时同步远程图片限制，并在状态栏显示结果（便于排查）。"""
+        try:
+            result = self._refresh_image_limits()
+        except Exception as error:  # noqa: BLE001
+            self.statusBar().showMessage(f"图片限制同步失败：{error}", 10000)
+            return
+        if getattr(result, "remote_applied", False):
+            limits = result.limits
+            self.statusBar().showMessage(
+                f"图片限制已同步：{limits.min_width}×{limits.min_height} ~ "
+                f"{limits.max_width}×{limits.max_height}，≤{limits.max_bytes} 字节",
+                10000,
+            )
+        else:
+            self.statusBar().showMessage(
+                f"图片限制未生效：{getattr(result, 'warning', '未知原因')}",
+                10000,
+            )
 
     # —— OCR ——
 
