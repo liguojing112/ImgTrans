@@ -57,6 +57,7 @@ class AnalyzeProduct:
         # 3) 调用 LLM Vision（分析前 3 张图，合并结果）
         vision_result: dict = {}
         max_images = min(3, len(image_paths))
+        raw = ""
         for i in range(max_images):
             try:
                 raw = self._llm.chat_with_image(
