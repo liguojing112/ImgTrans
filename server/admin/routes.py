@@ -20,7 +20,7 @@ from server.domain.admin_users import (
     MODULE_PERMISSIONS,
     PERMISSION_LABELS,
 )
-from server.domain.image_limits import ImageLimitValues
+from server.domain.image_limits import ImageLimitConflict, ImageLimitValues
 from server.domain.models import ModelReleaseSpec
 from server.api.rate_limit import enforce_rate_limit
 from server.domain.translation import TranslationTextItem, TranslationTextRequest
@@ -205,6 +205,18 @@ async def rollback_image_limits(version: int, request: Request) -> Response:
     _require_permission(request, session, "image_limits")
     request.app.state.manage_image_limits.rollback(version)
     request.state.audit_action = "rollback_image_limits"
+    return _redirect("/admin/image-limits")
+
+
+@admin_router.post("/image-limits/{version}/delete")
+async def delete_image_limit_version(version: int, request: Request) -> Response:
+    session, _ = await _protected_form(request)
+    _require_permission(request, session, "image_limits")
+    try:
+        request.app.state.manage_image_limits.delete(version)
+    except ImageLimitConflict as error:
+        raise HTTPException(status_code=409, detail=str(error))
+    request.state.audit_action = "delete_image_limit_version"
     return _redirect("/admin/image-limits")
 
 
@@ -396,9 +408,10 @@ _AUDIT_LABELS = {
     "issue_activation_codes": "手工发码",
     "disable_activation_code": "停用激活码",
     "enable_activation_code": "启用激活码",
-    "create_image_limit_draft": "新建图片限制草稿",
+    "create_image_limit_draft": "新建图片限制",
     "publish_image_limits": "发布图片限制",
     "rollback_image_limits": "回滚图片限制",
+    "delete_image_limit_version": "删除图片限制版本",
     "create_model_release": "新建模型草稿",
     "publish_model_release": "发布模型",
     "withdraw_model_release": "撤回模型",

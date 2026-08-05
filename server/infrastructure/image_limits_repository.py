@@ -141,6 +141,15 @@ class SqlAlchemyImageLimitRepository:
             )
             return tuple(_to_domain(record) for record in records)
 
+    def delete(self, version: int) -> None:
+        with self._database.session() as session:
+            record = session.get(ImageLimitVersionRecord, version)
+            if record is None:
+                raise ImageLimitNotFound("Image limit version was not found")
+            if record.status == ImageLimitStatus.PUBLISHED.value:
+                raise ImageLimitConflict("当前生效的配置不可删除，请先发布新版本")
+            session.delete(record)
+
     @staticmethod
     def _supersede_current(session) -> None:
         current = session.scalar(

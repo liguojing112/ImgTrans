@@ -2,18 +2,19 @@
 {% block content %}
 <h1>图片限制</h1>
 <section class="card">
-  <h2>新建草稿</h2>
+  <h2>新建</h2>
   <form method="post" action="/admin/image-limits/drafts" class="form-grid">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    {% for name, label in [("min_width", "最小宽度"), ("min_height", "最小高度"), ("max_width", "最大宽度"), ("max_height", "最大高度"), ("max_bytes", "最大文件大小（字节）")] %}
+    {% for name, label in [("min_width", "最小宽度（px）"), ("min_height", "最小高度（px）"), ("max_width", "最大宽度（px）"), ("max_height", "最大高度（px）"), ("max_bytes", "最大文件大小（字节）")] %}
     <label>{{ label }}<input name="{{ name }}" type="number" min="1" required></label>
     {% endfor %}
-    <button type="submit">创建草稿</button>
+    <button type="submit">创建</button>
   </form>
 </section>
 <section class="card"><h2>版本记录</h2>
-<table><tr><th>版本</th><th>状态</th><th>宽度</th><th>高度</th><th>文件上限</th><th>操作</th></tr>
-{% for item in versions %}<tr><td>{{ item.version }}</td><td>{{ "已发布" if item.status.value == "published" else "草稿" }}</td><td>{{ item.values.min_width }}～{{ item.values.max_width }}</td><td>{{ item.values.min_height }}～{{ item.values.max_height }}</td><td>{{ item.values.max_bytes }}</td><td>
+<table><tr><th>版本</th><th>状态</th><th>宽度（px）</th><th>高度（px）</th><th>文件上限（字节）</th><th>操作</th></tr>
+{% for item in versions %}<tr><td>{{ item.version }}</td><td>{{ "已发布" if item.status.value == "published" else ("已取代" if item.status.value == "superseded" else "草稿") }}</td><td>{{ item.values.min_width }}～{{ item.values.max_width }}</td><td>{{ item.values.min_height }}～{{ item.values.max_height }}</td><td>{{ item.values.max_bytes }}</td><td>
 {% if item.status.value == "draft" %}<form method="post" action="/admin/image-limits/{{ item.version }}/publish"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button>发布</button></form>{% else %}<form method="post" action="/admin/image-limits/{{ item.version }}/rollback"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button>回滚为新版本</button></form>{% endif %}
+{% if item.status.value != "published" %}<form method="post" action="/admin/image-limits/{{ item.version }}/delete"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button>删除</button></form>{% endif %}
 </td></tr>{% endfor %}</table></section>
 {% endblock %}

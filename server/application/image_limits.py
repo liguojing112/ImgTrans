@@ -20,6 +20,8 @@ class ImageLimitRepository(Protocol):
 
     def list_versions(self) -> tuple[ImageLimitVersion, ...]: ...
 
+    def delete(self, version: int) -> None: ...
+
 
 class ManageImageLimits:
     def __init__(self, repository: ImageLimitRepository) -> None:
@@ -38,6 +40,9 @@ class ManageImageLimits:
 
     def rollback(self, source_version: int) -> ImageLimitVersion:
         return self._repository.rollback(source_version)
+
+    def delete(self, version: int) -> None:
+        return self._repository.delete(version)
 
     def list_versions(self) -> tuple[ImageLimitVersion, ...]:
         return self._repository.list_versions()
