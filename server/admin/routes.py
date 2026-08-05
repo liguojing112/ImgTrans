@@ -766,12 +766,14 @@ def _activation_response(
         page, _PAGE_SIZE, status, search or None
     )
     pages = max(1, -(-total // _PAGE_SIZE))
+    plans = request.app.state.manage_activation_plans.list_all()
     return _render_protected(
         "activation.html",
         request,
         session,
         title="激活管理",
-        plans=request.app.state.manage_activation_plans.list_all(),
+        plans=plans,
+        plan_names={plan.plan_id: plan.values.name for plan in plans},
         codes=codes,
         issued_codes=issued_codes,
         activation_configured=request.app.state.device_authorization_enabled,
