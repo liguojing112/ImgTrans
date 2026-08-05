@@ -30,3 +30,21 @@ document.addEventListener('DOMContentLoaded', function () {
     });
   });
 });
+
+// 滚动位置记忆：点击表单/链接提交后页面刷新回顶部，这里恢复原位置
+(function () {
+  var SCROLL_KEY = 'imgtrans_admin_scroll';
+  var saved = sessionStorage.getItem(SCROLL_KEY);
+  if (saved !== null) {
+    sessionStorage.removeItem(SCROLL_KEY);
+    window.addEventListener('load', function () {
+      window.scrollTo(0, parseInt(saved, 10) || 0);
+    });
+  }
+  document.addEventListener('click', function (e) {
+    var el = e.target && e.target.closest ? e.target.closest('form, a, button') : null;
+    if (el) {
+      sessionStorage.setItem(SCROLL_KEY, String(window.scrollY || window.pageYOffset || 0));
+    }
+  });
+})();
