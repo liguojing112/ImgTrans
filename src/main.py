@@ -280,6 +280,22 @@ def create_main_window() -> MainWindow:
     return window
 
 
+def _application_icon():
+    """加载客户端图标；打包后从 _MEIPASS，开发时从 packaging/assets。"""
+    from PySide6.QtGui import QIcon
+
+    candidates = []
+    if getattr(sys, "frozen", False):
+        candidates.append(Path(sys._MEIPASS) / "assets" / "imgtrans.png")
+    candidates.append(
+        Path(__file__).resolve().parent.parent / "packaging" / "assets" / "imgtrans.png"
+    )
+    for path in candidates:
+        if path.is_file():
+            return QIcon(str(path))
+    return QIcon()
+
+
 def _install_qt_translator(application: QApplication) -> None:
     """安装 Qt 简体中文翻译，使标准按钮（确定/取消/是/否）显示中文。"""
     from PySide6.QtCore import QLibraryInfo, QTranslator
@@ -308,6 +324,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     application = QApplication.instance() or QApplication(["imgtrans"])
     application.setApplicationName("优译图AI")
     application.setApplicationVersion(__version__)
+    application.setWindowIcon(_application_icon())
     _install_qt_translator(application)
     if args.editor:
         window = _create_editor_window()

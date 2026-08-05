@@ -40,7 +40,7 @@ analysis = Analysis(
     [str(root / "src" / "__main__.py")],
     pathex=[str(root)],
     binaries=[*rapidocr_binaries, *onnx_binaries],
-    datas=rapidocr_datas,
+    datas=[*rapidocr_datas, (str(root / "packaging" / "assets" / "imgtrans.png"), "assets")],
     hiddenimports=[
         *rapidocr_hidden,
         "onnxruntime",
