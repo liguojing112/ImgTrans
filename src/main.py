@@ -125,12 +125,15 @@ def _create_quota_client(base_url: str):
     return QuotaClient(base_url)
 
 
+DEFAULT_BACKEND_URL = "https://imgtrans.rchtop.top"
+
+
 def create_main_window() -> MainWindow:
     logger = configure_logging()
     product = ProductInfo(name="图片翻译", version=__version__, milestone="M4")
     startup = BootstrapApplication(product, PlatformPaths.discover()).execute()
     codec = PillowImageCodec()
-    backend_url = os.environ.get("IMGTRANS_API_BASE_URL", "").strip()
+    backend_url = os.environ.get("IMGTRANS_API_BASE_URL", DEFAULT_BACKEND_URL).strip()
     development_api_token_configured = bool(
         os.environ.get("IMGTRANS_API_TOKEN", "").strip()
     )
@@ -340,7 +343,7 @@ def _create_editor_window() -> EditorMainWindow:
     )
 
     # —— 翻译 ——
-    backend_url = os.environ.get("IMGTRANS_API_BASE_URL", "").strip()
+    backend_url = os.environ.get("IMGTRANS_API_BASE_URL", DEFAULT_BACKEND_URL).strip()
     activation = None
     if backend_url:
         activation = ActivationCoordinator(
