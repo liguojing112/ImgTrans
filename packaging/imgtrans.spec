@@ -96,6 +96,7 @@ executable = EXE(
     [],
     exclude_binaries=True,
     name="ImgTrans",
+    icon=str(root / "packaging" / "assets" / "imgtrans.ico"),
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
