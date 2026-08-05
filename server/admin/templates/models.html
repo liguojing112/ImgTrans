@@ -1,13 +1,33 @@
 {% extends "base.html" %}
 {% block content %}
 <h1>模型发布</h1>
-<section class="card"><h2>新建模型草稿</h2>
+<section class="card">
+  <h2>使用说明</h2>
+  <p>本页用于发布<strong>客户端运行时需要下载的模型文件</strong>（如图片文字识别、背景修复等模型）。客户端启动时会自动从服务器拉取模型清单并下载安装。</p>
+  <ul>
+    <li>模型发布<strong>通常由软件供应商维护</strong>，日常一般不需要操作。</li>
+    <li>如需发布新模型：先把模型文件上传到对象存储，获取它的<strong>存储路径、版本、大小、SHA256</strong>，再按下表填写并「创建 → 发布」。</li>
+  </ul>
+  <p><strong>字段说明</strong></p>
+  <ul>
+    <li><strong>模型ID</strong>：模型唯一标识。如 lama-inpainting（背景修复）、rapidocr（文字识别）</li>
+    <li><strong>版本</strong>：模型版本号，同一模型发新版本时递增</li>
+    <li><strong>文件名</strong>：客户端保存到本地的文件名</li>
+    <li><strong>存储对象键</strong>：模型文件在对象存储中的路径</li>
+    <li><strong>对象版本</strong>：对象存储返回的版本标识</li>
+    <li><strong>大小（字节）</strong>：模型文件大小</li>
+    <li><strong>SHA256 校验值</strong>：文件哈希，用于校验下载完整性</li>
+    <li><strong>平台 / 架构</strong>：该模型适用于哪种系统的客户端</li>
+  </ul>
+  <p class="muted">如有疑问，请联系软件供应商协助发布。</p>
+</section>
+<section class="card"><h2>新建模型</h2>
 <form method="post" action="/admin/models/releases" class="form-grid">
 <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
 {% for name, label in [("model_id", "模型ID"), ("version", "版本"), ("filename", "文件名"), ("object_key", "存储对象键"), ("object_version", "对象版本"), ("size_bytes", "大小（字节）"), ("sha256", "SHA256 校验值")] %}<label>{{ label }}<input name="{{ name }}" {% if name == "size_bytes" %}type="number" min="1"{% endif %} required></label>{% endfor %}
 <label>平台<select name="platform"><option value="windows">Windows</option><option value="macos">macOS</option></select></label>
 <label>架构<select name="architecture"><option value="x86_64">x86_64</option><option value="arm64">ARM64</option></select></label>
-<button type="submit">创建草稿</button></form></section>
+<button type="submit">创建</button></form></section>
 <section class="card"><h2>发布记录</h2><table><tr><th>ID</th><th>模型</th><th>版本</th><th>目标</th><th>状态</th><th>操作</th></tr>
 {% for item in releases %}<tr><td>{{ item.release_id }}</td><td>{{ item.spec.model_id }}</td><td>{{ item.spec.version }}</td><td>{{ item.spec.platform }}/{{ item.spec.architecture }}</td><td>{{ "已发布" if item.status.value == "published" else "草稿" }}</td><td>
 {% if item.status.value == "draft" %}<form method="post" action="/admin/models/releases/{{ item.release_id }}/publish"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button>发布</button></form>{% elif item.status.value == "published" %}<form method="post" action="/admin/models/releases/{{ item.release_id }}/withdraw"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button>撤回</button></form>{% endif %}
