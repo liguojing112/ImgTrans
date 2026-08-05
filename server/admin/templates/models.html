@@ -4,12 +4,12 @@
 <section class="card">
   <h2>使用说明</h2>
   <p>本页用于发布<strong>客户端运行时需要下载的模型文件</strong>（如图片文字识别、背景修复等模型）。客户端启动时会自动从服务器拉取模型清单并下载安装。</p>
-  <ul>
+  <ol>
     <li>模型发布<strong>通常由软件供应商维护</strong>，日常一般不需要操作。</li>
     <li>如需发布新模型：先把模型文件上传到对象存储，获取它的<strong>存储路径、版本、大小、SHA256</strong>，再按下表填写并「创建 → 发布」。</li>
-  </ul>
+  </ol>
   <p><strong>字段说明</strong></p>
-  <ul>
+  <ol>
     <li><strong>模型ID</strong>：模型唯一标识。如 lama-inpainting（背景修复）、rapidocr（文字识别）</li>
     <li><strong>版本</strong>：模型版本号，同一模型发新版本时递增</li>
     <li><strong>文件名</strong>：客户端保存到本地的文件名</li>
@@ -18,7 +18,7 @@
     <li><strong>大小（字节）</strong>：模型文件大小</li>
     <li><strong>SHA256 校验值</strong>：文件哈希，用于校验下载完整性</li>
     <li><strong>平台 / 架构</strong>：该模型适用于哪种系统的客户端</li>
-  </ul>
+  </ol>
   <p class="muted">如有疑问，请联系软件供应商协助发布。</p>
 </section>
 <section class="card"><h2>新建模型</h2>
