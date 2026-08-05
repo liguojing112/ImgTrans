@@ -1254,7 +1254,13 @@ class EditorMainWindow(QMainWindow):
 
     def _on_import_failed(self, error: Exception) -> None:
         title, msg, suggestion = classify_error(error)
-        self.statusBar().showMessage(f"{title}：{msg}。{suggestion}")
+        self.statusBar().showMessage(f"{title}：{msg}。{suggestion}", 10000)
+        from src.domain.image import ImageValidationError
+
+        if isinstance(error, ImageValidationError):
+            from PySide6.QtWidgets import QMessageBox
+
+            QMessageBox.warning(self, title, f"{msg}\n\n{suggestion}")
 
     def _apply_image_limits_refresh(self) -> None:
         """启动时同步远程图片限制，并在状态栏显示结果（便于排查）。"""
