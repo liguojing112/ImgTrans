@@ -102,6 +102,7 @@ class EditorMainWindow(QMainWindow):
         payment_client=None,
         quota_client=None,
         access_token=None,
+        refresh_image_limits=None,
     ) -> None:
         super().__init__()
         self.setProperty("editorStyle", True)
@@ -144,6 +145,9 @@ class EditorMainWindow(QMainWindow):
         self._payment_client = payment_client
         self._quota_client = quota_client
         self._access_token = access_token
+        self._refresh_image_limits = refresh_image_limits
+        if self._refresh_image_limits is not None:
+            QTimer.singleShot(0, self._refresh_image_limits)
         self._activation_dialog = None
         self._quick_save_path: Path | None = None
         self._source_undo: list[ImageDocument] = []

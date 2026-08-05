@@ -349,7 +349,13 @@ def _create_editor_window() -> EditorMainWindow:
         PlatformPaths.discover(),
     ).execute()
     codec = PillowImageCodec()
-    image_limits = ImageLimits()
+    backend_url = os.environ.get("IMGTRANS_API_BASE_URL", DEFAULT_BACKEND_URL).strip()
+    remote_image_limits = HttpImageLimitsClient(backend_url) if backend_url else None
+    image_limits = ImageLimitsCoordinator(
+        JsonImageLimitsCache(startup.data_dir / "config" / "image-limits.json"),
+        ImageLimits(),
+        remote_image_limits,
+    )
     import_image = ImportImage(codec, image_limits)
     export_image = ExportImage(codec)
     task_runner = QtTaskRunner()
@@ -363,7 +369,6 @@ def _create_editor_window() -> EditorMainWindow:
     )
 
     # —— 翻译 ——
-    backend_url = os.environ.get("IMGTRANS_API_BASE_URL", DEFAULT_BACKEND_URL).strip()
     activation = None
     if backend_url:
         activation = ActivationCoordinator(
@@ -485,6 +490,7 @@ def _create_editor_window() -> EditorMainWindow:
         access_token=(
             activation.access_token if activation is not None else None
         ),
+        refresh_image_limits=image_limits.refresh,
     )
 
 
