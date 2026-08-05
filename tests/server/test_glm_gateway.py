@@ -53,6 +53,25 @@ def test_chat_not_configured() -> None:
         pass
 
 
+def test_chat_retries_on_rate_limit() -> None:
+    provider = lambda: {"api_key": "glm-key", "model": "glm-4.6v-flash"}
+    gateway = GlmGateway(provider, max_attempts=3, sleeper=lambda seconds: None)
+    rate_limited = json.dumps(
+        {"error": {"code": "1305", "message": "访问量过大"}}
+    ).encode("utf-8")
+    ok = json.dumps({"choices": [{"message": {"content": "你好"}}]}).encode("utf-8")
+    calls: list[int] = []
+
+    def _open(request, timeout=None):
+        calls.append(1)
+        return _FakeResponse(rate_limited) if len(calls) == 1 else _FakeResponse(ok)
+
+    with mock.patch("server.infrastructure.glm_gateway.urlopen", _open):
+        text = gateway.chat([{"role": "user", "content": "hi"}])
+    assert text == "你好"
+    assert len(calls) == 2
+
+
 def _app():
     database = Database("sqlite+pysqlite:///:memory:")
     Base.metadata.create_all(database.engine)
