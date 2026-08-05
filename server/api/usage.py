@@ -34,5 +34,8 @@ def get_usage(request: Request) -> dict:
 @usage_router.post("/consume")
 def consume_usage(request: Request) -> dict:
     require_client(request, "客户端认证未配置")
-    consumed, remaining = _manage(request).consume(_token(request), 1)
-    return {"consumed": consumed, "quota_remaining": remaining}
+    manage = _manage(request)
+    token = _token(request)
+    consumed, remaining = manage.consume(token, 1)
+    total, _ = manage.get_usage(token)
+    return {"consumed": consumed, "quota_total": total, "quota_remaining": remaining}

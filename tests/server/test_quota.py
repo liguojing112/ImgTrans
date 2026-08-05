@@ -124,6 +124,7 @@ def test_usage_api_and_unbind_endpoint() -> None:
             resp = await client.post("/v1/usage/consume", headers=headers)
             assert resp.json()["consumed"] is True
             assert resp.json()["quota_remaining"] == 1
+            assert resp.json()["quota_total"] == 2
             # 解绑
             resp = await client.post(
                 "/v1/activations/unbind", json={"activation_code": code}
