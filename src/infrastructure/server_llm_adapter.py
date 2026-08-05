@@ -28,8 +28,9 @@ class ServerLLMAdapter(LLMAdapter):
         access_token: TokenSource,
         timeout_seconds: float = 30.0,
     ) -> None:
-        # provider=glm 保留 max_tokens 上限收敛逻辑（服务端同样受 GLM 限制）
-        super().__init__(LLMConfig(provider="glm", max_tokens=4096))
+        # provider 非 glm 以避免旧模型的 1024 max_tokens 截断限制；
+        # glm-4.6v 等付费模型支持更高输出
+        super().__init__(LLMConfig(provider="custom", max_tokens=4096))
         self._backend_url = backend_url.rstrip("/")
         self._token_source = access_token
         self._timeout_seconds = timeout_seconds

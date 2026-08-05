@@ -10,6 +10,7 @@ from typing import Callable
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 import json
+import logging
 import time
 
 _MAX_RESPONSE_BYTES = 4 * 1024 * 1024
@@ -97,7 +98,14 @@ class GlmGateway:
                     self._sleeper(0.8 * (attempt + 1))
                     continue
                 raise GlmError("GLM 服务当前访问量过大，请稍后再试")
-            return _extract_text(payload)
+            text = _extract_text(payload)
+            logging.getLogger("imgtrans.server").info(
+                "glm_chat_ok model=%s text_len=%s text_prefix=%r",
+                body["model"],
+                len(text),
+                text[:200],
+            )
+            return text
         raise GlmError("GLM 服务当前访问量过大，请稍后再试")
 
 
