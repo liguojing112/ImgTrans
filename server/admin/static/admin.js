@@ -29,6 +29,22 @@ document.addEventListener('DOMContentLoaded', function () {
       copyText(btn.getAttribute('data-copy'), btn);
     });
   });
+  // 方案编辑：点"编辑"启用促销价/原价输入；提交前也确保提交（防 disabled 漏传）
+  document.querySelectorAll('button[data-edit-form]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var id = btn.getAttribute('data-edit-form');
+      document.querySelectorAll('input[data-edit-form="' + id + '"]').forEach(function (i) {
+        i.disabled = false;
+      });
+    });
+  });
+  document.querySelectorAll('form[id^="edit-"]').forEach(function (f) {
+    f.addEventListener('submit', function () {
+      document.querySelectorAll('input[data-edit-form="' + f.id + '"]').forEach(function (i) {
+        i.disabled = false;
+      });
+    });
+  });
 });
 
 // 滚动位置记忆：点击表单/链接提交后页面刷新回顶部，这里恢复原位置

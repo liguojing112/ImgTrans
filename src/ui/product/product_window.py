@@ -423,7 +423,9 @@ class ProductWindow(QMainWindow):
             raise RuntimeError("请先激活应用后再使用商品详情生成")
         info = self._quota_client.consume(token)
         if not info.consumed:
-            raise RuntimeError("商品详情次数不足，请购买次数包")
+            if info.quota_total <= 0:
+                raise RuntimeError("当前是时长包，请购买次数包后使用商品详情生成")
+            raise RuntimeError("商品详情次数已用完，请购买次数包")
 
     def _on_generate(self) -> None:
         fact = self._step_analysis.current_fact()
