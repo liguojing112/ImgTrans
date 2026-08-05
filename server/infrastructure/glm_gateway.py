@@ -56,7 +56,7 @@ class GlmGateway:
             raise GlmNotConfigured("GLM 未配置，请在后台第三方配置填写 API 密钥")
         base_url = (config.get("base_url") or self.DEFAULT_BASE_URL).rstrip("/")
         body: dict = {
-            "model": model or config.get("model") or "glm-4.6v-flash",
+            "model": model or config.get("model") or "glm-4.6v",
             "messages": messages,
             "max_tokens": max_tokens or 4096,
         }
