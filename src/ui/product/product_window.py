@@ -1,6 +1,6 @@
 """商品详情生成主窗口 — 三步式工作流。
 
-顶部栏: 返回首页 | 标题 | LLM 设置 | 保存
+顶部栏: 返回首页 | 标题 | 保存
 步骤指示器 | QStackedWidget(第1步/第2步/第3步)
 文件菜单: 保存项目 / 打开项目
 """
@@ -806,13 +806,13 @@ class ProductWindow(QMainWindow):
     def _classify_error(self, msg: str) -> str:
         msg_lower = msg.lower()
         if "401" in msg or "unauthorized" in msg_lower or "invalid api" in msg_lower:
-            return f"API Key 无效或已过期，请检查 LLM 设置 ({msg})"
+            return f"未激活或授权已失效，请先在账户中激活 ({msg})"
         if "429" in msg or "rate limit" in msg_lower or "quota" in msg_lower or "额度" in msg:
-            return f"API 额度不足或请求频率超限，请稍后重试或更换 Key ({msg})"
+            return f"API 额度不足或请求频率超限，请稍后重试或联系供应商 ({msg})"
         if "timeout" in msg_lower or "timed out" in msg_lower:
             return f"请求超时，请检查网络连接 ({msg})"
         if "connection" in msg_lower or "refused" in msg_lower or "network" in msg_lower:
-            return f"网络连接失败，请检查网络或 API 地址 ({msg})"
+            return f"网络连接失败，请检查网络 ({msg})"
         if "max_tokens" in msg_lower or "参数非法" in msg:
-            return f"模型参数错误，请检查 LLM 设置中的模型和 Max Tokens ({msg})"
+            return f"模型参数错误，请联系供应商 ({msg})"
         return msg
