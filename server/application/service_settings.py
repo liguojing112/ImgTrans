@@ -124,9 +124,13 @@ class ManageServiceSettings:
                 "appid": row.wechat_appid,
                 "mchid": row.wechat_mchid,
                 "apiv3_key": self._cipher.decrypt(row.wechat_apiv3_key_cipher),
-                "private_key": self._cipher.decrypt(row.wechat_private_key_cipher),
+                "private_key": _normalize_pem(
+                    self._cipher.decrypt(row.wechat_private_key_cipher)
+                ),
                 "serial_no": row.wechat_serial_no,
-                "platform_cert": self._cipher.decrypt(row.wechat_platform_cert_cipher),
+                "platform_cert": _normalize_pem(
+                    self._cipher.decrypt(row.wechat_platform_cert_cipher)
+                ),
                 "notify_url": self._notify_url,
             }
         except ValueError:
@@ -136,7 +140,7 @@ class ManageServiceSettings:
         return config
 
     def _encrypt_or_keep(self, raw: str, current_cipher: str | None) -> str | None:
-        stripped = raw.strip()
+        stripped = _normalize_pem(raw.strip())
         if stripped:
             return self._cipher.encrypt(stripped)
         return current_cipher
@@ -155,3 +159,8 @@ class ManageServiceSettings:
 
 def _strip(value: str) -> str:
     return value.strip()
+
+
+def _normalize_pem(value: str) -> str:
+    """PEM 统一用 LF 行尾 — wechatpayv3 解析私钥不兼容 CRLF（`\r` 混入 base64 导致失败）。"""
+    return value.replace("\r\n", "\n").replace("\r", "\n")

@@ -124,6 +124,28 @@ def test_load_wechat_settings_decrypts_full() -> None:
     assert loaded["notify_url"] == DEFAULT_WECHAT_NOTIFY_URL
 
 
+def test_crlf_private_key_normalized_to_lf() -> None:
+    app = _app()
+    manage = app.state.manage_service_settings
+    crlf = {
+        **WECHAT,
+        "wechat_private_key": (
+            "-----BEGIN PRIVATE KEY-----\r\nMIIEvQ==\r\n-----END PRIVATE KEY-----"
+        ),
+        "wechat_platform_cert": (
+            "-----BEGIN PUBLIC KEY-----\r\nMIIBIjANBg==\r\n-----END PUBLIC KEY-----"
+        ),
+    }
+    manage.save_wechat(crlf)
+    loaded = manage.load_wechat_settings()
+    assert (
+        loaded["private_key"]
+        == "-----BEGIN PRIVATE KEY-----\nMIIEvQ==\n-----END PRIVATE KEY-----"
+    )
+    assert "\r" not in loaded["private_key"]
+    assert "\r" not in loaded["platform_cert"]
+
+
 def test_notify_url_is_fixed_and_ignores_submitted_value() -> None:
     app = _app()
     manage = app.state.manage_service_settings
