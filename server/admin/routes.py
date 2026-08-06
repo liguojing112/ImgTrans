@@ -879,6 +879,17 @@ def _integer_or_zero(form: dict[str, str], name: str) -> int:
     return _integer(form, name)
 
 
+def _yuan_to_minor(form: dict[str, str], name: str) -> int:
+    """后台表单以"元"填金额，转换为内部分单位。"""
+    raw = form.get(name, "").strip()
+    if not raw:
+        return 0
+    try:
+        return int(round(float(raw) * 100))
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=f"{name} 金额格式无效") from error
+
+
 def _plan_values(form: dict[str, str]) -> ActivationPlanValues:
     from datetime import datetime, timezone
 
@@ -895,14 +906,14 @@ def _plan_values(form: dict[str, str]) -> ActivationPlanValues:
             raise HTTPException(status_code=422, detail="促销截止时间格式无效") from error
     return ActivationPlanValues(
         name=_required(form, "name"),
-        amount_minor=_integer(form, "amount_minor"),
+        amount_minor=_yuan_to_minor(form, "amount_minor"),
         currency=_required(form, "currency"),
         duration_hours=_integer_or_zero(form, "duration_hours"),
         enabled=form.get("enabled") == "true",
         plan_type=plan_type,
         quota=_integer_or_zero(form, "quota"),
         sale_amount_minor=(
-            _integer(form, "sale_amount_minor") if sale_amount_raw else None
+            _yuan_to_minor(form, "sale_amount_minor") if sale_amount_raw else None
         ),
         sale_ends_at=sale_ends_at,
         benefits=form.get("benefits", ""),
