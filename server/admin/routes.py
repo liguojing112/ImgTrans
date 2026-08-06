@@ -760,7 +760,7 @@ def _models_response(request: Request, session: AdminSession) -> HTMLResponse:
 
 
 _PLAN_ERROR_MESSAGES = {
-    "Activation plan sale price is invalid": "促销价必须低于原价（单位：分）",
+    "Activation plan sale price is invalid": "促销价必须低于原价（单位：元）",
     "Activation plan duration is invalid": "时长（小时）必须在 0~87600 之间",
     "Activation plan quota is invalid": "次数必须在 0~1000000 之间",
     "Activation plan must include duration or quota": "方案必须包含时长或次数",
