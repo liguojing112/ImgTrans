@@ -248,11 +248,14 @@ def create_app(
         payment_gateway,
         app.state.manage_activation_plans,
         payment_repository,
+        activation_codes=app.state.manage_activation_codes,
     )
     app.state.handle_payment_callback = HandlePaymentCallback(
         payment_gateway,
         payment_repository,
         app.state.manage_activation_codes.issue,
+        app.state.manage_activation_plans,
+        renew_code=app.state.manage_activation_codes.renew_by_code_id,
     )
     app.state.get_payment_order = GetPaymentOrder(payment_repository)
     app.state.list_payment_orders = ListPaymentOrders(payment_repository)

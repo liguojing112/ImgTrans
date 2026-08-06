@@ -311,6 +311,45 @@ class SqlAlchemyActivationRepository:
             session.flush()
             return _code_to_domain(record, self._cipher)
 
+    def get_code_by_digest(self, code_digest: str) -> ActivationCode | None:
+        with self._database.session() as session:
+            record = session.scalar(
+                select(ActivationCodeRecord).where(
+                    ActivationCodeRecord.code_digest == code_digest
+                )
+            )
+            return _code_to_domain(record, self._cipher) if record is not None else None
+
+    def renew_code(
+        self,
+        code_id: str,
+        duration_hours: int,
+        quota: int,
+        now: datetime,
+    ) -> ActivationCode:
+        """续购叠加：在现有激活码上累加时长/次数（不换激活码）。"""
+        with self._database.session() as session:
+            record = session.scalar(
+                select(ActivationCodeRecord)
+                .where(ActivationCodeRecord.code_id == code_id)
+                .with_for_update()
+            )
+            if record is None:
+                raise ActivationNotFound("Activation code was not found")
+            if record.disabled:
+                raise ActivationConflict("Activation code is disabled")
+            if duration_hours > 0:
+                expires_at = _as_utc(record.expires_at)
+                if expires_at is None or expires_at <= now:
+                    record.expires_at = now + timedelta(hours=duration_hours)
+                else:
+                    record.expires_at = expires_at + timedelta(hours=duration_hours)
+            if quota > 0:
+                record.quota_total += quota
+                record.quota_remaining += quota
+            session.flush()
+            return _code_to_domain(record, self._cipher)
+
     def activate(
         self,
         code_digest: str,

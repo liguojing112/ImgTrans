@@ -40,14 +40,23 @@ class PaymentRepository(Protocol):
 
 
 class CreatePaymentOrder:
-    """客户端选套餐 → Native 下单 → 建订单。"""
+    """客户端选套餐 → Native 下单 → 建订单。带 activation_code 视为续购叠加。"""
 
-    def __init__(self, gateway, plans, order_repository: PaymentRepository) -> None:
+    def __init__(
+        self,
+        gateway,
+        plans,
+        order_repository: PaymentRepository,
+        activation_codes=None,
+    ) -> None:
         self._gateway = gateway
         self._plans = plans
         self._orders = order_repository
+        self._activation_codes = activation_codes
 
-    def execute(self, plan_id: int) -> tuple[PaymentOrder, str]:
+    def execute(
+        self, plan_id: int, activation_code: str | None = None
+    ) -> tuple[PaymentOrder, str]:
         plan = next(
             (item for item in self._plans.list_all() if item.plan_id == plan_id),
             None,
@@ -56,6 +65,21 @@ class CreatePaymentOrder:
             raise PaymentConflict("套餐不存在或已停用")
         now = datetime.now(timezone.utc)
         order_id = uuid4().hex
+        code_id = None
+        if self._activation_codes is not None:
+            if activation_code:
+                code = self._activation_codes.get_by_activation_code(activation_code)
+                if code is None or code.disabled:
+                    raise PaymentConflict("激活码无效或已停用")
+                # 续购纯次数包须已有活跃时长
+                if plan.values.plan_type == "quota":
+                    expires = code.expires_at
+                    if expires is None or expires <= now:
+                        raise PaymentConflict("请先购买并激活时长包后再购买次数包")
+                code_id = code.code_id
+            elif plan.values.plan_type == "quota":
+                # 首次购买不允许纯次数包（必须先有时长码）
+                raise PaymentConflict("请先购买并激活时长包后再购买次数包")
         # 有效促销期用促销价，否则原价（订单创建时锁定金额）
         amount = (
             plan.values.sale_amount_minor
@@ -68,7 +92,7 @@ class CreatePaymentOrder:
             amount_minor=amount,
             currency=plan.values.currency,
             status=PaymentStatus.CREATED,
-            code_id=None,
+            code_id=code_id,
             created_at=now,
         )
         self._orders.create(order)
@@ -79,14 +103,21 @@ class CreatePaymentOrder:
 
 
 class HandlePaymentCallback:
-    """微信支付回调 — 验签 + 金额核对 + 幂等发码。"""
+    """微信支付回调 — 验签 + 金额核对 + 幂等发码/续购叠加。"""
 
     def __init__(
-        self, gateway, order_repository: PaymentRepository, issue_codes
+        self,
+        gateway,
+        order_repository: PaymentRepository,
+        issue_codes,
+        plans=None,
+        renew_code=None,
     ) -> None:
         self._gateway = gateway
         self._orders = order_repository
         self._issue_codes = issue_codes
+        self._plans = plans
+        self._renew_code = renew_code
 
     def execute(self, body: bytes, headers: dict[str, str]) -> None:
         notify = self._gateway.parse_notify(body, headers)
@@ -104,6 +135,19 @@ class HandlePaymentCallback:
         now = datetime.now(timezone.utc)
         if not self._orders.mark_paid_if_created(order.order_id, now):
             return  # 已处理过，幂等返回
+        if order.code_id and self._renew_code is not None:
+            # 续购：在现有激活码上累加时长/次数
+            plan = next(
+                (p for p in self._plans.list_all() if p.plan_id == order.plan_id),
+                None,
+            )
+            if plan is not None:
+                self._renew_code(
+                    order.code_id,
+                    plan.values.duration_hours,
+                    plan.values.quota,
+                )
+            return
         issued = self._issue_codes(order.plan_id, 1)
         item = issued[0]
         self._orders.set_activation_code(

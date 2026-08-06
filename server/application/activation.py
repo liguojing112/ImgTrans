@@ -10,6 +10,7 @@ from typing import Callable, Protocol
 from server.domain.activation import (
     ActivationCode,
     ActivationConflict,
+    ActivationNotFound,
     ActivationPlan,
     ActivationPlanValues,
     DeviceActivation,
@@ -54,6 +55,16 @@ class ActivationRepository(Protocol):
     def disable_code(self, code_id: str, now: datetime) -> ActivationCode: ...
 
     def enable_code(self, code_id: str) -> ActivationCode: ...
+
+    def get_code_by_digest(self, code_digest: str) -> ActivationCode | None: ...
+
+    def renew_code(
+        self,
+        code_id: str,
+        duration_hours: int,
+        quota: int,
+        now: datetime,
+    ) -> ActivationCode: ...
 
     def activate(
         self,
@@ -208,6 +219,40 @@ class ManageActivationCodes:
 
     def enable(self, code_id: str) -> ActivationCode:
         return self._repository.enable_code(code_id)
+
+    def get_by_activation_code(self, activation_code: str) -> ActivationCode | None:
+        if self._hasher is None:
+            return None
+        return self._repository.get_code_by_digest(
+            self._hasher.digest_code(activation_code.strip())
+        )
+
+    def renew(
+        self, activation_code: str, duration_hours: int, quota: int
+    ) -> ActivationCode:
+        """续购叠加：在现有激活码上累加时长/次数（不换激活码）。"""
+        if self._hasher is None:
+            raise ActivationConflict("Activation service is not configured")
+        code = self.get_by_activation_code(activation_code)
+        if code is None:
+            raise ActivationNotFound("Activation code was not found")
+        return self._repository.renew_code(
+            code.code_id,
+            duration_hours,
+            quota,
+            datetime.now(timezone.utc),
+        )
+
+    def renew_by_code_id(
+        self, code_id: str, duration_hours: int, quota: int
+    ) -> ActivationCode:
+        """支付回调续购叠加：按激活码 UUID 累加时长/次数。"""
+        return self._repository.renew_code(
+            code_id,
+            duration_hours,
+            quota,
+            datetime.now(timezone.utc),
+        )
 
     def unbind(self, activation_code: str) -> bool:
         """自助解绑：清设备/token 绑定，保留次数与时长额度。"""

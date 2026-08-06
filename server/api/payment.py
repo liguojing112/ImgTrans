@@ -16,6 +16,7 @@ admin_payment_router = APIRouter(prefix="/v1/admin/payment", tags=["admin-paymen
 
 class CreateOrderRequest(StrictContract):
     plan_id: int
+    activation_code: str | None = None
 
 
 def _create_order_use(request: Request):
@@ -79,7 +80,9 @@ async def create_order(request: Request) -> dict:
     body = await request.json()
     spec = CreateOrderRequest.model_validate(body)
     try:
-        order, code_url = _create_order_use(request).execute(spec.plan_id)
+        order, code_url = _create_order_use(request).execute(
+            spec.plan_id, spec.activation_code
+        )
     except PaymentError as error:
         _raise_payment(error)
     return {
