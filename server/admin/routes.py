@@ -14,7 +14,7 @@ from server.admin.security import (
     AdminSecurity,
     AdminSession,
 )
-from server.domain.activation import ActivationConflict, ActivationPlanValues
+from server.domain.activation import ActivationConflict, ActivationError, ActivationPlanValues
 from server.domain.admin_users import (
     AdminUserError,
     MODULE_PERMISSIONS,
@@ -328,7 +328,10 @@ def activation_page(request: Request) -> Response:
 async def create_activation_plan(request: Request) -> Response:
     session, form = await _protected_form(request)
     _require_permission(request, session, "activation")
-    request.app.state.manage_activation_plans.create(_plan_values(form))
+    try:
+        request.app.state.manage_activation_plans.create(_plan_values(form))
+    except ActivationError as error:
+        return _activation_response(request, session, error=_plan_error_message(error))
     request.state.audit_action = "create_activation_plan"
     return _redirect("/admin/activation")
 
@@ -337,7 +340,10 @@ async def create_activation_plan(request: Request) -> Response:
 async def update_activation_plan(plan_id: int, request: Request) -> Response:
     session, form = await _protected_form(request)
     _require_permission(request, session, "activation")
-    request.app.state.manage_activation_plans.update(plan_id, _plan_values(form))
+    try:
+        request.app.state.manage_activation_plans.update(plan_id, _plan_values(form))
+    except ActivationError as error:
+        return _activation_response(request, session, error=_plan_error_message(error))
     request.state.audit_action = "update_activation_plan"
     return _redirect("/admin/activation")
 
@@ -753,11 +759,29 @@ def _models_response(request: Request, session: AdminSession) -> HTMLResponse:
     )
 
 
+_PLAN_ERROR_MESSAGES = {
+    "Activation plan sale price is invalid": "促销价必须低于原价（单位：分）",
+    "Activation plan duration is invalid": "时长（小时）必须在 0~87600 之间",
+    "Activation plan quota is invalid": "次数必须在 0~1000000 之间",
+    "Activation plan must include duration or quota": "方案必须包含时长或次数",
+    "Duration plan requires duration hours": "时长包必须填写时长（小时）",
+    "Quota plan requires quota": "次数包必须填写次数",
+    "Combo plan requires both duration and quota": "组合包必须同时填写时长和次数",
+    "Activation plan amount cannot be negative": "原价不能为负数",
+    "Activation plan currency is invalid": "货币代码无效（需 3 位大写字母）",
+}
+
+
+def _plan_error_message(error: ActivationError) -> str:
+    return _PLAN_ERROR_MESSAGES.get(str(error), str(error))
+
+
 def _activation_response(
     request: Request,
     session: AdminSession,
     *,
     issued_codes: tuple[str, ...] = (),
+    error: str | None = None,
 ) -> HTMLResponse:
     page = max(1, _query_int(request, "page", 1))
     status = (request.query_params.get("status") or "").strip() or None
@@ -782,6 +806,7 @@ def _activation_response(
         page=page,
         pages=pages,
         total=total,
+        error=error,
     )
 
 
