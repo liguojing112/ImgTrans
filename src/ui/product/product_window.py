@@ -372,6 +372,8 @@ class ProductWindow(QMainWindow):
         if not images:
             QMessageBox.warning(self, "提示", "请先上传商品图片。")
             return
+        if not self._check_quota_available():
+            return
         image_paths = [img.path for img in images]
 
         self._cancel_requested = False
@@ -414,6 +416,26 @@ class ProductWindow(QMainWindow):
 
     # —— 文案生成 ——
 
+    def _check_quota_available(self) -> bool:
+        """商品详情使用前检查是否购买了次数包；未购买弹窗提示。"""
+        if self._quota_client is None:
+            return True
+        token = self._access_token() if self._access_token else None
+        if not token:
+            QMessageBox.warning(self, "提示", "请先激活应用后再使用商品详情生成")
+            return False
+        try:
+            info = self._quota_client.get_usage(token)
+        except Exception as error:
+            QMessageBox.warning(self, "提示", f"无法获取商品详情次数：{error}")
+            return False
+        if info.quota_total <= 0:
+            QMessageBox.warning(
+                self, "提示", "当前是时长包，请购买次数包后使用商品详情生成"
+            )
+            return False
+        return True
+
     def _ensure_quota(self) -> None:
         """生成前原子扣减一次商品详情次数；不足则抛错中止。"""
         if self._quota_client is None:
@@ -431,6 +453,8 @@ class ProductWindow(QMainWindow):
         fact = self._step_analysis.current_fact()
         if fact is None:
             QMessageBox.warning(self, "提示", "请先完成 AI 分析。")
+            return
+        if not self._check_quota_available():
             return
         info = self._model.manual_info
         settings = self._step_copywriting.settings()

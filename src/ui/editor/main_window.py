@@ -171,7 +171,7 @@ class EditorMainWindow(QMainWindow):
         self._model = EditorModel()
         self._undo_stack = QUndoStack(self)
 
-        self._home_page = HomePage()
+        self._home_page = HomePage(self._payment_client)
         self._editor_page = EditorPage(self._undo_stack)
         self._toolbox_page = self._create_toolbox_page()
 
@@ -303,6 +303,27 @@ class EditorMainWindow(QMainWindow):
         purchase.purchase_completed.connect(_on_completed)
         purchase.show()
 
+    def _open_purchase_for_plan(self, plan) -> None:
+        if self._payment_client is None:
+            return
+        from src.ui.purchase_dialog import PurchaseDialog
+
+        purchase = PurchaseDialog(
+            self._payment_client,
+            self._task_runner,
+            self,
+            preselect_plan_id=plan.plan_id,
+        )
+
+        def _on_completed(code: str) -> None:
+            dialog = self._activation_dialog
+            if dialog is not None:
+                dialog.code_edit.setText(code)
+                dialog.request_activation()
+
+        purchase.purchase_completed.connect(_on_completed)
+        purchase.show()
+
     def _release_activation_dialog(self, dialog) -> None:
         if self._activation_dialog is dialog:
             self._activation_dialog = None
@@ -360,6 +381,7 @@ class EditorMainWindow(QMainWindow):
         self._home_page.image_translation_requested.connect(self._enter_editor)
         self._home_page.product_detail_requested.connect(self._enter_product)
         self._home_page.toolbox_requested.connect(self._enter_toolbox)
+        self._home_page.purchase_requested.connect(self._open_purchase_for_plan)
 
         # EditorPage 核心
         self._editor_page.import_requested.connect(self._on_import)
@@ -666,6 +688,8 @@ class EditorMainWindow(QMainWindow):
         panel = self._editor_page.batch_panel
         sources = panel.sources
         if not sources:
+            return
+        if not self._check_translation_access():
             return
         ctrl = self._editor_page.translate_controls
         selection = self._translation_selection(panel.selected_target_language)
@@ -1347,6 +1371,19 @@ class EditorMainWindow(QMainWindow):
 
     # —— 翻译 ——
 
+    def _check_translation_access(self) -> bool:
+        """图片翻译前检查是否已激活且时长未过期；未购买时长包弹窗提示。"""
+        try:
+            session = self._activation_status() if self._activation_status else None
+        except Exception:
+            session = None
+        if session is None or not getattr(session, "active", False):
+            from PySide6.QtWidgets import QMessageBox
+
+            QMessageBox.warning(self, "提示", "您还没有可用的翻译时长，请先购买时长包")
+            return False
+        return True
+
     def _on_translate(self, ocr_language: str, target_language: str) -> None:
         if self._translation_document_id is not None:
             self.statusBar().showMessage("已有图片正在翻译，请等待完成或先取消")
@@ -1357,6 +1394,8 @@ class EditorMainWindow(QMainWindow):
         document = self._model.source_document
         if document is None:
             self.statusBar().showMessage("请先导入图片")
+            return
+        if not self._check_translation_access():
             return
 
         translating_doc_id = self._model.active_document_id

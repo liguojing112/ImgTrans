@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -21,10 +21,12 @@ class HomePage(QFrame):
     image_translation_requested = Signal()
     product_detail_requested = Signal()
     toolbox_requested = Signal()
+    purchase_requested = Signal(object)
 
-    def __init__(self) -> None:
+    def __init__(self, payment_client=None) -> None:
         super().__init__()
         self.setProperty("editorStyle", True)
+        self._payment_client = payment_client
 
         layout = QVBoxLayout(self)
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -89,6 +91,80 @@ class HomePage(QFrame):
         cards_bottom.addWidget(toolbox_card)
         cards_bottom.addStretch()
         layout.addLayout(cards_bottom)
+
+        # 套餐区
+        plans_title = QLabel("购买套餐")
+        plans_title.setObjectName("homeSubtitle")
+        plans_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(plans_title)
+        self._plans_row = QHBoxLayout()
+        self._plans_row.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._plans_row.setSpacing(12)
+        layout.addLayout(self._plans_row)
+
+        if self._payment_client is not None:
+            QTimer.singleShot(0, self._load_plans)
+
+    def _load_plans(self) -> None:
+        try:
+            plans = self._payment_client.list_plans()
+        except Exception:
+            return
+        self.set_plans(plans)
+
+    def set_plans(self, plans) -> None:
+        while self._plans_row.count():
+            item = self._plans_row.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+        for plan in plans:
+            self._plans_row.addWidget(self._make_plan_card(plan))
+        if not plans:
+            note = QLabel("暂无可购买套餐")
+            note.setObjectName("homeCardDesc")
+            note.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self._plans_row.addWidget(note)
+
+    def _make_plan_card(self, plan):
+        if plan.plan_type == "combo":
+            spec = f"{plan.duration_hours} 小时 + {plan.quota} 次"
+        elif plan.plan_type == "quota":
+            spec = f"{plan.quota} 次"
+        else:
+            spec = f"{plan.duration_hours} 小时"
+        price = (
+            plan.sale_amount_minor
+            if plan.is_on_sale and plan.sale_amount_minor
+            else plan.amount_minor
+        )
+        card = QFrame()
+        card.setObjectName("homeCard")
+        card.setProperty("editorStyle", True)
+        card.setFixedSize(200, 130)
+        card.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        inner = QVBoxLayout(card)
+        inner.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        inner.setSpacing(8)
+
+        name = QLabel(plan.name)
+        name.setObjectName("homeCardTitle")
+        name.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        price_label = QLabel(f"¥{price / 100:.2f}")
+        price_label.setObjectName("homeCardTitle")
+        price_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        spec_label = QLabel(spec)
+        spec_label.setObjectName("homeCardDesc")
+        spec_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        inner.addWidget(name)
+        inner.addWidget(price_label)
+        inner.addWidget(spec_label)
+        card.mousePressEvent = lambda e, p=plan: self.purchase_requested.emit(p)
+        return card
 
     def _make_card(
         self,

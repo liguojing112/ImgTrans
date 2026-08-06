@@ -45,10 +45,12 @@ class PurchaseDialog(QDialog):
         payment_client: PaymentClient,
         task_runner: TaskRunner,
         parent=None,
+        preselect_plan_id: int | None = None,
     ) -> None:
         super().__init__(parent)
         self._client = payment_client
         self._task_runner = task_runner
+        self._preselect_plan_id = preselect_plan_id
         self._plans: list[PayablePlan] = []
         self._selected_plan: PayablePlan | None = None
         self._order: PaymentOrderInfo | None = None
@@ -114,13 +116,21 @@ class PurchaseDialog(QDialog):
         duration_plans = [p for p in self._plans if p.plan_type != "quota"]
         quota_plans = [p for p in self._plans if p.plan_type == "quota"]
 
-        def _add_group(title: str, items: list[PayablePlan], suffix: str) -> None:
+        def _suffix(plan: PayablePlan) -> str:
+            if plan.plan_type == "combo":
+                return f"{plan.duration_hours} 小时 + {plan.quota} 次"
+            if plan.plan_type == "quota":
+                return f"{plan.quota} 次"
+            return f"{plan.duration_hours} 小时"
+
+        def _add_group(title: str, items: list[PayablePlan]) -> None:
             if not items:
                 return
             if self._plan_combo.count() > 0:
                 self._plan_combo.insertSeparator(self._plan_combo.count())
             self._plan_combo.addItem(title)
             for plan in items:
+                suffix = _suffix(plan)
                 if plan.is_on_sale and plan.sale_amount_minor is not None:
                     label = (
                         f"{plan.name}  —  ¥{plan.sale_amount_minor / 100:.2f}"
@@ -132,9 +142,13 @@ class PurchaseDialog(QDialog):
                     )
                 self._plan_combo.addItem(label, plan.plan_id)
 
-        _add_group("── 翻译时长包 ──", duration_plans, f"{duration_plans[0].duration_days} 天" if duration_plans else "")
-        _add_group("── 商品详情次数包 ──", quota_plans, f"{quota_plans[0].quota} 次" if quota_plans else "")
+        _add_group("── 翻译时长包 ──", duration_plans)
+        _add_group("── 商品详情次数包 ──", quota_plans)
         self._plan_combo.currentIndexChanged.connect(self._on_plan_selected)
+        if self._preselect_plan_id is not None:
+            index = self._plan_combo.findData(self._preselect_plan_id)
+            if index >= 0:
+                self._plan_combo.setCurrentIndex(index)
         self._on_plan_selected()
         self._status_label.setText("请选择套餐后购买")
         self._buy_button.setEnabled(True)

@@ -22,7 +22,7 @@ class PayablePlan:
     name: str
     amount_minor: int
     currency: str
-    duration_days: int
+    duration_hours: int
     plan_type: str = "duration"
     quota: int = 0
     sale_amount_minor: int | None = None
@@ -63,7 +63,7 @@ class PaymentClient:
                 name=item["name"],
                 amount_minor=item["amount_minor"],
                 currency=item["currency"],
-                duration_days=item["duration_days"],
+                duration_hours=item["duration_hours"],
                 plan_type=item.get("plan_type", "duration"),
                 quota=item.get("quota", 0),
                 sale_amount_minor=item.get("sale_amount_minor"),
