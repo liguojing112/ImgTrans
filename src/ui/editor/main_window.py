@@ -262,6 +262,9 @@ class EditorMainWindow(QMainWindow):
         )
         self.activation_action.triggered.connect(self.show_activation_dialog)
         account_menu.addAction(self.activation_action)
+        renew_action = QAction("续购时长/次数…", self)
+        renew_action.triggered.connect(self._open_renew_dialog)
+        account_menu.addAction(renew_action)
 
     def show_activation_dialog(self) -> None:
         if (
@@ -286,6 +289,34 @@ class EditorMainWindow(QMainWindow):
         dialog.finished.connect(lambda: self._release_activation_dialog(dialog))
         self._activation_dialog = dialog
         dialog.show()
+
+    def _open_renew_dialog(self) -> None:
+        session = self._activation_status() if self._activation_status else None
+        code = getattr(session, "code", None) if session else None
+        if not code:
+            QMessageBox.warning(self, "提示", "请先激活后，再续购时长/次数")
+            return
+        if self._payment_client is None:
+            return
+        from src.ui.purchase_dialog import PurchaseDialog
+
+        purchase = PurchaseDialog(
+            self._payment_client,
+            self._task_runner,
+            self,
+            renew_code=code,
+        )
+        purchase.renew_completed.connect(lambda: self._refresh_after_renew(code))
+        purchase.show()
+
+    def _refresh_after_renew(self, code: str) -> None:
+        if self._activate_device is None:
+            return
+        try:
+            self._activate_device(code)
+            QMessageBox.information(self, "续购成功", "时长/次数已更新到当前激活码")
+        except Exception as error:
+            QMessageBox.warning(self, "提示", f"刷新激活状态失败：{error}")
 
     def _open_purchase_dialog(self) -> None:
         if self._payment_client is None:

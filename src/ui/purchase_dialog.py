@@ -37,6 +37,7 @@ class PurchaseDialog(QDialog):
     """扫码购买激活码 — 选套餐 → 下单 → 二维码 → 轮询支付结果。"""
 
     purchase_completed = Signal(str)  # activation_code
+    renew_completed = Signal()  # 续购成功（已叠加到当前激活码）
 
     _POLL_MS = 3000
 
@@ -46,22 +47,29 @@ class PurchaseDialog(QDialog):
         task_runner: TaskRunner,
         parent=None,
         preselect_plan_id: int | None = None,
+        renew_code: str | None = None,
     ) -> None:
         super().__init__(parent)
         self._client = payment_client
         self._task_runner = task_runner
         self._preselect_plan_id = preselect_plan_id
+        self._renew_code = renew_code
+        self._is_renewal = renew_code is not None
         self._plans: list[PayablePlan] = []
         self._selected_plan: PayablePlan | None = None
         self._order: PaymentOrderInfo | None = None
         self._polling = False
         self.setObjectName("purchaseDialog")
-        self.setWindowTitle("扫码购买")
+        self.setWindowTitle("续购套餐" if self._is_renewal else "扫码购买")
         self.setMinimumSize(380, 520)
 
         layout = QVBoxLayout(self)
 
-        intro = QLabel("选择套餐后用微信扫码支付，支付成功后自动生成激活码。")
+        intro = QLabel(
+            "选择套餐后用微信扫码支付，时长/次数将叠加到当前激活码。"
+            if self._is_renewal
+            else "选择套餐后用微信扫码支付，支付成功后自动生成激活码。"
+        )
         intro.setWordWrap(True)
         layout.addWidget(intro)
 
@@ -226,7 +234,7 @@ class PurchaseDialog(QDialog):
         self._set_busy(True)
         self._status_label.setText("正在下单…")
         self._task_runner.submit(
-            lambda: self._client.create_order(plan_id),
+            lambda: self._client.create_order(plan_id, self._renew_code),
             self._order_created,
             self._operation_failed,
         )
@@ -285,6 +293,15 @@ class PurchaseDialog(QDialog):
                 self, "支付成功", f"激活码已生成：\n{result.activation_code}\n正在绑定本机…"
             )
             self.purchase_completed.emit(result.activation_code)
+            self.accept()
+        elif result.status == "paid" and self._is_renewal:
+            self._timer.stop()
+            self._polling = False
+            self._status_label.setText("续购成功，时长/次数已叠加到当前激活码")
+            QMessageBox.information(
+                self, "续购成功", "时长/次数已叠加到当前激活码"
+            )
+            self.renew_completed.emit()
             self.accept()
         elif result.status == "paid":
             self._timer.stop()

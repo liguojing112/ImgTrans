@@ -74,8 +74,13 @@ class PaymentClient:
             for item in payload
         ]
 
-    def create_order(self, plan_id: int) -> PaymentOrderInfo:
-        payload = self._post("/v1/payments/orders", {"plan_id": plan_id})
+    def create_order(
+        self, plan_id: int, activation_code: str | None = None
+    ) -> PaymentOrderInfo:
+        body = {"plan_id": plan_id}
+        if activation_code:
+            body["activation_code"] = activation_code
+        payload = self._post("/v1/payments/orders", body)
         return _parse_order(payload)
 
     def poll_order(self, order_id: str) -> PaymentOrderInfo:

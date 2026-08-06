@@ -61,6 +61,7 @@ class ActivationCoordinator:
                             "access_token": session.access_token,
                             "quota_total": session.quota_total,
                             "quota_remaining": session.quota_remaining,
+                            "code": normalized,
                         },
                         separators=(",", ":"),
                     ),
@@ -159,6 +160,7 @@ def _decode_session(encoded: str) -> ActivationSession | None:
             access_token=payload["access_token"],
             quota_total=quota_total,
             quota_remaining=quota_remaining,
+            code=payload.get("code"),
         )
         if session.expires_at <= datetime.now(timezone.utc):
             return None

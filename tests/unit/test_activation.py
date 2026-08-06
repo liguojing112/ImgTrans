@@ -55,7 +55,11 @@ def test_activation_uses_stable_device_id_and_secure_session() -> None:
     assert client.calls[0][0] == "IT-ABCD"
     assert client.calls[0][1] == client.calls[1][1]
     assert client.calls[0][1].startswith("imgtrans-")
-    assert coordinator.current_session() == activated
+    session = coordinator.current_session()
+    assert session is not None
+    assert session.code == "IT-EFGH"
+    assert session.plan_id == activated.plan_id
+    assert session.expires_at == activated.expires_at
     assert coordinator.access_token() == "itd_fixture_device_token_123456"
     assert "itd_fixture_device_token_123456" not in repr(activated)
     assert all("https" not in key for key in credentials.values)

@@ -18,6 +18,7 @@ class ActivationSession:
     access_token: str = field(repr=False)
     quota_total: int = 0
     quota_remaining: int = 0
+    code: str | None = None
 
     def __post_init__(self) -> None:
         if isinstance(self.plan_id, bool) or not isinstance(self.plan_id, int) or self.plan_id <= 0:
