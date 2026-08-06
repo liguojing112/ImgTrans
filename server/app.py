@@ -309,7 +309,7 @@ def create_app(
         ):
             response.headers["Cache-Control"] = "no-store"
             response.headers["Content-Security-Policy"] = (
-                "default-src 'self'; style-src 'self'; form-action 'self'; "
+                "default-src 'self'; style-src 'self' 'unsafe-inline'; form-action 'self'; "
                 "frame-ancestors 'none'; base-uri 'none'"
             )
             response.headers["X-Content-Type-Options"] = "nosniff"
