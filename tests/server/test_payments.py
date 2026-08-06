@@ -81,7 +81,7 @@ def _app():
     # 建一个可购套餐
     plan = app.state.manage_activation_plans.create(
         ActivationPlanValues(
-            name="月卡", amount_minor=3000, currency="CNY", duration_days=30
+            name="月卡", amount_minor=3000, currency="CNY", duration_hours=30
         )
     )
     app.state._plan_id = plan.plan_id
@@ -122,7 +122,7 @@ def test_create_order_rejects_disabled_plan() -> None:
     app.state.manage_activation_plans.update(
         plan_id,
         ActivationPlanValues(
-            name="月卡", amount_minor=3000, currency="CNY", duration_days=30, enabled=False
+            name="月卡", amount_minor=3000, currency="CNY", duration_hours=30, enabled=False
         ),
     )
 
@@ -262,7 +262,7 @@ def test_create_order_uses_sale_price_when_on_sale() -> None:
     app = _app()
     plan = app.state.manage_activation_plans.create(
         ActivationPlanValues(
-            name="促销月卡", amount_minor=3000, currency="CNY", duration_days=30,
+            name="促销月卡", amount_minor=3000, currency="CNY", duration_hours=30,
             sale_amount_minor=1500,
             sale_ends_at=datetime.now(timezone.utc) + timedelta(days=1),
             benefits="含30天图片翻译",
@@ -279,7 +279,7 @@ def test_create_order_uses_original_price_after_sale_ends() -> None:
     app = _app()
     plan = app.state.manage_activation_plans.create(
         ActivationPlanValues(
-            name="过期促销", amount_minor=3000, currency="CNY", duration_days=30,
+            name="过期促销", amount_minor=3000, currency="CNY", duration_hours=30,
             sale_amount_minor=1500,
             sale_ends_at=datetime.now(timezone.utc) - timedelta(days=1),
         )
@@ -294,7 +294,7 @@ def test_plans_api_includes_promotion() -> None:
     app = _app()
     app.state.manage_activation_plans.create(
         ActivationPlanValues(
-            name="促销月卡", amount_minor=3000, currency="CNY", duration_days=30,
+            name="促销月卡", amount_minor=3000, currency="CNY", duration_hours=30,
             sale_amount_minor=1500,
             sale_ends_at=datetime.now(timezone.utc) + timedelta(days=1),
             benefits="含30天图片翻译",

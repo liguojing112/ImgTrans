@@ -33,7 +33,7 @@ class ActivationRepository(Protocol):
     def create_codes(
         self,
         plan_id: int,
-        duration_days: int,
+        duration_hours: int,
         quota_total: int,
         code_digests: tuple[str, ...],
         plaintexts: tuple[str, ...] = (),
@@ -168,7 +168,7 @@ class ManageActivationCodes:
             try:
                 activations = self._repository.create_codes(
                     plan.plan_id,
-                    plan.values.duration_days,
+                    plan.values.duration_hours,
                     plan.values.quota,
                     digests,
                     plaintext,

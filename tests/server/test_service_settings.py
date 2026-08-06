@@ -181,7 +181,7 @@ def test_plans_expose_wechat_pay_configured() -> None:
     app = _app()
     app.state.manage_activation_plans.create(
         ActivationPlanValues(
-            name="monthly", amount_minor=3000, currency="CNY", duration_days=30
+            name="monthly", amount_minor=3000, currency="CNY", duration_hours=30
         )
     )
     app.state.manage_service_settings.save_wechat(WECHAT)

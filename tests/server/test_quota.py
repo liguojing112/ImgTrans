@@ -37,7 +37,7 @@ def test_quota_plan_issues_code_with_quota() -> None:
     plan = app.state.manage_activation_plans.create(
         ActivationPlanValues(
             name="100次包", amount_minor=5000, currency="CNY",
-            duration_days=1, plan_type="quota", quota=100,
+            duration_hours=1, plan_type="quota", quota=100,
         )
     )
     code, grant = _issue_and_activate(app, plan.plan_id, DEVICE_A)
@@ -50,7 +50,7 @@ def test_consume_decrements_and_stops_at_zero() -> None:
     plan = app.state.manage_activation_plans.create(
         ActivationPlanValues(
             name="3次包", amount_minor=300, currency="CNY",
-            duration_days=1, plan_type="quota", quota=3,
+            duration_hours=1, plan_type="quota", quota=3,
         )
     )
     _code, grant = _issue_and_activate(app, plan.plan_id, DEVICE_A)
@@ -72,7 +72,7 @@ def test_unbind_allows_rebind_and_keeps_quota() -> None:
     plan = app.state.manage_activation_plans.create(
         ActivationPlanValues(
             name="5次包", amount_minor=500, currency="CNY",
-            duration_days=1, plan_type="quota", quota=5,
+            duration_hours=1, plan_type="quota", quota=5,
         )
     )
     code, grant = _issue_and_activate(app, plan.plan_id, DEVICE_A)
@@ -90,7 +90,7 @@ def test_rebind_extends_duration() -> None:
     app = _app()
     plan = app.state.manage_activation_plans.create(
         ActivationPlanValues(
-            name="30天", amount_minor=3000, currency="CNY", duration_days=30
+            name="30天", amount_minor=3000, currency="CNY", duration_hours=30
         )
     )
     code, grant = _issue_and_activate(app, plan.plan_id, DEVICE_A)
@@ -106,7 +106,7 @@ def test_usage_api_and_unbind_endpoint() -> None:
     plan = app.state.manage_activation_plans.create(
         ActivationPlanValues(
             name="2次包", amount_minor=200, currency="CNY",
-            duration_days=1, plan_type="quota", quota=2,
+            duration_hours=1, plan_type="quota", quota=2,
         )
     )
     code, grant = _issue_and_activate(app, plan.plan_id, DEVICE_A)
@@ -139,13 +139,13 @@ def test_payment_plans_include_type_and_quota() -> None:
     app = _app()
     app.state.manage_activation_plans.create(
         ActivationPlanValues(
-            name="月卡", amount_minor=3000, currency="CNY", duration_days=30
+            name="月卡", amount_minor=3000, currency="CNY", duration_hours=30
         )
     )
     app.state.manage_activation_plans.create(
         ActivationPlanValues(
             name="100次包", amount_minor=5000, currency="CNY",
-            duration_days=1, plan_type="quota", quota=100,
+            duration_hours=1, plan_type="quota", quota=100,
         )
     )
 
@@ -156,7 +156,7 @@ def test_payment_plans_include_type_and_quota() -> None:
             by_id = {p["plan_id"]: p for p in plans}
             duration = [p for p in plans if p["plan_type"] == "duration"]
             quota = [p for p in plans if p["plan_type"] == "quota"]
-            assert len(duration) == 1 and duration[0]["duration_days"] == 30
+            assert len(duration) == 1 and duration[0]["duration_hours"] == 30
             assert len(quota) == 1 and quota[0]["quota"] == 100
 
     _run(scenario)

@@ -30,7 +30,7 @@ def test_issued_code_plaintext_roundtrips() -> None:
     app = _app()
     plan = app.state.manage_activation_plans.create(
         ActivationPlanValues(
-            name="月卡", amount_minor=1990, currency="CNY", duration_days=30
+            name="月卡", amount_minor=1990, currency="CNY", duration_hours=30
         )
     )
     issued = app.state.manage_activation_codes.issue(plan.plan_id, 2)
@@ -44,7 +44,7 @@ def test_code_search_by_plaintext() -> None:
     app = _app()
     plan = app.state.manage_activation_plans.create(
         ActivationPlanValues(
-            name="月卡", amount_minor=1990, currency="CNY", duration_days=30
+            name="月卡", amount_minor=1990, currency="CNY", duration_hours=30
         )
     )
     issued = app.state.manage_activation_codes.issue(plan.plan_id, 1)
@@ -61,7 +61,7 @@ def test_status_tabs_filter() -> None:
     app = _app()
     plan = app.state.manage_activation_plans.create(
         ActivationPlanValues(
-            name="月卡", amount_minor=1990, currency="CNY", duration_days=30
+            name="月卡", amount_minor=1990, currency="CNY", duration_hours=30
         )
     )
     issued = app.state.manage_activation_codes.issue(plan.plan_id, 3)
@@ -85,7 +85,7 @@ def test_enable_code_after_disable() -> None:
     app = _app()
     plan = app.state.manage_activation_plans.create(
         ActivationPlanValues(
-            name="月卡", amount_minor=1990, currency="CNY", duration_days=30
+            name="月卡", amount_minor=1990, currency="CNY", duration_hours=30
         )
     )
     issued = app.state.manage_activation_codes.issue(plan.plan_id, 1)
@@ -98,7 +98,7 @@ def test_delete_plan_cascades_codes() -> None:
     app = _app()
     with_codes = app.state.manage_activation_plans.create(
         ActivationPlanValues(
-            name="有码方案", amount_minor=1990, currency="CNY", duration_days=30
+            name="有码方案", amount_minor=1990, currency="CNY", duration_hours=30
         )
     )
     issued = app.state.manage_activation_codes.issue(with_codes.plan_id, 1)
@@ -114,7 +114,7 @@ def test_delete_plan_cascades_codes() -> None:
 
     empty = app.state.manage_activation_plans.create(
         ActivationPlanValues(
-            name="空方案", amount_minor=990, currency="CNY", duration_days=30
+            name="空方案", amount_minor=990, currency="CNY", duration_hours=30
         )
     )
     app.state.manage_activation_plans.delete(empty.plan_id)
@@ -126,7 +126,7 @@ def test_usage_page_lists_plaintext_and_search() -> None:
     plan = app.state.manage_activation_plans.create(
         ActivationPlanValues(
             name="10次包", amount_minor=500, currency="CNY",
-            duration_days=1, plan_type="quota", quota=10,
+            duration_hours=1, plan_type="quota", quota=10,
         )
     )
     issued = app.state.manage_activation_codes.issue(plan.plan_id, 1)

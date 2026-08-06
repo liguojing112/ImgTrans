@@ -50,7 +50,7 @@ def _create_plan(app, **changes):
         "name": "30 天基础版",
         "amount_minor": 1990,
         "currency": "CNY",
-        "duration_days": 30,
+        "duration_hours": 30,
         "enabled": True,
         **changes,
     }
@@ -91,7 +91,7 @@ def test_plan_amount_is_exact_integer_and_updates_do_not_change_issued_duration(
     try:
         plan = _create_plan(app)
         issued = _issue_code(app, plan["plan_id"])
-        assert issued["duration_days"] == 30
+        assert issued["duration_hours"] == 30
         updated = _request(
             app,
             "PUT",
@@ -101,7 +101,7 @@ def test_plan_amount_is_exact_integer_and_updates_do_not_change_issued_duration(
                 "name": "90 天基础版",
                 "amount_minor": 4990,
                 "currency": "CNY",
-                "duration_days": 90,
+                "duration_hours": 90,
                 "enabled": True,
             },
         )
@@ -110,7 +110,7 @@ def test_plan_amount_is_exact_integer_and_updates_do_not_change_issued_duration(
         listed_codes = _request(
             app, "GET", "/v1/admin/activation/codes", headers=_admin_headers()
         ).json()["codes"]
-        assert listed_codes[0]["duration_days"] == 30
+        assert listed_codes[0]["duration_hours"] == 30
         decimal = _request(
             app,
             "POST",
@@ -120,7 +120,7 @@ def test_plan_amount_is_exact_integer_and_updates_do_not_change_issued_duration(
                 "name": "invalid",
                 "amount_minor": 19.9,
                 "currency": "CNY",
-                "duration_days": 30,
+                "duration_hours": 30,
             },
         )
         assert decimal.status_code == 422
@@ -178,7 +178,7 @@ def test_first_activation_binds_one_device_and_device_token_authorizes_client_ap
         duration = datetime.fromisoformat(payload["expires_at"]) - datetime.fromisoformat(
             payload["activated_at"]
         )
-        assert duration == timedelta(days=30)
+        assert duration == timedelta(hours=30)
         with app.state.database.session() as session:
             record = session.get(ActivationCodeRecord, issued["code_id"])
             assert record.device_digest != DEVICE_A
@@ -246,7 +246,7 @@ def test_disable_revokes_device_token_and_prevents_reactivation() -> None:
 def test_expired_binding_rejects_code_and_device_token() -> None:
     app = _app()
     try:
-        issued = _issue_code(app, _create_plan(app, duration_days=1)["plan_id"])
+        issued = _issue_code(app, _create_plan(app, duration_hours=1)["plan_id"])
         grant = _activate(app, issued["activation_code"]).json()
         with app.state.database.session() as session:
             record = session.get(ActivationCodeRecord, issued["code_id"])
@@ -273,7 +273,7 @@ def test_disabled_plan_blocks_new_codes_but_does_not_revoke_existing_code() -> N
             "PUT",
             f"/v1/admin/activation/plans/{plan['plan_id']}",
             headers=_admin_headers(),
-            json={**{key: plan[key] for key in ("name", "amount_minor", "currency", "duration_days")}, "enabled": False},
+            json={**{key: plan[key] for key in ("name", "amount_minor", "currency", "duration_hours")}, "enabled": False},
         )
         assert disabled_plan.status_code == 200
         blocked = _request(

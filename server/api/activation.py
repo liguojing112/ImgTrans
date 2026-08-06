@@ -24,9 +24,9 @@ class ActivationPlanPayload(StrictContract):
     name: str = Field(min_length=1, max_length=100)
     amount_minor: int = Field(ge=0, le=1_000_000_000_000)
     currency: str = Field(default="CNY", pattern=r"^[A-Z]{3}$")
-    duration_days: int = Field(ge=1, le=3650)
+    duration_hours: int = Field(ge=0, le=87600)
     enabled: bool = True
-    plan_type: Literal["duration", "quota"] = "duration"
+    plan_type: Literal["duration", "quota", "combo"] = "duration"
     quota: int = Field(default=0, ge=0, le=1_000_000)
     sale_amount_minor: int | None = Field(default=None, ge=0, le=1_000_000_000_000)
     sale_ends_at: datetime | None = None
@@ -55,7 +55,7 @@ class IssuedActivationCodeResponse(StrictContract):
     code_id: str
     activation_code: str
     plan_id: int
-    duration_days: int
+    duration_hours: int
     created_at: datetime
 
 
@@ -66,7 +66,7 @@ class IssuedActivationCodesResponse(StrictContract):
 class ActivationCodeResponse(StrictContract):
     code_id: str
     plan_id: int
-    duration_days: int
+    duration_hours: int
     status: Literal["unbound", "active", "expired", "disabled"]
     bound: bool
     created_at: datetime
@@ -242,7 +242,7 @@ def issue_codes(
                 code_id=item.activation.code_id,
                 activation_code=item.plaintext,
                 plan_id=item.activation.plan_id,
-                duration_days=item.activation.duration_days,
+                duration_hours=item.activation.duration_hours,
                 created_at=item.activation.created_at,
             )
             for item in issued
@@ -300,7 +300,7 @@ def _plan_response(plan: ActivationPlan) -> ActivationPlanResponse:
             "name": plan.values.name,
             "amount_minor": plan.values.amount_minor,
             "currency": plan.values.currency,
-            "duration_days": plan.values.duration_days,
+            "duration_hours": plan.values.duration_hours,
             "enabled": plan.values.enabled,
             "plan_type": plan.values.plan_type,
             "quota": plan.values.quota,
@@ -324,7 +324,7 @@ def _code_response(code: ActivationCode) -> ActivationCodeResponse:
     return ActivationCodeResponse(
         code_id=code.code_id,
         plan_id=code.plan_id,
-        duration_days=code.duration_days,
+        duration_hours=code.duration_hours,
         status=status_value,
         bound=code.bound,
         created_at=code.created_at,

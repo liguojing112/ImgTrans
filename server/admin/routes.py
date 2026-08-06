@@ -847,6 +847,13 @@ def _integer(form: dict[str, str], name: str) -> int:
         raise HTTPException(status_code=422, detail=f"{name} must be an integer") from error
 
 
+def _integer_or_zero(form: dict[str, str], name: str) -> int:
+    raw = form.get(name, "").strip()
+    if not raw:
+        return 0
+    return _integer(form, name)
+
+
 def _plan_values(form: dict[str, str]) -> ActivationPlanValues:
     from datetime import datetime, timezone
 
@@ -865,10 +872,10 @@ def _plan_values(form: dict[str, str]) -> ActivationPlanValues:
         name=_required(form, "name"),
         amount_minor=_integer(form, "amount_minor"),
         currency=_required(form, "currency"),
-        duration_days=_integer(form, "duration_days"),
+        duration_hours=_integer_or_zero(form, "duration_hours"),
         enabled=form.get("enabled") == "true",
         plan_type=plan_type,
-        quota=_integer(form, "quota") if plan_type == "quota" else 0,
+        quota=_integer_or_zero(form, "quota"),
         sale_amount_minor=(
             _integer(form, "sale_amount_minor") if sale_amount_raw else None
         ),

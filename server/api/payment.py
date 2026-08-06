@@ -52,7 +52,7 @@ def list_payable_plans(request: Request) -> list[dict]:
             "name": item.values.name,
             "amount_minor": item.values.amount_minor,
             "currency": item.values.currency,
-            "duration_days": item.values.duration_days,
+            "duration_hours": item.values.duration_hours,
             "plan_type": item.values.plan_type,
             "quota": item.values.quota,
             "sale_amount_minor": item.values.sale_amount_minor,

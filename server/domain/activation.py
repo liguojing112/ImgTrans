@@ -28,9 +28,9 @@ class ActivationPlanValues:
     name: str
     amount_minor: int
     currency: str
-    duration_days: int
+    duration_hours: int = 0
     enabled: bool = True
-    plan_type: str = "duration"  # duration | quota
+    plan_type: str = "duration"  # duration | quota | combo
     quota: int = 0
     sale_amount_minor: int | None = None
     sale_ends_at: datetime | None = None
@@ -44,12 +44,20 @@ class ActivationPlanValues:
             raise ActivationError("Activation plan amount cannot be negative")
         if not re.fullmatch(r"[A-Z]{3}", self.currency):
             raise ActivationError("Activation plan currency is invalid")
-        if self.plan_type not in {"duration", "quota"}:
+        if self.plan_type not in {"duration", "quota", "combo"}:
             raise ActivationError("Activation plan type is invalid")
-        if not 1 <= self.duration_days <= 3650:
+        if not 0 <= self.duration_hours <= 87600:
             raise ActivationError("Activation plan duration is invalid")
-        if self.plan_type == "quota" and not 1 <= self.quota <= 1_000_000:
+        if not 0 <= self.quota <= 1_000_000:
             raise ActivationError("Activation plan quota is invalid")
+        if self.duration_hours <= 0 and self.quota <= 0:
+            raise ActivationError("Activation plan must include duration or quota")
+        if self.plan_type == "duration" and self.duration_hours <= 0:
+            raise ActivationError("Duration plan requires duration hours")
+        if self.plan_type == "quota" and self.quota <= 0:
+            raise ActivationError("Quota plan requires quota")
+        if self.plan_type == "combo" and (self.duration_hours <= 0 or self.quota <= 0):
+            raise ActivationError("Combo plan requires both duration and quota")
         if len(self.benefits) > 500:
             raise ActivationError("Activation plan benefits are too long")
         if self.sale_amount_minor is not None:
@@ -78,7 +86,7 @@ class ActivationPlan:
 class ActivationCode:
     code_id: str
     plan_id: int
-    duration_days: int
+    duration_hours: int
     disabled: bool
     bound: bool
     created_at: datetime

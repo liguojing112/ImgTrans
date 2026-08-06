@@ -27,7 +27,7 @@ class ActivationPlanRecord(Base):
     __table_args__ = (
         CheckConstraint("amount_minor >= 0", name="ck_activation_plan_amount"),
         CheckConstraint(
-            "duration_days >= 1 AND duration_days <= 3650",
+            "duration_hours >= 0 AND duration_hours <= 87600",
             name="ck_activation_plan_duration",
         ),
     )
@@ -36,7 +36,7 @@ class ActivationPlanRecord(Base):
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     amount_minor: Mapped[int] = mapped_column(BigInteger, nullable=False)
     currency: Mapped[str] = mapped_column(String(3), nullable=False)
-    duration_days: Mapped[int] = mapped_column(Integer, nullable=False)
+    duration_hours: Mapped[int] = mapped_column(Integer, nullable=False)
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False)
     plan_type: Mapped[str] = mapped_column(String(10), nullable=False, default="duration")
     quota: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -51,7 +51,7 @@ class ActivationCodeRecord(Base):
     __tablename__ = "activation_codes"
     __table_args__ = (
         CheckConstraint(
-            "duration_days >= 1 AND duration_days <= 3650",
+            "duration_hours >= 0 AND duration_hours <= 87600",
             name="ck_activation_code_duration",
         ),
         UniqueConstraint("code_digest", name="uq_activation_code_digest"),
@@ -60,7 +60,7 @@ class ActivationCodeRecord(Base):
 
     code_id: Mapped[str] = mapped_column(String(36), primary_key=True)
     plan_id: Mapped[int] = mapped_column(ForeignKey("activation_plans.plan_id"), nullable=False, index=True)
-    duration_days: Mapped[int] = mapped_column(Integer, nullable=False)
+    duration_hours: Mapped[int] = mapped_column(Integer, nullable=False)
     code_digest: Mapped[str] = mapped_column(String(64), nullable=False)
     device_digest: Mapped[str | None] = mapped_column(String(64), nullable=True)
     token_digest: Mapped[str | None] = mapped_column(String(64), nullable=True)
@@ -104,7 +104,7 @@ class SqlAlchemyActivationRepository:
                 name=values.name.strip(),
                 amount_minor=values.amount_minor,
                 currency=values.currency,
-                duration_days=values.duration_days,
+                duration_hours=values.duration_hours,
                 enabled=values.enabled,
                 plan_type=values.plan_type,
                 quota=values.quota,
@@ -128,7 +128,7 @@ class SqlAlchemyActivationRepository:
             record.name = values.name.strip()
             record.amount_minor = values.amount_minor
             record.currency = values.currency
-            record.duration_days = values.duration_days
+            record.duration_hours = values.duration_hours
             record.enabled = values.enabled
             record.plan_type = values.plan_type
             record.quota = values.quota
@@ -180,7 +180,7 @@ class SqlAlchemyActivationRepository:
     def create_codes(
         self,
         plan_id: int,
-        duration_days: int,
+        duration_hours: int,
         quota_total: int,
         code_digests: tuple[str, ...],
         plaintexts: tuple[str, ...] = (),
@@ -202,7 +202,7 @@ class SqlAlchemyActivationRepository:
                     ActivationCodeRecord(
                         code_id=str(uuid4()),
                         plan_id=plan_id,
-                        duration_days=duration_days,
+                        duration_hours=duration_hours,
                         quota_total=quota_total,
                         quota_remaining=quota_total,
                         code_digest=digest,
@@ -335,7 +335,7 @@ class SqlAlchemyActivationRepository:
                         if previous is not None and previous > now:
                             expires_at = previous  # 换机续用：延续剩余时长
                         else:
-                            expires_at = now + timedelta(days=record.duration_days)
+                            expires_at = now + timedelta(hours=record.duration_hours)
                         claimed = session.execute(
                             update(ActivationCodeRecord)
                             .where(
@@ -515,7 +515,7 @@ def _plan_to_domain(record: ActivationPlanRecord) -> ActivationPlan:
             name=record.name,
             amount_minor=record.amount_minor,
             currency=record.currency,
-            duration_days=record.duration_days,
+            duration_hours=record.duration_hours,
             enabled=record.enabled,
             plan_type=record.plan_type,
             quota=record.quota,
@@ -534,7 +534,7 @@ def _code_to_domain(
     return ActivationCode(
         code_id=record.code_id,
         plan_id=record.plan_id,
-        duration_days=record.duration_days,
+        duration_hours=record.duration_hours,
         disabled=record.disabled,
         bound=record.device_digest is not None,
         created_at=_as_utc(record.created_at) or record.created_at,

@@ -253,7 +253,7 @@ def test_all_management_pages_render_and_secrets_are_not_exposed() -> None:
                     "name": "<script>alert(1)</script>",
                     "amount_minor": "1990",
                     "currency": "CNY",
-                    "duration_days": "30",
+                    "duration_hours": "30",
                     "enabled": "true",
                 },
                 follow_redirects=False,
