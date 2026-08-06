@@ -124,7 +124,15 @@ class HomePage(QFrame):
             self.set_plans(result)
 
     def _plans_failed(self, error) -> None:
-        pass
+        while self._plans_row.count():
+            item = self._plans_row.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+        note = QLabel(f"套餐加载失败：{error}")
+        note.setObjectName("homeCardDesc")
+        note.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._plans_row.addWidget(note)
 
     def set_plans(self, plans) -> None:
         while self._plans_row.count():

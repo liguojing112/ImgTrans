@@ -49,6 +49,8 @@ analysis = Analysis(
         "PIL.Image",
         "PIL.ImageCms",
         "PIL.ImageQt",
+        "qrcode",
+        "png",
     ],
     hookspath=[],
     hooksconfig={},

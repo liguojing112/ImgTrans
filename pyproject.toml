@@ -16,6 +16,7 @@ dependencies = [
   "rapidocr==3.9.1",
   "playwright==1.53.0",
   "qrcode>=7.4,<9",
+  "pypng>=0.20220715",
 ]
 
 [project.optional-dependencies]
