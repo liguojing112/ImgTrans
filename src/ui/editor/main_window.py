@@ -171,7 +171,7 @@ class EditorMainWindow(QMainWindow):
         self._model = EditorModel()
         self._undo_stack = QUndoStack(self)
 
-        self._home_page = HomePage(self._payment_client)
+        self._home_page = HomePage(self._payment_client, self._task_runner)
         self._editor_page = EditorPage(self._undo_stack)
         self._toolbox_page = self._create_toolbox_page()
 

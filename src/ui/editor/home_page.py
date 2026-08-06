@@ -23,10 +23,11 @@ class HomePage(QFrame):
     toolbox_requested = Signal()
     purchase_requested = Signal(object)
 
-    def __init__(self, payment_client=None) -> None:
+    def __init__(self, payment_client=None, task_runner=None) -> None:
         super().__init__()
         self.setProperty("editorStyle", True)
         self._payment_client = payment_client
+        self._task_runner = task_runner
 
         layout = QVBoxLayout(self)
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -106,11 +107,24 @@ class HomePage(QFrame):
             QTimer.singleShot(0, self._load_plans)
 
     def _load_plans(self) -> None:
-        try:
-            plans = self._payment_client.list_plans()
-        except Exception:
+        if self._task_runner is not None:
+            self._task_runner.submit(
+                self._payment_client.list_plans,
+                self._plans_loaded,
+                self._plans_failed,
+            )
             return
-        self.set_plans(plans)
+        try:
+            self.set_plans(self._payment_client.list_plans())
+        except Exception:
+            pass
+
+    def _plans_loaded(self, result) -> None:
+        if isinstance(result, list):
+            self.set_plans(result)
+
+    def _plans_failed(self, error) -> None:
+        pass
 
     def set_plans(self, plans) -> None:
         while self._plans_row.count():

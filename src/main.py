@@ -326,12 +326,6 @@ def _ensure_single_instance() -> bool:
 
 def main(argv: Sequence[str] | None = None) -> int:
     multiprocessing.freeze_support()
-    if not _ensure_single_instance():
-        from PySide6.QtWidgets import QApplication, QMessageBox
-
-        app = QApplication.instance() or QApplication(["imgtrans"])
-        QMessageBox.warning(None, "提示", "客户端已在运行，请切换到已打开的窗口")
-        return 0
     parser = argparse.ArgumentParser(prog="imgtrans")
     parser.add_argument(
         "--smoke-test",
@@ -344,6 +338,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="launch the new editor UI (under development)",
     )
     args = parser.parse_args(list(argv) if argv is not None else None)
+    if not args.smoke_test and not _ensure_single_instance():
+        from PySide6.QtWidgets import QMessageBox
+
+        app = QApplication.instance() or QApplication(["imgtrans"])
+        QMessageBox.warning(None, "提示", "客户端已在运行，请切换到已打开的窗口")
+        return 0
     configure_qt_runtime()
     application = QApplication.instance() or QApplication(["imgtrans"])
     application.setApplicationName("优译图AI")
