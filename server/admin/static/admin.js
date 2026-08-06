@@ -29,20 +29,13 @@ document.addEventListener('DOMContentLoaded', function () {
       copyText(btn.getAttribute('data-copy'), btn);
     });
   });
-  // 方案编辑：点"编辑"启用促销价/原价输入；提交前也确保提交（防 disabled 漏传）
+  // 方案编辑：输入框始终可编辑；点"编辑"高亮该行便于定位
   document.querySelectorAll('button[data-edit-form]').forEach(function (btn) {
     btn.addEventListener('click', function () {
-      var id = btn.getAttribute('data-edit-form');
-      document.querySelectorAll('input[data-edit-form="' + id + '"]').forEach(function (i) {
-        i.disabled = false;
-      });
-    });
-  });
-  document.querySelectorAll('form[id^="edit-"]').forEach(function (f) {
-    f.addEventListener('submit', function () {
-      document.querySelectorAll('input[data-edit-form="' + f.id + '"]').forEach(function (i) {
-        i.disabled = false;
-      });
+      var tr = btn.closest('tr');
+      if (tr) {
+        tr.style.background = '#fff8e1';
+      }
     });
   });
 });
