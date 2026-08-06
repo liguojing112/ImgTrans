@@ -523,6 +523,7 @@ async def save_settings(request: Request) -> Response:
                 "wechat_private_key": form.get("wechat_private_key", ""),
                 "wechat_serial_no": form.get("wechat_serial_no", ""),
                 "wechat_platform_cert": form.get("wechat_platform_cert", ""),
+                "wechat_public_key_id": form.get("wechat_public_key_id", ""),
                 "wechat_notify_url": form.get("wechat_notify_url", ""),
             }
         )

@@ -52,6 +52,9 @@
     <textarea name="wechat_private_key" placeholder="{{ '已配置（留空保持不变）' if settings.wechat_private_key_configured else '粘贴 -----BEGIN PRIVATE KEY----- 全文' }}"></textarea>
     <label>微信支付平台公钥（PEM 全文）</label>
     <textarea name="wechat_platform_cert" placeholder="{{ '已配置（留空保持不变）' if settings.wechat_platform_cert_configured else '粘贴 -----BEGIN PUBLIC KEY----- 全文' }}"></textarea>
+    <label>微信支付公钥ID</label>
+    <input name="wechat_public_key_id" type="text" value="{{ settings.wechat_public_key_id }}" placeholder="如 PUB_KEY_ID_xxxxxxxx">
+    <div class="hint">商户平台-API安全-微信支付公钥 处查看（公钥模式下必需）</div>
     <label>支付回调 URL</label>
     <input name="wechat_notify_url" type="text" value="{{ settings.wechat_notify_url }}" disabled>
     <div class="hint">固定回调地址，由系统指定，不可修改</div>

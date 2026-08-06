@@ -32,6 +32,7 @@ class ManageServiceSettings:
                 "wechat_mchid": "",
                 "wechat_serial_no": "",
                 "wechat_notify_url": self._notify_url,
+                "wechat_public_key_id": "",
                 "wechat_apiv3_key_configured": False,
                 "wechat_private_key_configured": False,
                 "wechat_platform_cert_configured": False,
@@ -44,6 +45,7 @@ class ManageServiceSettings:
             "wechat_mchid": row.wechat_mchid or "",
             "wechat_serial_no": row.wechat_serial_no or "",
             "wechat_notify_url": self._notify_url,
+            "wechat_public_key_id": row.wechat_public_key_id or "",
             "wechat_apiv3_key_configured": bool(row.wechat_apiv3_key_cipher),
             "wechat_private_key_configured": bool(row.wechat_private_key_cipher),
             "wechat_platform_cert_configured": bool(row.wechat_platform_cert_cipher),
@@ -71,6 +73,7 @@ class ManageServiceSettings:
                 values.get("wechat_platform_cert", ""),
                 current.wechat_platform_cert_cipher if current else None,
             ),
+            wechat_public_key_id=_strip(values.get("wechat_public_key_id", "")),
             # 回调 URL 固定写死，忽略表单提交值
             wechat_notify_url=self._notify_url,
             glm_api_key_cipher=current.glm_api_key_cipher if current else None,
@@ -91,6 +94,7 @@ class ManageServiceSettings:
             wechat_private_key_cipher=current.wechat_private_key_cipher,
             wechat_serial_no=current.wechat_serial_no,
             wechat_platform_cert_cipher=current.wechat_platform_cert_cipher,
+            wechat_public_key_id=current.wechat_public_key_id,
             wechat_notify_url=self._notify_url,
             glm_api_key_cipher=self._encrypt_or_keep(
                 values.get("glm_api_key", ""),
@@ -131,6 +135,7 @@ class ManageServiceSettings:
                 "platform_cert": _normalize_pem(
                     self._cipher.decrypt(row.wechat_platform_cert_cipher)
                 ),
+                "public_key_id": row.wechat_public_key_id or "",
                 "notify_url": self._notify_url,
             }
         except ValueError:
@@ -154,6 +159,7 @@ class ManageServiceSettings:
             and row.wechat_private_key_cipher
             and row.wechat_serial_no
             and row.wechat_platform_cert_cipher
+            and row.wechat_public_key_id
         )
 
 

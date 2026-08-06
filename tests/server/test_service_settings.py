@@ -29,6 +29,7 @@ WECHAT = {
     "wechat_private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvQ==\n-----END PRIVATE KEY-----",
     "wechat_serial_no": "1234567890ABCDEF",
     "wechat_platform_cert": "-----BEGIN PUBLIC KEY-----\nMIIBIjANBg==\n-----END PUBLIC KEY-----",
+    "wechat_public_key_id": "PUB_KEY_ID_TEST0001",
     "wechat_notify_url": "https://imgtrans.rchtop.top/v1/payments/notify",
 }
 
@@ -120,6 +121,7 @@ def test_load_wechat_settings_decrypts_full() -> None:
     assert loaded["apiv3_key"] == WECHAT["wechat_apiv3_key"]
     assert loaded["private_key"] == WECHAT["wechat_private_key"]
     assert loaded["platform_cert"] == WECHAT["wechat_platform_cert"]
+    assert loaded["public_key_id"] == WECHAT["wechat_public_key_id"]
     # 回调 URL 固定写死，忽略表单提交值
     assert loaded["notify_url"] == DEFAULT_WECHAT_NOTIFY_URL
 

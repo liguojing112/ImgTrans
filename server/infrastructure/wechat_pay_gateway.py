@@ -44,15 +44,28 @@ class WechatPayV3Gateway:
                 config.get("private_key"),
                 config.get("serial_no"),
                 config.get("platform_cert"),
+                config.get("public_key_id"),
                 config.get("notify_url"),
             )
         ):
             raise PaymentConflict("微信支付未配置")
         # 配置变化时重建客户端（记录上次配置签名）
-        signature = tuple(config[key] for key in ("mchid", "apiv3_key", "serial_no", "notify_url"))
+        signature = tuple(
+            config[key]
+            for key in (
+                "mchid",
+                "apiv3_key",
+                "serial_no",
+                "platform_cert",
+                "public_key_id",
+                "notify_url",
+            )
+        )
         if self._client is None or getattr(self, "_signature", None) != signature:
             from wechatpayv3 import WeChatPay, WeChatPayType
 
+            # 微信支付公钥模式：成对传入公钥与公钥ID，避免在线拉平台证书
+            # （商户若未开通旧版"平台证书"产品，/v3/certificates 会 404）
             self._client = WeChatPay(
                 wechatpay_type=WeChatPayType.NATIVE,
                 mchid=config["mchid"],
@@ -62,6 +75,8 @@ class WechatPayV3Gateway:
                 appid=config["appid"],
                 notify_url=config["notify_url"],
                 cert_dir=None,
+                public_key=config["platform_cert"],
+                public_key_id=config["public_key_id"],
             )
             self._signature = signature
         return self._client
