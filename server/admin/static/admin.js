@@ -29,6 +29,14 @@ document.addEventListener('DOMContentLoaded', function () {
       copyText(btn.getAttribute('data-copy'), btn);
     });
   });
+  // 危险操作确认（data-confirm 表单提交前弹窗确认）
+  document.querySelectorAll('form[data-confirm]').forEach(function (f) {
+    f.addEventListener('submit', function (e) {
+      if (!window.confirm(f.getAttribute('data-confirm'))) {
+        e.preventDefault();
+      }
+    });
+  });
 });
 
 // 滚动位置记忆：点击表单/链接提交后页面刷新回顶部，这里恢复原位置

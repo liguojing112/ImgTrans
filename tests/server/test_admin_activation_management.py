@@ -8,7 +8,7 @@ os.environ["IMGTRANS_SETTINGS_ENCRYPTION_KEY"] = "test-settings-key-1234567890ab
 
 from server.app import create_app
 from server.config import ServerSettings
-from server.domain.activation import ActivationConflict, ActivationPlanValues
+from server.domain.activation import ActivationPlanValues
 from server.infrastructure.database import Base, Database
 
 ACTIVATION_SECRET = "test-activation-secret-1234567890abcdef"
@@ -94,19 +94,23 @@ def test_enable_code_after_disable() -> None:
     assert app.state.manage_activation_codes.enable(code_id).disabled is False
 
 
-def test_delete_plan_refuses_when_codes_exist() -> None:
+def test_delete_plan_cascades_codes() -> None:
     app = _app()
     with_codes = app.state.manage_activation_plans.create(
         ActivationPlanValues(
             name="有码方案", amount_minor=1990, currency="CNY", duration_days=30
         )
     )
-    app.state.manage_activation_codes.issue(with_codes.plan_id, 1)
-    try:
-        app.state.manage_activation_plans.delete(with_codes.plan_id)
-        raise AssertionError("expected ActivationConflict")
-    except ActivationConflict:
-        pass
+    issued = app.state.manage_activation_codes.issue(with_codes.plan_id, 1)
+    code_id = issued[0].activation.code_id
+    app.state.manage_activation_plans.delete(with_codes.plan_id)
+    # 方案删除后，其激活码一并被删
+    codes, _ = app.state.manage_activation_codes.list_page(1, 50, None, None)
+    assert all(item.code_id != code_id for item in codes)
+    assert all(
+        item.plan_id != with_codes.plan_id
+        for item in app.state.manage_activation_plans.list_all()
+    )
 
     empty = app.state.manage_activation_plans.create(
         ActivationPlanValues(

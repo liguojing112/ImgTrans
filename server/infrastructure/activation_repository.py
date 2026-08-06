@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 from threading import Lock
 from uuid import uuid4
 
-from sqlalchemy import BigInteger, Boolean, CheckConstraint, DateTime, ForeignKey, Integer, String, UniqueConstraint, func, select, update
+from sqlalchemy import BigInteger, Boolean, CheckConstraint, DateTime, ForeignKey, Integer, String, UniqueConstraint, delete, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -140,20 +140,27 @@ class SqlAlchemyActivationRepository:
             return _plan_to_domain(record)
 
     def delete_plan(self, plan_id: int) -> None:
+        """删除方案，并级联删除该方案下的激活码及其用量记录。
+
+        注意：会作废该方案下已发给客户的所有激活码（客户已激活的码失效）。
+        """
         with self._database.session() as session:
             record = session.get(ActivationPlanRecord, plan_id)
             if record is None:
                 raise ActivationNotFound("Activation plan was not found")
-            count = (
-                session.scalar(
-                    select(func.count())
-                    .select_from(ActivationCodeRecord)
-                    .where(ActivationCodeRecord.plan_id == plan_id)
-                )
-                or 0
+            code_ids = select(ActivationCodeRecord.code_id).where(
+                ActivationCodeRecord.plan_id == plan_id
             )
-            if count:
-                raise ActivationConflict("该方案下已有激活码，无法删除")
+            session.execute(
+                delete(UsageRecordRecord).where(
+                    UsageRecordRecord.code_id.in_(code_ids)
+                )
+            )
+            session.execute(
+                delete(ActivationCodeRecord).where(
+                    ActivationCodeRecord.plan_id == plan_id
+                )
+            )
             session.delete(record)
 
     def list_plans(self) -> tuple[ActivationPlan, ...]:
