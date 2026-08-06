@@ -36,7 +36,7 @@ class GlmGateway:
     def __init__(
         self,
         config_provider: Callable[[], dict | None],
-        timeout_seconds: float = 30.0,
+        timeout_seconds: float = 120.0,
         max_attempts: int = 4,
         sleeper=time.sleep,
     ) -> None:

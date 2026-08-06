@@ -26,7 +26,7 @@ class ServerLLMAdapter(LLMAdapter):
         self,
         backend_url: str,
         access_token: TokenSource,
-        timeout_seconds: float = 30.0,
+        timeout_seconds: float = 120.0,
     ) -> None:
         # provider 非 glm 以避免旧模型的 1024 max_tokens 截断限制；
         # glm-4.6v 等付费模型支持更高输出
