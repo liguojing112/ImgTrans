@@ -25,7 +25,7 @@ from server.application.payment import (
 )
 from server.config import ServerSettings
 from server.domain.activation import ActivationPlanValues
-from server.domain.payment import PaymentStatus
+from server.domain.payment import PaymentConflict, PaymentStatus
 from server.infrastructure.activation_repository import SqlAlchemyActivationRepository
 from server.infrastructure.database import Base, Database
 from server.infrastructure.payment_repository import SqlAlchemyPaymentRepository
@@ -311,3 +311,48 @@ def test_plans_api_includes_promotion() -> None:
             assert promo["benefits"] == "含30天图片翻译"
 
     _run(scenario)
+
+
+class _FakePayClient:
+    """模拟 wechatpayv3 SDK：pay() 返回 (code, message) 元组。"""
+
+    def __init__(self, code, message):
+        self._code = code
+        self._message = message
+
+    def pay(self, **kwargs):
+        return self._code, self._message
+
+
+def test_native_prepay_parses_tuple_ok(monkeypatch) -> None:
+    gateway = WechatPayV3Gateway(lambda: {"configured": True})
+    monkeypatch.setattr(
+        gateway, "_pay", lambda: _FakePayClient(200, '{"code_url":"weixin://wxpay/bizpayurl?pr=abc"}')
+    )
+    assert gateway.native_prepay("order1", 100, "测试") == "weixin://wxpay/bizpayurl?pr=abc"
+
+
+def test_native_prepay_raises_wechat_error_with_detail(monkeypatch) -> None:
+    gateway = WechatPayV3Gateway(lambda: {"configured": True})
+    monkeypatch.setattr(
+        gateway,
+        "_pay",
+        lambda: _FakePayClient(500, '{"code":"SYSTEM_ERROR","message":"未知错误"}'),
+    )
+    try:
+        gateway.native_prepay("order1", 100, "测试")
+        assert False, "微信错误应抛 PaymentConflict"
+    except PaymentConflict as error:
+        assert "500" in str(error)
+
+
+def test_native_prepay_raises_when_no_code_url(monkeypatch) -> None:
+    gateway = WechatPayV3Gateway(lambda: {"configured": True})
+    monkeypatch.setattr(
+        gateway, "_pay", lambda: _FakePayClient(200, '{"prepay_id":"wx123"}')
+    )
+    try:
+        gateway.native_prepay("order1", 100, "测试")
+        assert False, "缺 code_url 应抛 PaymentConflict"
+    except PaymentConflict as error:
+        assert "付款二维码" in str(error)
