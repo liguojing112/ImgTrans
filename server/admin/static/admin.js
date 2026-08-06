@@ -29,15 +29,6 @@ document.addEventListener('DOMContentLoaded', function () {
       copyText(btn.getAttribute('data-copy'), btn);
     });
   });
-  // 方案编辑：输入框始终可编辑；点"编辑"高亮该行便于定位
-  document.querySelectorAll('button[data-edit-form]').forEach(function (btn) {
-    btn.addEventListener('click', function () {
-      var tr = btn.closest('tr');
-      if (tr) {
-        tr.style.background = '#fff8e1';
-      }
-    });
-  });
 });
 
 // 滚动位置记忆：点击表单/链接提交后页面刷新回顶部，这里恢复原位置
