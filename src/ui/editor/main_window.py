@@ -185,6 +185,9 @@ class EditorMainWindow(QMainWindow):
         self.setStatusBar(QStatusBar(self))
         self.statusBar().showMessage("就绪")
 
+        # 启动始终停在首页
+        self._stack.setCurrentWidget(self._home_page)
+
         self._connect_signals()
 
         self.setStyleSheet(EDITOR_DARK_THEME)

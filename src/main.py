@@ -307,8 +307,31 @@ def _install_qt_translator(application: QApplication) -> None:
         application.installTranslator(translator)
 
 
+_shared_instance_memory = None
+
+
+def _ensure_single_instance() -> bool:
+    """同一时间只允许一个客户端实例运行（双击多次只开一个窗口）。"""
+    global _shared_instance_memory
+    from PySide6.QtCore import QSharedMemory
+
+    memory = QSharedMemory("ImgTransDesktopSingleInstance")
+    if memory.attach():
+        return False
+    if not memory.create(1):
+        return False
+    _shared_instance_memory = memory
+    return True
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     multiprocessing.freeze_support()
+    if not _ensure_single_instance():
+        from PySide6.QtWidgets import QApplication, QMessageBox
+
+        app = QApplication.instance() or QApplication(["imgtrans"])
+        QMessageBox.warning(None, "提示", "客户端已在运行，请切换到已打开的窗口")
+        return 0
     parser = argparse.ArgumentParser(prog="imgtrans")
     parser.add_argument(
         "--smoke-test",
