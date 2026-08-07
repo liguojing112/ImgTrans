@@ -65,8 +65,8 @@ def validate_username(username: str) -> str:
 
 
 def validate_password(password: str) -> None:
-    if len(password) < 12:
-        raise AdminUserError("Administrator password must contain at least 12 characters")
+    if len(password) == 0:
+        raise AdminUserError("Administrator password cannot be empty")
 
 
 @dataclass(frozen=True, slots=True)

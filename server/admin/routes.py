@@ -359,6 +359,7 @@ _AUDIT_LABELS = {
     "enable_admin_user": "启用账号",
     "disable_admin_user": "停用账号",
     "reset_admin_user_password": "重置密码",
+    "delete_admin_user": "删除子账号",
     "change_password": "修改密码",
     "create_activation_plan": "新建方案",
     "update_activation_plan": "修改方案",
@@ -600,6 +601,18 @@ async def reset_admin_user_password(user_id: int, request: Request) -> Response:
     except AdminUserError as error:
         raise HTTPException(status_code=422, detail=str(error))
     request.state.audit_action = "reset_admin_user_password"
+    return _redirect("/admin/users")
+
+
+@admin_router.post("/users/{user_id}/delete")
+async def delete_admin_user(user_id: int, request: Request) -> Response:
+    session, _ = await _protected_form(request)
+    _require_permission(request, session, "users")
+    try:
+        _manage_users(request).delete(user_id)
+    except AdminUserError as error:
+        raise HTTPException(status_code=422, detail=str(error))
+    request.state.audit_action = "delete_admin_user"
     return _redirect("/admin/users")
 
 

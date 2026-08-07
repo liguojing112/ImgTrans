@@ -5,10 +5,10 @@
 <form method="post" action="/admin/users" class="form-grid">
 <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
 <label>用户名<input name="username" pattern="[A-Za-z0-9._-]{1,64}" required></label>
-<label>初始密码（至少 12 位）<input name="password" type="password" minlength="12" required></label>
-<fieldset><legend>权限（可勾选多个）</legend>
+<label>初始密码<input name="password" type="password" minlength="1" required></label>
+<details><summary>权限（可勾选多个）</summary>
 {% for key, label in permission_labels.items() %}<label class="checkbox"><input type="checkbox" name="perm_{{ key }}" value="true"> {{ label }}</label>{% endfor %}
-</fieldset>
+</details>
 <button>创建账号</button>
 </form></section>
 <section class="card"><h2>账号列表</h2>
@@ -22,11 +22,13 @@
 <td>{{ "启用" if user.enabled else "已停用" }}</td>
 <td>
 {% if not user.is_super %}
+<details><summary>设置权限</summary>
 <form method="post" action="/admin/users/{{ user.user_id }}/permissions">
 <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
 {% for key, label in permission_labels.items() %}<label class="checkbox"><input type="checkbox" name="perm_{{ key }}" value="true" {{ "checked" if key in user.permissions }}> {{ label }}</label>{% endfor %}
 <button>保存权限</button>
 </form>
+</details>
 {% else %}-{% endif %}
 </td>
 <td>
@@ -36,7 +38,8 @@
 {% else %}
 <form method="post" action="/admin/users/{{ user.user_id }}/enable"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button>启用</button></form>
 {% endif %}
-<form method="post" action="/admin/users/{{ user.user_id }}/reset-password"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><label>新密码<input name="password" type="password" minlength="12" required></label><button>重置密码</button></form>
+<form method="post" action="/admin/users/{{ user.user_id }}/reset-password"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><label>新密码<input name="password" type="password" minlength="1" required></label><button>重置密码</button></form>
+<form method="post" action="/admin/users/{{ user.user_id }}/delete" data-confirm="删除子账号后不可恢复，确定删除？"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="btn-delete">删除</button></form>
 {% else %}-{% endif %}
 </td>
 </tr>

@@ -108,6 +108,12 @@ class ManageAdminUsers:
             user_id, hash_admin_password(new_password)
         )
 
+    def delete(self, user_id: int) -> None:
+        user = self._require(user_id)
+        if user.is_super:
+            raise AdminUserDenied("cannot_delete_super", "不能删除超管账号")
+        self._repository.delete(user_id)
+
     def change_own_password(
         self, username: str, current_password: str, new_password: str
     ) -> AdminUser:

@@ -136,8 +136,8 @@ class AdminSecurity:
 
 
 def hash_admin_password(password: str) -> str:
-    if len(password) < 12:
-        raise AdminSecurityError("Administrator password must contain at least 12 characters")
+    if len(password) == 0:
+        raise AdminSecurityError("Administrator password cannot be empty")
     salt = secrets.token_bytes(16)
     digest = hashlib.scrypt(
         password.encode("utf-8"),

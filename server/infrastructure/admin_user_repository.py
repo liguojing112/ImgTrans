@@ -108,6 +108,12 @@ class SqlAlchemyAdminUserRepository:
                 ).all()
             )
 
+    def delete(self, user_id: int) -> None:
+        with self._database.session() as session:
+            record = session.get(AdminUserRecord, user_id)
+            if record is not None:
+                session.delete(record)
+
 
 def _to_user(record: AdminUserRecord) -> AdminUser:
     return AdminUser(
