@@ -10,13 +10,6 @@
   <script src="/admin/static/admin.js?v=5" defer></script>
 </head>
 <body>
-  <header class="topbar">
-    <a class="brand" href="/admin">
-      <img class="brand-logo" src="/admin/static/imgtrans.png" alt="">
-      <span>优译图AI 管理后台</span>
-    </a>
-    {% if username %}<span>{{ username }}</span>{% endif %}
-  </header>
   {% if username %}
   <nav>
     {% if 'image_limits' in permissions %}<a href="/admin/image-limits">图片限制</a>{% endif %}

@@ -1,8 +1,5 @@
 :root { color-scheme: light; font-family: system-ui, sans-serif; background: #f4f6f8; color: #17202a; }
 body { margin: 0; }
-.topbar { display: flex; justify-content: space-between; padding: 1rem 2rem; background: #14213d; color: white; }
-.brand { display: inline-flex; align-items: center; gap: .65rem; color: white; font-weight: 700; text-decoration: none; }
-.brand-logo { width: 32px; height: 32px; border-radius: 7px; object-fit: contain; }
 nav { display: flex; align-items: center; gap: 1rem; padding: .75rem 2rem; background: white; border-bottom: 1px solid #dfe4ea; }
 nav a { color: #1d4ed8; text-decoration: none; }
 nav form { margin-left: auto; }
@@ -12,6 +9,12 @@ main { max-width: 1180px; margin: 2rem auto; padding: 0 1rem; }
 .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; }
 .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: .75rem; align-items: end; }
 label { display: grid; gap: .35rem; }
+.permission-picker { grid-column: 1 / -1; border: 1px solid #dfe4ea; border-radius: .55rem; padding: .7rem .8rem; background: #f8fafc; }
+.permission-picker summary { cursor: pointer; color: #17202a; font-weight: 600; }
+.permission-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: .55rem; margin-top: .7rem; }
+.permission-option { display: flex; align-items: center; gap: .5rem; min-height: 2.5rem; padding: .55rem .65rem; border: 1px solid #dfe4ea; border-radius: .4rem; background: #fff; cursor: pointer; }
+.permission-option:hover { border-color: #1d4ed8; background: #eff6ff; }
+.permission-option input { width: 1.1rem; height: 1.1rem; margin: 0; accent-color: #1d4ed8; }
 input, select, button { font: inherit; padding: .55rem; border: 1px solid #aab2bd; border-radius: .35rem; }
 button { cursor: pointer; background: #1d4ed8; color: white; border-color: #1d4ed8; }
 table { width: 100%; border-collapse: collapse; }
