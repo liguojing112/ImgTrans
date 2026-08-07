@@ -19,6 +19,11 @@ _ERROR_SUGGESTIONS = {
 
 def classify_error(error: Exception) -> tuple[str, str, str]:
     """对异常分类，返回 (标题, 消息, 用户建议)。"""
+    import logging
+
+    logging.getLogger("imgtrans").error(
+        "operation_failed error=%r", error, exc_info=True
+    )
     msg = sanitize_error_msg(str(error))
 
     # 连接错误
