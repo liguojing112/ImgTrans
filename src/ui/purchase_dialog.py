@@ -298,9 +298,6 @@ class PurchaseDialog(QDialog):
             self._timer.stop()
             self._polling = False
             self._status_label.setText("续购成功，时长/次数已叠加到当前激活码")
-            QMessageBox.information(
-                self, "续购成功", "时长/次数已叠加到当前激活码"
-            )
             self.renew_completed.emit()
             self.accept()
         elif result.status == "paid":
