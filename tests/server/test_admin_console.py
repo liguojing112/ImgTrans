@@ -191,7 +191,7 @@ def test_csrf_protected_write_is_audited_without_request_values() -> None:
                     "min_height": "124",
                     "max_width": "9000",
                     "max_height": "9001",
-                    "max_bytes": "9876543",
+                    "max_bytes": "200000",
                 },
             )
             assert missing.status_code == 403
@@ -203,13 +203,13 @@ def test_csrf_protected_write_is_audited_without_request_values() -> None:
                     "min_height": "124",
                     "max_width": "9000",
                     "max_height": "9001",
-                    "max_bytes": "9876543",
+                    "max_bytes": "200000",
                 },
                 follow_redirects=False,
             )
             assert created.status_code == 303
             page = await client.get("/admin/image-limits")
-            assert "9876543" in page.text
+            assert "200000" in page.text
             events = app.state.audit_management.list_recent()
             resources = [event.resource for event in events]
             assert "/admin/image-limits/drafts" in resources
@@ -217,7 +217,7 @@ def test_csrf_protected_write_is_audited_without_request_values() -> None:
                 f"{event.actor}:{event.action}:{event.resource}:{event.correlation_id}"
                 for event in events
             )
-            assert "9876543" not in serialized
+            assert "200000" not in serialized
             assert all(event.correlation_id for event in events)
             assert sum(resource == "/admin/image-limits/drafts" for resource in resources) == 1
 

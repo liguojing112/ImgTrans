@@ -114,16 +114,16 @@ class ImageLimits:
         if width < self.min_width or height < self.min_height:
             raise ImageValidationError(
                 "dimensions_too_small",
-                f"当前图片尺寸为 {width}×{height}，请上传 "
+                f"当前图片尺寸为 {width}×{height} 像素，请上传 "
                 f"{self.min_width}×{self.min_height} 至 "
-                f"{self.max_width}×{self.max_height} 范围内的图片",
+                f"{self.max_width}×{self.max_height} 像素（宽×高）范围内的图片",
             )
         if width > self.max_width or height > self.max_height:
             raise ImageValidationError(
                 "dimensions_too_large",
-                f"当前图片尺寸为 {width}×{height}，请上传 "
+                f"当前图片尺寸为 {width}×{height} 像素，请上传 "
                 f"{self.min_width}×{self.min_height} 至 "
-                f"{self.max_width}×{self.max_height} 范围内的图片",
+                f"{self.max_width}×{self.max_height} 像素（宽×高）范围内的图片",
             )
         if width * height > self.max_pixels:
             raise ImageValidationError(

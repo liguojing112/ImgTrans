@@ -181,7 +181,7 @@ async def create_image_limit_draft(request: Request) -> Response:
         min_height=_integer(form, "min_height"),
         max_width=_integer(form, "max_width"),
         max_height=_integer(form, "max_height"),
-        max_bytes=_integer(form, "max_bytes"),
+        max_bytes=_max_bytes(form),
     )
     request.app.state.manage_image_limits.create_draft(values)
     request.state.audit_action = "create_image_limit_draft"
@@ -810,6 +810,22 @@ def _integer(form: dict[str, str], name: str) -> int:
         return int(_required(form, name))
     except ValueError as error:
         raise HTTPException(status_code=422, detail=f"{name} must be an integer") from error
+
+
+# 数据库 max_bytes 为 PostgreSQL Integer（int32），上限约 2GB
+_INT32_MAX = 2_147_483_647
+
+
+def _max_bytes(form: dict[str, str], name: str = "max_bytes") -> int:
+    """后台以 KB 输入，转换为字节并校验不超数据库 int32 上限。"""
+    kilobytes = _integer(form, name)
+    value = kilobytes * 1024
+    if value > _INT32_MAX:
+        raise HTTPException(
+            status_code=422,
+            detail="最大文件大小过大，请设置不超过 2097151 KB（约 2GB）",
+        )
+    return value
 
 
 def _integer_or_zero(form: dict[str, str], name: str) -> int:

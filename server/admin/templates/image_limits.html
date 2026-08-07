@@ -5,15 +5,15 @@
   <h2>新建</h2>
   <form method="post" action="/admin/image-limits/drafts" class="form-grid">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    {% for name, label in [("min_width", "最小宽度（px）"), ("min_height", "最小高度（px）"), ("max_width", "最大宽度（px）"), ("max_height", "最大高度（px）"), ("max_bytes", "最大文件大小（字节）")] %}
-    <label>{{ label }}<input name="{{ name }}" type="number" min="1" required></label>
+    {% for name, label in [("min_width", "最小宽度（px）"), ("min_height", "最小高度（px）"), ("max_width", "最大宽度（px）"), ("max_height", "最大高度（px）"), ("max_bytes", "最大文件大小（KB）")] %}
+    <label>{{ label }}<input name="{{ name }}" type="number" min="1" {% if name == "max_bytes" %}max="2097151"{% endif %} required></label>
     {% endfor %}
     <button type="submit">创建</button>
   </form>
 </section>
 <section class="card"><h2>版本记录</h2>
-<table><tr><th>版本</th><th>状态</th><th>宽度（px）</th><th>高度（px）</th><th>文件上限（字节）</th><th>操作</th></tr>
-{% for item in versions %}<tr><td>{{ item.version }}</td><td>{{ "已发布" if item.status.value == "published" else ("已取代" if item.status.value == "superseded" else "草稿") }}</td><td>{{ item.values.min_width }}～{{ item.values.max_width }}</td><td>{{ item.values.min_height }}～{{ item.values.max_height }}</td><td>{{ item.values.max_bytes }}</td><td>
+<table><tr><th>版本</th><th>状态</th><th>宽度（px）</th><th>高度（px）</th><th>文件上限（KB）</th><th>操作</th></tr>
+{% for item in versions %}<tr><td>{{ item.version }}</td><td>{{ "已发布" if item.status.value == "published" else ("已取代" if item.status.value == "superseded" else "草稿") }}</td><td>{{ item.values.min_width }}～{{ item.values.max_width }}</td><td>{{ item.values.min_height }}～{{ item.values.max_height }}</td><td>{{ item.values.max_bytes // 1024 }}</td><td>
 {% if item.status.value == "draft" %}<form method="post" action="/admin/image-limits/{{ item.version }}/publish"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button>发布</button></form>{% else %}<form method="post" action="/admin/image-limits/{{ item.version }}/rollback"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button>回滚为新版本</button></form>{% endif %}
 {% if item.status.value != "published" %}<form method="post" action="/admin/image-limits/{{ item.version }}/delete"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button>删除</button></form>{% endif %}
 </td></tr>{% endfor %}</table></section>
