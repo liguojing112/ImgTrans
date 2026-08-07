@@ -8,7 +8,7 @@
 <label>初始密码<input name="password" type="password" minlength="1" required></label>
 <details class="permission-picker"><summary>权限（可勾选多个）</summary>
 <div class="permission-grid">
-{% for key, label in permission_labels.items() %}<label class="permission-option"><input type="checkbox" name="perm_{{ key }}" value="true"><span>{{ label }}</span><span class="permission-check" aria-hidden="true">✓</span></label>{% endfor %}
+{% for key, label in permission_labels.items() %}<label class="permission-option"><span>{{ label }}</span><input type="checkbox" name="perm_{{ key }}" value="true"></label>{% endfor %}
 </div>
 </details>
 <button>创建账号</button>
@@ -28,7 +28,7 @@
 <form method="post" action="/admin/users/{{ user.user_id }}/permissions">
 <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
 <div class="permission-grid">
-{% for key, label in permission_labels.items() %}<label class="permission-option"><input type="checkbox" name="perm_{{ key }}" value="true" {{ "checked" if key in user.permissions }}><span>{{ label }}</span><span class="permission-check" aria-hidden="true">✓</span></label>{% endfor %}
+{% for key, label in permission_labels.items() %}<label class="permission-option"><span>{{ label }}</span><input type="checkbox" name="perm_{{ key }}" value="true" {{ "checked" if key in user.permissions }}></label>{% endfor %}
 </div>
 <button>保存权限</button>
 </form>

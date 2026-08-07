@@ -126,10 +126,11 @@ def test_account_permissions_use_grouped_checkbox_picker() -> None:
             await _login(client)
             page = await client.get("/admin/users")
             assert page.status_code == 200
+            assert 'href="/admin/static/admin.css?v=2"' in page.text
             assert 'class="permission-picker"' in page.text
             assert 'class="permission-grid"' in page.text
             assert 'class="permission-option"' in page.text
-            assert 'class="permission-check"' in page.text
+            assert 'class="permission-check"' not in page.text
             assert 'name="perm_image_limits"' in page.text
 
     try:
