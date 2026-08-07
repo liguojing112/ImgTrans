@@ -550,6 +550,23 @@ def users_page(request: Request) -> Response:
     )
 
 
+@admin_router.get("/users/{user_id}/edit", response_class=HTMLResponse)
+def edit_user_page(user_id: int, request: Request) -> Response:
+    session = _require_session(request)
+    _require_permission(request, session, "users")
+    user = _manage_users(request).get(user_id)
+    if user.is_super:
+        raise HTTPException(status_code=404, detail="超管账号无需编辑")
+    return _render_protected(
+        "user_edit.html",
+        request,
+        session,
+        title="编辑子账号",
+        user=user,
+        permission_labels=PERMISSION_LABELS,
+    )
+
+
 @admin_router.post("/users")
 async def create_admin_user(request: Request) -> Response:
     session, form = await _protected_form(request)

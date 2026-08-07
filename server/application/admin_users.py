@@ -84,6 +84,9 @@ class ManageAdminUsers:
     def list_all(self) -> list[AdminUser]:
         return self._repository.list_all()
 
+    def get(self, user_id: int) -> AdminUser:
+        return self._require(user_id)
+
     def has_super(self) -> bool:
         return self._repository.count_super() > 0
 
