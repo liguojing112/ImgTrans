@@ -255,11 +255,11 @@ class TranslateControls(QFrame):
         action_row.addWidget(self.translate_button)
         action_row.addWidget(self.ocr_only_button)
 
-        # 取消按钮（翻译中可见）
-        self.cancel_button = QPushButton("取消翻译")
-        self.cancel_button.setObjectName("cancelWorkflowButton")
-        self.cancel_button.clicked.connect(self.cancel_requested.emit)
-        self.cancel_button.setVisible(False)
+        # 翻译提示（翻译开始后无法取消）
+        self.translate_hint = QLabel("翻译开始后无法取消，请耐心等待完成")
+        self.translate_hint.setObjectName("propertyFieldLabel")
+        self.translate_hint.setWordWrap(True)
+        self.translate_hint.setVisible(False)
 
         # 进度条
         self.progress = QProgressBar()
@@ -300,7 +300,7 @@ class TranslateControls(QFrame):
         layout.addWidget(self.terminology_editor)
         layout.addWidget(self.terminology_status)
         layout.addLayout(action_row)
-        layout.addWidget(self.cancel_button)
+        layout.addWidget(self.translate_hint)
         layout.addWidget(self.progress)
         layout.addWidget(self.stage_label)
         layout.addWidget(self.summary_label)
@@ -431,7 +431,7 @@ class TranslateControls(QFrame):
     def set_translating(self, translating: bool) -> None:
         self.translate_button.setEnabled(not translating)
         self.ocr_only_button.setEnabled(not translating)
-        self.cancel_button.setVisible(translating)
+        self.translate_hint.setVisible(translating)
         self.ocr_language.setEnabled(not translating)
         self.ocr_mode.setEnabled(not translating)
         self.high_recall_controls.setEnabled(not translating)

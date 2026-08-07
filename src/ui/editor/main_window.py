@@ -1378,7 +1378,6 @@ class EditorMainWindow(QMainWindow):
         self._editor_page.top_bar.set_translating(True)
         ctrl.set_translating(True)
         ctrl.set_preparing()
-        ctrl.cancel_button.setVisible(False)  # 独立 OCR 无取消操作
         self._editor_page.right_tabs.setCurrentIndex(1)  # 跳转 OCR 结果页
         self.statusBar().showMessage(f"正在 OCR 识别（{ocr_language}）…")
 
