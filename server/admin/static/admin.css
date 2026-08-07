@@ -10,6 +10,7 @@ main { max-width: 1180px; margin: 2rem auto; padding: 0 1rem; }
 .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; }
 .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: .75rem; align-items: end; }
 label { display: grid; gap: .35rem; }
+.field-hint { color: #667085; font-size: .82rem; line-height: 1.25; }
 .permission-picker { position: relative; align-self: center; width: max-content; max-width: 100%; border: 0; padding: 0; background: transparent; z-index: 1000; }
 .permission-picker[open] { z-index: 2147483647; }
 .permission-picker summary { display: inline-flex; align-items: center; gap: .45rem; box-sizing: border-box; cursor: pointer; color: #1d4ed8; font-weight: 600; padding: .35rem .15rem; list-style: none; }

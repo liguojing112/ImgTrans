@@ -17,6 +17,7 @@ PASSWORD_HASH = hash_admin_password(PASSWORD)
 SESSION_SECRET = "test-admin-session-secret-1234567890abcdef"
 
 SUB_USERNAME = "kefu01"
+CHINESE_SUB_USERNAME = "客服01"
 SUB_PASSWORD = "customer-password-123"
 
 
@@ -95,6 +96,31 @@ def test_super_admin_can_create_and_manage_subuser() -> None:
             sub = next(u for u in users if u.username == SUB_USERNAME)
             assert sub.is_super is False
             assert sub.permissions == frozenset({"activation"})
+
+    _run(scenario)
+
+
+def test_super_admin_can_create_subuser_with_chinese_username() -> None:
+    app = _app()
+
+    async def scenario():
+        transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+            csrf = await _login(client, USERNAME, PASSWORD)
+            response = await client.post(
+                "/admin/users",
+                data={
+                    "csrf_token": csrf,
+                    "username": CHINESE_SUB_USERNAME,
+                    "password": SUB_PASSWORD,
+                },
+                follow_redirects=False,
+            )
+            assert response.status_code == 303
+            assert any(
+                user.username == CHINESE_SUB_USERNAME
+                for user in app.state.manage_admin_users.list_all()
+            )
 
     _run(scenario)
 

@@ -59,8 +59,8 @@ def format_permissions(permissions: frozenset[str]) -> str:
 
 def validate_username(username: str) -> str:
     normalized = username.strip()
-    if not re.fullmatch(r"[A-Za-z0-9._-]{1,64}", normalized):
-        raise AdminUserError("Administrator username is invalid")
+    if not re.fullmatch(r"[A-Za-z0-9._\-\u4e00-\u9fff]{1,64}", normalized):
+        raise AdminUserError("用户名仅支持中文、英文、数字、点、下划线和连字符")
     return normalized
 
 

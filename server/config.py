@@ -179,9 +179,11 @@ class ServerSettings:
                 "Administrator username, password hash and session secret must be configured together"
             )
         if admin_username is not None and not re.fullmatch(
-            r"[A-Za-z0-9._-]{1,64}", admin_username
+            r"[A-Za-z0-9._\-\u4e00-\u9fff]{1,64}", admin_username
         ):
-            raise ServerSettingsError("IMGTRANS_ADMIN_USERNAME is invalid")
+            raise ServerSettingsError(
+                "IMGTRANS_ADMIN_USERNAME only supports Chinese, letters, digits, dots, underscores and hyphens"
+            )
         if admin_password_hash is not None and not re.fullmatch(
             r"scrypt\$16384\$8\$1\$[A-Za-z0-9_-]{22}\$[A-Za-z0-9_-]{43}",
             admin_password_hash,

@@ -4,7 +4,7 @@
 <section class="card user-create-card"><h2>新建客服子账号</h2>
 <form method="post" action="/admin/users" class="form-grid">
 <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-<label>用户名<input name="username" pattern="[A-Za-z0-9._-]{1,64}" required></label>
+<label>用户名<input name="username" maxlength="64" placeholder="如：客服01、kefu01" required><small class="field-hint">支持中文、英文、数字、点、下划线和连字符</small></label>
 <label>初始密码<input name="password" type="password" minlength="1" required></label>
 <details class="permission-picker"><summary>权限（可勾选多个）</summary>
 <div class="permission-grid">
