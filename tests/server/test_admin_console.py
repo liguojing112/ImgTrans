@@ -129,6 +129,7 @@ def test_account_permissions_use_grouped_checkbox_picker() -> None:
             assert 'class="permission-picker"' in page.text
             assert 'class="permission-grid"' in page.text
             assert 'class="permission-option"' in page.text
+            assert 'class="permission-check"' in page.text
             assert 'name="perm_image_limits"' in page.text
 
     try:

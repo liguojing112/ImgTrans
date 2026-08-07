@@ -9,12 +9,18 @@ main { max-width: 1180px; margin: 2rem auto; padding: 0 1rem; }
 .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; }
 .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: .75rem; align-items: end; }
 label { display: grid; gap: .35rem; }
-.permission-picker { grid-column: 1 / -1; border: 1px solid #dfe4ea; border-radius: .55rem; padding: .7rem .8rem; background: #f8fafc; }
-.permission-picker summary { cursor: pointer; color: #17202a; font-weight: 600; }
-.permission-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: .55rem; margin-top: .7rem; }
-.permission-option { display: flex; align-items: center; gap: .5rem; min-height: 2.5rem; padding: .55rem .65rem; border: 1px solid #dfe4ea; border-radius: .4rem; background: #fff; cursor: pointer; }
-.permission-option:hover { border-color: #1d4ed8; background: #eff6ff; }
-.permission-option input { width: 1.1rem; height: 1.1rem; margin: 0; accent-color: #1d4ed8; }
+.permission-picker { position: relative; grid-column: 1 / -1; border: 0; padding: 0; background: transparent; z-index: 3; }
+.permission-picker summary { display: inline-flex; align-items: center; justify-content: space-between; min-width: 220px; box-sizing: border-box; cursor: pointer; color: #17202a; font-weight: 600; padding: .65rem .8rem; border: 1px solid #aab2bd; border-radius: .55rem; background: #fff; list-style: none; }
+.permission-picker summary::-webkit-details-marker { display: none; }
+.permission-picker summary::after { content: "⌄"; margin-left: 1.5rem; color: #667085; font-size: 1.1rem; }
+.permission-picker[open] summary { border-radius: .55rem .55rem 0 0; border-color: #1d4ed8; }
+.permission-picker[open] summary::after { content: "⌃"; }
+.permission-grid { position: absolute; top: calc(100% - 1px); left: 0; display: grid; grid-template-columns: 1fr; gap: .15rem; width: min(360px, 90vw); max-height: 18rem; overflow-y: auto; box-sizing: border-box; padding: .55rem; border: 1px solid #1d4ed8; border-radius: 0 .55rem .75rem .75rem; background: #fff; box-shadow: 0 .7rem 1.6rem rgba(16, 24, 40, .18); }
+.permission-option { display: flex; align-items: center; gap: .65rem; min-height: 2.5rem; padding: .55rem .7rem; border: 0; border-radius: .45rem; background: transparent; cursor: pointer; }
+.permission-option:hover { background: #eff6ff; }
+.permission-option input { position: absolute; inline-size: 1px; block-size: 1px; opacity: 0; pointer-events: none; }
+.permission-check { margin-left: auto; color: #1d4ed8; font-size: 1.25rem; font-weight: 700; opacity: 0; }
+.permission-option input:checked ~ .permission-check { opacity: 1; }
 input, select, button { font: inherit; padding: .55rem; border: 1px solid #aab2bd; border-radius: .35rem; }
 button { cursor: pointer; background: #1d4ed8; color: white; border-color: #1d4ed8; }
 table { width: 100%; border-collapse: collapse; }
