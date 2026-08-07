@@ -100,6 +100,9 @@ def test_release_verifier_requires_all_image_plugins_and_model_runtimes(
     (runtime / "onnxruntime_pybind11_state.pyd").write_bytes(b"fixture")
     (runtime / "cv2.pyd").write_bytes(b"fixture")
     (runtime / "Qt6Core.dll").write_bytes(b"fixture")
+    bundled = artifact / "_internal" / "bundled_models" / "lama-inpainting"
+    bundled.mkdir(parents=True)
+    (bundled / "inpainting_lama_2025jan.onnx").write_bytes(b"fixture")
 
     assert imageformat_plugins(artifact) == REQUIRED_IMAGE_PLUGINS
     assert all(runtime_assets(artifact).values())
@@ -116,6 +119,9 @@ def test_runtime_asset_check_accepts_macos_qt_core_layout(tmp_path: Path) -> Non
     (resources / "PySide6" / "QtCore.abi3.so").write_bytes(b"fixture")
     (resources / "onnxruntime_pybind11_state.so").write_bytes(b"fixture")
     (resources / "cv2.abi3.so").write_bytes(b"fixture")
+    bundled = resources / "bundled_models" / "lama-inpainting"
+    bundled.mkdir(parents=True)
+    (bundled / "inpainting_lama_2025jan.onnx").write_bytes(b"fixture")
     assert all(runtime_assets(artifact).values())
 
 
@@ -139,6 +145,8 @@ def test_formal_spec_and_workflow_have_release_gates() -> None:
     assert 'root / "src" / "__main__.py"' in spec
     assert 'collect_data_files(' in spec
     assert 'excludes=["models/*.onnx", "**/*.onnx"]' in spec
+    assert "bundled_models" in spec
+    assert "bundled_datas" in spec
     assert '"rapidocr.inference_engine.onnxruntime"' in spec
     assert 'collect_submodules("rapidocr")' not in spec
     assert '"rapidocr.inference_engine.pytorch"' in spec

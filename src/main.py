@@ -125,6 +125,19 @@ def _create_quota_client(base_url: str):
     return QuotaClient(base_url)
 
 
+def _with_bundled_models(repository):
+    """打包版 exe 用内置模型兜底（data_dir 缺模型时直接加载内置 onnx）。"""
+    from src.infrastructure.bundled_models import (
+        BundledModelRepository,
+        bundled_models_root,
+    )
+
+    root = bundled_models_root()
+    if root is None:
+        return repository
+    return BundledModelRepository(repository, root)
+
+
 DEFAULT_BACKEND_URL = "https://imgtrans.rchtop.top"
 
 
@@ -153,7 +166,7 @@ def create_main_window() -> MainWindow:
     import_image = ImportImage(codec, image_limits)
     export_image = ExportImage(codec)
     task_runner = QtTaskRunner()
-    model_repository = FileModelRepository(startup.data_dir / "models")
+    model_repository = _with_bundled_models(FileModelRepository(startup.data_dir / "models"))
     installed_lama = model_repository.active("lama-inpainting")
     default_model_path = (
         Path(installed_lama.path)
@@ -383,7 +396,7 @@ def _create_editor_window() -> EditorMainWindow:
     import_image = ImportImage(codec, image_limits)
     export_image = ExportImage(codec)
     task_runner = QtTaskRunner()
-    model_repository = FileModelRepository(startup.data_dir / "models")
+    model_repository = _with_bundled_models(FileModelRepository(startup.data_dir / "models"))
 
     # —— OCR ——
     recognize = RecognizeText(

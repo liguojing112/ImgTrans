@@ -8,6 +8,8 @@ from pathlib import Path
 import subprocess
 import sys
 
+import rapidocr
+
 
 TARGETS = ("windows-x64", "macos-arm64")
 
@@ -75,6 +77,15 @@ def main(argv: list[str] | None = None) -> int:
             )
         )
         return 0
+
+    root = Path(__file__).resolve().parents[1]
+    from scripts.prepare_bundled_models import prepare as prepare_bundled
+
+    prepare_bundled(
+        root / "packaging" / "bundled_models",
+        Path(rapidocr.__file__).resolve().parent,
+        None,
+    )
 
     environment = os.environ.copy()
     environment["IMGTRANS_BUILD_TARGET"] = args.target

@@ -36,11 +36,22 @@ rapidocr_hidden = [
 ]
 onnx_binaries = collect_dynamic_libs("onnxruntime")
 
+bundled_models_dir = root / "packaging" / "bundled_models"
+bundled_datas = []
+if bundled_models_dir.is_dir():
+    for model_dir in bundled_models_dir.iterdir():
+        if model_dir.is_dir():
+            for file in model_dir.iterdir():
+                if file.is_file():
+                    bundled_datas.append(
+                        (str(file), f"bundled_models/{model_dir.name}")
+                    )
+
 analysis = Analysis(
     [str(root / "src" / "__main__.py")],
     pathex=[str(root)],
     binaries=[*rapidocr_binaries, *onnx_binaries],
-    datas=[*rapidocr_datas, (str(root / "packaging" / "assets" / "imgtrans.png"), "assets")],
+    datas=[*rapidocr_datas, *bundled_datas, (str(root / "packaging" / "assets" / "imgtrans.png"), "assets")],
     hiddenimports=[
         *rapidocr_hidden,
         "onnxruntime",

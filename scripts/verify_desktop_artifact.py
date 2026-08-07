@@ -116,7 +116,10 @@ def runtime_assets(artifact: Path) -> dict[str, bool]:
     return {
         "rapidocr_config": any(name.endswith("rapidocr/config.yaml") for name in normalized)
         and any(name.endswith("rapidocr/default_models.yaml") for name in normalized),
-        "model_weights_excluded": not any(name.endswith(".onnx") for name in normalized),
+        "model_weights_bundled": any(
+            "/bundled_models/" in name and name.endswith(".onnx")
+            for name in normalized
+        ),
         "onnxruntime_native": any("onnxruntime_pybind11_state" in name for name in normalized),
         "opencv_native": any(
             name.endswith(("cv2.pyd", "cv2.abi3.so")) or "/cv2." in name
