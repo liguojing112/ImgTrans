@@ -94,7 +94,6 @@ analysis = Analysis(
         "uvicorn",
         "jinja2",
         "lxml",
-        "shapely",
         "PySide6.QtWebEngineCore",
         "PySide6.QtWebEngineWidgets",
     ],
