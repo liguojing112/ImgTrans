@@ -92,12 +92,9 @@ class PurchaseDialog(QDialog):
         layout.addWidget(self._status_label)
 
         buttons = QHBoxLayout()
-        self._buy_button = QPushButton("立即购买")
-        self._buy_button.clicked.connect(self._start_purchase)
         close_button = QPushButton("关闭")
         close_button.clicked.connect(self.reject)
         buttons.addStretch()
-        buttons.addWidget(self._buy_button)
         buttons.addWidget(close_button)
         layout.addLayout(buttons)
 
@@ -107,7 +104,6 @@ class PurchaseDialog(QDialog):
         self._countdown_timer.timeout.connect(self._update_countdown)
 
         self._status_label.setText("正在加载套餐…")
-        self._buy_button.setEnabled(False)
         self._task_runner.submit(
             self._client.list_plans, self._plans_loaded, self._operation_failed
         )
@@ -157,9 +153,10 @@ class PurchaseDialog(QDialog):
             index = self._plan_combo.findData(self._preselect_plan_id)
             if index >= 0:
                 self._plan_combo.setCurrentIndex(index)
+                self._status_label.setText("选择套餐后自动生成付款码")
+                return
         self._on_plan_selected()
-        self._status_label.setText("请选择套餐后购买")
-        self._buy_button.setEnabled(True)
+        self._status_label.setText("选择套餐后自动生成付款码")
 
     def _on_plan_selected(self) -> None:
         plan_id = self._plan_combo.currentData()
@@ -167,6 +164,7 @@ class PurchaseDialog(QDialog):
             (p for p in self._plans if p.plan_id == plan_id), None
         )
         self._update_plan_info()
+        self._auto_purchase()
 
     def _update_plan_info(self) -> None:
         self._countdown_timer.stop()
@@ -227,16 +225,25 @@ class PurchaseDialog(QDialog):
             f"优惠剩余 {hours:02d}:{minutes:02d}:{seconds:02d}</span>"
         )
 
-    def _start_purchase(self) -> None:
+    def _auto_purchase(self) -> None:
+        """选套餐后自动下单并显示二维码；切换套餐时旧下单结果被丢弃。"""
         plan_id = self._plan_combo.currentData()
         if plan_id is None:
             return
-        self._set_busy(True)
+        self._ordering_seq = getattr(self, "_ordering_seq", 0) + 1
+        seq = self._ordering_seq
+        self._timer.stop()
+        self._polling = False
         self._status_label.setText("正在下单…")
+        self._set_busy(True)
         self._task_runner.submit(
             lambda: self._client.create_order(plan_id, self._renew_code),
-            self._order_created,
-            self._operation_failed,
+            lambda result: (
+                self._order_created(result) if seq == self._ordering_seq else None
+            ),
+            lambda error: (
+                self._operation_failed(error) if seq == self._ordering_seq else None
+            ),
         )
 
     def _order_created(self, result: object) -> None:
@@ -315,5 +322,4 @@ class PurchaseDialog(QDialog):
         self._status_label.setText(f"操作失败：{error}")
 
     def _set_busy(self, busy: bool) -> None:
-        self._buy_button.setEnabled(not busy)
         self._plan_combo.setEnabled(not busy)
