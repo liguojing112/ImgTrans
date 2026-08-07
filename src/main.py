@@ -381,6 +381,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 def _create_editor_window() -> EditorMainWindow:
     """构建编辑器窗口的完整依赖集。"""
+    configure_logging()
     startup = BootstrapApplication(
         ProductInfo(name="图片翻译", version=__version__, milestone="M4"),
         PlatformPaths.discover(),
