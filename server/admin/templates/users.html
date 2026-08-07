@@ -15,7 +15,7 @@
 </form></section>
 <section class="card"><h2>账号列表</h2>
 <table>
-<tr><th>用户名</th><th>类型</th><th>权限</th><th>状态</th><th>权限设置</th><th>操作</th></tr>
+<tr><th>用户名</th><th>类型</th><th>权限</th><th>状态</th><th>操作</th></tr>
 {% for user in users %}
 <tr>
 <td>{{ user.username }}</td>
@@ -24,7 +24,7 @@
 <td>{{ "启用" if user.enabled else "已停用" }}</td>
 <td>
 {% if not user.is_super %}
-<details class="permission-picker"><summary>设置权限</summary>
+<details class="permission-picker"><summary>编辑</summary>
 <form method="post" action="/admin/users/{{ user.user_id }}/permissions">
 <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
 <div class="permission-grid">
@@ -32,18 +32,14 @@
 </div>
 <button>保存权限</button>
 </form>
-</details>
-{% else %}-{% endif %}
-</td>
-<td>
-{% if not user.is_super %}
+<form method="post" action="/admin/users/{{ user.user_id }}/reset-password"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><label>新密码<input name="password" type="password" minlength="1" required></label><button>重置密码</button></form>
 {% if user.enabled %}
 <form method="post" action="/admin/users/{{ user.user_id }}/disable"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button>停用</button></form>
 {% else %}
 <form method="post" action="/admin/users/{{ user.user_id }}/enable"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button>启用</button></form>
 {% endif %}
-<form method="post" action="/admin/users/{{ user.user_id }}/reset-password"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><label>新密码<input name="password" type="password" minlength="1" required></label><button>重置密码</button></form>
 <form method="post" action="/admin/users/{{ user.user_id }}/delete" data-confirm="删除子账号后不可恢复，确定删除？"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="btn-delete">删除</button></form>
+</details>
 {% else %}-{% endif %}
 </td>
 </tr>
