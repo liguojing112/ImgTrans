@@ -25,23 +25,12 @@ def configure_logging(level: int = logging.INFO) -> logging.Logger:
 
 
 def _attach_file_handler(logger: logging.Logger) -> None:
-    """日志写入 data_dir/logs/imgtrans.log，失败则兜底写 exe 同级。"""
-    try:
-        from src.platform.paths import PlatformPaths
+    """日志写入 data_dir/logs/imgtrans.log（exe 安装目录不可写，避免打包冲突）。"""
+    from src.platform.paths import PlatformPaths
 
-        log_dir = PlatformPaths.discover().data_dir / "logs"
-        log_dir.mkdir(parents=True, exist_ok=True)
-        _add_file_handler(logger, log_dir / "imgtrans.log")
-    except OSError:
-        pass
-    try:
-        import sys
-
-        _add_file_handler(
-            logger, Path(sys.executable).resolve().parent / "imgtrans-debug.log"
-        )
-    except OSError:
-        pass
+    log_dir = PlatformPaths.discover().data_dir / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    _add_file_handler(logger, log_dir / "imgtrans.log")
 
 
 def _add_file_handler(logger: logging.Logger, path: Path) -> None:
