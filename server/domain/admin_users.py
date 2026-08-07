@@ -49,10 +49,8 @@ def parse_permissions(value: str) -> frozenset[str]:
         return frozenset()
     # users 权限仅超管序列化需要；子账号创建/勾选仍用 MODULE_PERMISSIONS 限制
     valid = MODULE_PERMISSIONS | {"users"}
-    unknown = {part for part in value.split(",") if part and part not in valid}
-    if unknown:
-        raise AdminUserError(f"Unknown permissions: {', '.join(sorted(unknown))}")
-    return frozenset(part for part in value.split(",") if part)
+    # 历史数据可能含已下线的权限（如 models），忽略而非抛错，保证登录可用
+    return frozenset(part for part in value.split(",") if part and part in valid)
 
 
 def format_permissions(permissions: frozenset[str]) -> str:
