@@ -31,12 +31,6 @@ class ServerSettings:
     translator_key: str | None = field(default=None, repr=False)
     translator_region: str | None = None
     translator_timeout_seconds: float = 10.0
-    object_storage_endpoint: str | None = None
-    object_storage_region: str | None = None
-    object_storage_bucket: str | None = None
-    object_storage_access_key: str | None = field(default=None, repr=False)
-    object_storage_secret_key: str | None = field(default=None, repr=False)
-    model_download_url_ttl_seconds: int = 900
     activation_secret: str | None = field(default=None, repr=False)
     admin_username: str | None = None
     admin_password_hash: str | None = field(default=None, repr=False)
@@ -160,47 +154,7 @@ class ServerSettings:
             raise ServerSettingsError(
                 "IMGTRANS_TRANSLATOR_TIMEOUT_SECONDS must be between 1 and 60"
             )
-        object_storage_endpoint = _optional_url(
-            values.get("IMGTRANS_OBJECT_STORAGE_ENDPOINT"),
-            "IMGTRANS_OBJECT_STORAGE_ENDPOINT",
-            require_https=production,
-        )
-        object_storage_region = values.get("IMGTRANS_OBJECT_STORAGE_REGION")
-        if object_storage_region is not None:
-            object_storage_region = object_storage_region.strip() or None
-        object_storage_bucket = values.get("IMGTRANS_OBJECT_STORAGE_BUCKET")
-        if object_storage_bucket is not None:
-            object_storage_bucket = object_storage_bucket.strip() or None
-        object_storage_access_key = _optional_secret(
-            values.get("IMGTRANS_OBJECT_STORAGE_ACCESS_KEY"),
-            "IMGTRANS_OBJECT_STORAGE_ACCESS_KEY",
-        )
-        object_storage_secret_key = _optional_secret(
-            values.get("IMGTRANS_OBJECT_STORAGE_SECRET_KEY"),
-            "IMGTRANS_OBJECT_STORAGE_SECRET_KEY",
-        )
-        storage_values = (
-            object_storage_endpoint,
-            object_storage_bucket,
-            object_storage_access_key,
-            object_storage_secret_key,
-        )
-        if any(storage_values) and not all(storage_values):
-            raise ServerSettingsError(
-                "Object storage endpoint, bucket and credentials must be configured together"
-            )
-        try:
-            model_download_url_ttl_seconds = int(
-                values.get("IMGTRANS_MODEL_DOWNLOAD_URL_TTL_SECONDS", "900")
-            )
-        except ValueError as error:
-            raise ServerSettingsError(
-                "IMGTRANS_MODEL_DOWNLOAD_URL_TTL_SECONDS must be an integer"
-            ) from error
-        if not 60 <= model_download_url_ttl_seconds <= 3600:
-            raise ServerSettingsError(
-                "IMGTRANS_MODEL_DOWNLOAD_URL_TTL_SECONDS must be between 60 and 3600"
-            )
+        object_storage_endpoint = None
         activation_secret = values.get("IMGTRANS_ACTIVATION_SECRET")
         if activation_secret is not None:
             activation_secret = activation_secret.strip()
@@ -263,12 +217,6 @@ class ServerSettings:
             translator_key=translator_key,
             translator_region=translator_region,
             translator_timeout_seconds=translator_timeout_seconds,
-            object_storage_endpoint=object_storage_endpoint,
-            object_storage_region=object_storage_region,
-            object_storage_bucket=object_storage_bucket,
-            object_storage_access_key=object_storage_access_key,
-            object_storage_secret_key=object_storage_secret_key,
-            model_download_url_ttl_seconds=model_download_url_ttl_seconds,
             activation_secret=activation_secret,
             admin_username=admin_username,
             admin_password_hash=admin_password_hash,
@@ -303,7 +251,6 @@ class ServerSettings:
             "docs_enabled": self.docs_enabled,
             "client_config_ttl_seconds": self.client_config_ttl_seconds,
             "translator_configured": self.translator_key is not None,
-            "object_storage_configured": self.object_storage_endpoint is not None,
             "activation_configured": self.activation_secret is not None,
             "admin_console_configured": self.admin_session_secret is not None,
             "wechat_pay_configured": self.wechat_pay_configured,

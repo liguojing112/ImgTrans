@@ -21,7 +21,6 @@ from server.domain.admin_users import (
     PERMISSION_LABELS,
 )
 from server.domain.image_limits import ImageLimitConflict, ImageLimitValues
-from server.domain.models import ModelReleaseSpec
 from server.api.rate_limit import enforce_rate_limit
 from server.domain.translation import TranslationTextItem, TranslationTextRequest
 
@@ -144,7 +143,6 @@ _DASHBOARD_LABELS = {
     "docs_enabled": "API 文档",
     "client_config_ttl_seconds": "客户端配置缓存（秒）",
     "translator_configured": "翻译服务",
-    "object_storage_configured": "对象存储",
     "activation_configured": "激活服务",
     "admin_console_configured": "管理后台",
     "wechat_pay_configured": "微信支付",
@@ -218,52 +216,6 @@ async def delete_image_limit_version(version: int, request: Request) -> Response
         raise HTTPException(status_code=409, detail=str(error))
     request.state.audit_action = "delete_image_limit_version"
     return _redirect("/admin/image-limits")
-
-
-@admin_router.get("/models", response_class=HTMLResponse)
-def models_page(request: Request) -> Response:
-    session = _require_session(request)
-    _require_permission(request, session, "models")
-    return _models_response(request, session)
-
-
-@admin_router.post("/models/releases")
-async def create_model_release(request: Request) -> Response:
-    session, form = await _protected_form(request)
-    _require_permission(request, session, "models")
-    request.app.state.manage_model_releases.create(
-        ModelReleaseSpec(
-            model_id=_required(form, "model_id"),
-            version=_required(form, "version"),
-            platform=_required(form, "platform"),
-            architecture=_required(form, "architecture"),
-            filename=_required(form, "filename"),
-            object_key=_required(form, "object_key"),
-            object_version=_required(form, "object_version"),
-            size_bytes=_integer(form, "size_bytes"),
-            sha256=_required(form, "sha256"),
-        )
-    )
-    request.state.audit_action = "create_model_release"
-    return _redirect("/admin/models")
-
-
-@admin_router.post("/models/releases/{release_id}/publish")
-async def publish_model_release(release_id: int, request: Request) -> Response:
-    session, _ = await _protected_form(request)
-    _require_permission(request, session, "models")
-    request.app.state.manage_model_releases.publish(release_id)
-    request.state.audit_action = "publish_model_release"
-    return _redirect("/admin/models")
-
-
-@admin_router.post("/models/releases/{release_id}/withdraw")
-async def withdraw_model_release(release_id: int, request: Request) -> Response:
-    session, _ = await _protected_form(request)
-    _require_permission(request, session, "models")
-    request.app.state.manage_model_releases.withdraw(release_id)
-    request.state.audit_action = "withdraw_model_release"
-    return _redirect("/admin/models")
 
 
 @admin_router.get("/translation", response_class=HTMLResponse)
@@ -418,9 +370,6 @@ _AUDIT_LABELS = {
     "publish_image_limits": "发布图片限制",
     "rollback_image_limits": "回滚图片限制",
     "delete_image_limit_version": "删除图片限制版本",
-    "create_model_release": "新建模型草稿",
-    "publish_model_release": "发布模型",
-    "withdraw_model_release": "撤回模型",
     "test_translation": "测试翻译连接",
     "post": "表单提交",
     "get": "查看",
@@ -747,16 +696,6 @@ def _image_limits_response(request: Request, session: AdminSession) -> HTMLRespo
         session,
         title="图片限制",
         versions=request.app.state.manage_image_limits.list_versions(),
-    )
-
-
-def _models_response(request: Request, session: AdminSession) -> HTMLResponse:
-    return _render_protected(
-        "models.html",
-        request,
-        session,
-        title="模型发布",
-        releases=request.app.state.manage_model_releases.list_all(),
     )
 
 

@@ -236,7 +236,6 @@ def test_all_management_pages_render_and_secrets_are_not_exposed() -> None:
             csrf = await _login(client)
             for path in (
                 "/admin/image-limits",
-                "/admin/models",
                 "/admin/translation",
                 "/admin/activation",
                 "/admin/audit",

@@ -18,12 +18,6 @@ def test_settings_are_read_from_environment_without_exposing_database_url() -> N
             "IMGTRANS_CLIENT_API_TOKEN": "test-client-token-123456",
             "IMGTRANS_TRANSLATOR_KEY": "test-translator-key-123456",
             "IMGTRANS_TRANSLATOR_REGION": "westus",
-            "IMGTRANS_OBJECT_STORAGE_ENDPOINT": "https://storage.example.test",
-            "IMGTRANS_OBJECT_STORAGE_REGION": "us-east-1",
-            "IMGTRANS_OBJECT_STORAGE_BUCKET": "imgtrans-models",
-            "IMGTRANS_OBJECT_STORAGE_ACCESS_KEY": "test-access-key-123456",
-            "IMGTRANS_OBJECT_STORAGE_SECRET_KEY": "test-secret-key-123456",
-            "IMGTRANS_MODEL_DOWNLOAD_URL_TTL_SECONDS": "600",
             "IMGTRANS_ACTIVATION_SECRET": "test-activation-secret-1234567890abcdef",
             "IMGTRANS_ADMIN_USERNAME": "admin.user",
             "IMGTRANS_ADMIN_PASSWORD_HASH": hash_admin_password(
@@ -50,8 +44,6 @@ def test_settings_are_read_from_environment_without_exposing_database_url() -> N
     assert settings.client_api_token == "test-client-token-123456"
     assert settings.translator_key == "test-translator-key-123456"
     assert settings.translator_region == "westus"
-    assert settings.object_storage_bucket == "imgtrans-models"
-    assert settings.model_download_url_ttl_seconds == 600
     assert settings.activation_secret == "test-activation-secret-1234567890abcdef"
     assert settings.admin_username == "admin.user"
     assert settings.admin_session_ttl_seconds == 3600
@@ -63,8 +55,6 @@ def test_settings_are_read_from_environment_without_exposing_database_url() -> N
     assert settings.admin_token not in repr(settings)
     assert settings.client_api_token not in repr(settings)
     assert settings.translator_key not in repr(settings)
-    assert settings.object_storage_access_key not in repr(settings)
-    assert settings.object_storage_secret_key not in repr(settings)
     assert settings.activation_secret not in repr(settings)
     assert settings.admin_password_hash not in repr(settings)
     assert settings.admin_session_secret not in repr(settings)

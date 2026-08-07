@@ -15,7 +15,6 @@
   {% if username %}
   <nav>
     {% if 'image_limits' in permissions %}<a href="/admin/image-limits">图片限制</a>{% endif %}
-    {% if 'models' in permissions %}<a href="/admin/models">模型</a>{% endif %}
     {% if 'translation' in permissions %}<a href="/admin/translation">翻译服务</a>{% endif %}
     {% if 'activation' in permissions %}<a href="/admin/activation">激活</a>{% endif %}
     {% if 'usage' in permissions %}<a href="/admin/usage">用量</a>{% endif %}

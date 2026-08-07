@@ -1,6 +1,21 @@
 {% extends "base.html" %}
 {% block content %}
 <h1>翻译服务</h1>
+<section class="card">
+  <h2>本页用途</h2>
+  <p>本页显示<strong>图片翻译服务</strong>（Microsoft Translator）的配置状态。</p>
+  <p><strong>翻译流程</strong>：客户端在"图片翻译"功能中，先识别图片里的文字（OCR），再由本服务把文字翻译成目标语言，最后回填到图片上。</p>
+  <p><strong>没有配置时</strong>：客户端无法进行真实的文字翻译。</p>
+  <p><strong>配置方式</strong>：翻译密钥在<strong>服务器环境变量</strong>中配置（<code>IMGTRANS_TRANSLATOR_KEY</code>），本页面只读显示状态，不可在此修改。如需配置，请联系软件供应商。</p>
+  <p><strong>状态说明</strong></p>
+  <dl>
+    <dt>Microsoft Translator</dt><dd>{{ "已配置" if translator_configured else "未配置" }}</dd>
+  </dl>
+  <ul>
+    <li><strong>已配置</strong> — 翻译服务可用，客户端可正常翻译图片文字。</li>
+    <li><strong>未配置</strong> — 翻译服务不可用，客户端无法真翻译。</li>
+  </ul>
+</section>
 <section class="card"><dl>
 <dt>Microsoft Translator</dt><dd>{{ "已配置" if translator_configured else "未配置" }}</dd>
 <dt>区域配置</dt><dd>{{ "已配置" if translator_region_configured else "未配置或不需要" }}</dd>

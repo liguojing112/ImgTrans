@@ -29,15 +29,14 @@ class AdminUserDenied(AdminUserError):
 SUPER_ROLE = "super"
 SUB_ROLE = "sub"
 SUPER_PERMISSIONS = frozenset(
-    {"activation", "image_limits", "models", "translation", "audit", "users", "payments", "usage"}
+    {"activation", "image_limits", "translation", "audit", "users", "payments", "usage"}
 )
 MODULE_PERMISSIONS = frozenset(
-    {"activation", "image_limits", "models", "translation", "audit", "payments", "usage"}
+    {"activation", "image_limits", "translation", "audit", "payments", "usage"}
 )
 PERMISSION_LABELS = {
     "activation": "激活管理",
     "image_limits": "图片限制",
-    "models": "模型发布",
     "translation": "翻译服务",
     "audit": "审计日志",
     "payments": "订单",

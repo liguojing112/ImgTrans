@@ -25,7 +25,6 @@ from src.application.inpainting import (
     RepairTranslatedRegions,
 )
 from src.application.manual_region import ProcessManualRegion
-from src.application.model_delivery import EnsureModels
 from src.application.ocr import RecognizeText
 from src.application.translation import TranslateRegions
 from src.application.translate_image import TranslateImage
@@ -45,11 +44,7 @@ from src.infrastructure.image_limits_config import (
 from src.infrastructure.lama_onnx_adapter import LAMA_MODEL_FILENAME
 from src.infrastructure.activation_client import HttpActivationClient
 from src.infrastructure.mock_translator import MockTranslationAdapter
-from src.infrastructure.model_delivery import (
-    FileModelRepository,
-    HttpModelManifestClient,
-    HttpRangeModelDownloader,
-)
+from src.infrastructure.model_delivery import FileModelRepository
 from src.infrastructure.opencv_inpaint_adapter import OpenCvInpaintAdapter
 from src.infrastructure.pillow_mask_rasterizer import PillowMaskRasterizer
 from src.infrastructure.pillow_image_cropper import PillowImageCropper
@@ -63,7 +58,7 @@ from src.infrastructure.user_preferences import (
     JsonModelTermsPreferences,
     JsonTerminologyPreferences,
 )
-from src.platform.paths import PlatformPaths, discover_model_target
+from src.platform.paths import PlatformPaths
 from src.platform.credentials import create_platform_credential_store
 from src.platform.qt_runtime import QtRuntimeMonitor, configure_qt_runtime
 from src.ui.main_window import MainWindow
@@ -147,9 +142,6 @@ def create_main_window() -> MainWindow:
     startup = BootstrapApplication(product, PlatformPaths.discover()).execute()
     codec = PillowImageCodec()
     backend_url = os.environ.get("IMGTRANS_API_BASE_URL", DEFAULT_BACKEND_URL).strip()
-    development_api_token_configured = bool(
-        os.environ.get("IMGTRANS_API_TOKEN", "").strip()
-    )
     remote_image_limits = (
         HttpImageLimitsClient(backend_url) if backend_url else None
     )
@@ -243,17 +235,6 @@ def create_main_window() -> MainWindow:
     preferences_path = startup.data_dir / "config" / "preferences.json"
     brand_terms_preferences = JsonBrandTermsPreferences(preferences_path)
     terminology_preferences = JsonTerminologyPreferences(preferences_path)
-    update_models = None
-    if backend_url:
-        model_platform, model_architecture = discover_model_target()
-        update_models = EnsureModels(
-            HttpModelManifestClient(backend_url, access_token),
-            HttpRangeModelDownloader(),
-            model_repository,
-            startup.cache_dir / "model-downloads",
-            model_platform,
-            model_architecture,
-        ).execute
     logger.info("application_ready version=%s", product.version)
     window = MainWindow(
         startup,
@@ -273,7 +254,6 @@ def create_main_window() -> MainWindow:
         export_batch_selection=export_batch_selection,
         task_runner=task_runner,
         refresh_image_limits=image_limits.refresh,
-        update_models=update_models,
         activate_device=activation.activate if activation is not None else None,
         activation_status=(
             activation.current_session if activation is not None else None
@@ -287,9 +267,7 @@ def create_main_window() -> MainWindow:
     )
     if remote_image_limits is not None:
         QTimer.singleShot(0, window.request_image_limits_refresh)
-    if update_models is not None and development_api_token_configured:
-        QTimer.singleShot(0, window.request_model_update)
-    elif activation is not None:
+    if activation is not None:
         QTimer.singleShot(0, window.request_activation_check)
     return window
 

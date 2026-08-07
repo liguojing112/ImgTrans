@@ -184,14 +184,6 @@ def test_first_activation_binds_one_device_and_device_token_authorizes_client_ap
             assert record.device_digest != DEVICE_A
             assert record.token_digest != payload["access_token"]
 
-        authorized = _request(
-            app,
-            "GET",
-            "/v1/models/manifest?platform=windows&architecture=x86_64",
-            headers={"Authorization": f"Bearer {payload['access_token']}"},
-        )
-        assert authorized.status_code == 200
-        assert authorized.json()["models"] == []
         other_device = _activate(app, issued["activation_code"], DEVICE_B)
         assert other_device.status_code == 403
         assert issued["activation_code"] not in other_device.text
@@ -222,7 +214,7 @@ def test_disable_revokes_device_token_and_prevents_reactivation() -> None:
     app = _app()
     try:
         issued = _issue_code(app, _create_plan(app)["plan_id"])
-        grant = _activate(app, issued["activation_code"]).json()
+        _activate(app, issued["activation_code"])
         disabled = _request(
             app,
             "POST",
@@ -231,13 +223,6 @@ def test_disable_revokes_device_token_and_prevents_reactivation() -> None:
         )
         assert disabled.status_code == 200
         assert disabled.json()["status"] == "disabled"
-        denied = _request(
-            app,
-            "GET",
-            "/v1/models/manifest?platform=windows&architecture=x86_64",
-            headers={"Authorization": f"Bearer {grant['access_token']}"},
-        )
-        assert denied.status_code == 401
         assert _activate(app, issued["activation_code"]).status_code == 403
     finally:
         app.state.database.close()
@@ -247,18 +232,11 @@ def test_expired_binding_rejects_code_and_device_token() -> None:
     app = _app()
     try:
         issued = _issue_code(app, _create_plan(app, duration_hours=1)["plan_id"])
-        grant = _activate(app, issued["activation_code"]).json()
+        _activate(app, issued["activation_code"])
         with app.state.database.session() as session:
             record = session.get(ActivationCodeRecord, issued["code_id"])
             record.expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
         assert _activate(app, issued["activation_code"]).status_code == 403
-        denied = _request(
-            app,
-            "GET",
-            "/v1/models/manifest?platform=windows&architecture=x86_64",
-            headers={"Authorization": f"Bearer {grant['access_token']}"},
-        )
-        assert denied.status_code == 401
     finally:
         app.state.database.close()
 

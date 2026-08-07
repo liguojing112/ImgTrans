@@ -10,10 +10,7 @@ import pytest
 
 from src.domain.image import ImageFileFormat, ImageLimits, ImageValidationError
 from src.domain.models import ModelDeliveryError, ModelManifestEntry
-from src.infrastructure.model_delivery import (
-    FileModelRepository,
-    HttpRangeModelDownloader,
-)
+from src.infrastructure.model_delivery import FileModelRepository
 from src.infrastructure.pillow_image_codec import PillowImageCodec
 from src.platform.storage import StorageUnavailableError
 
@@ -22,16 +19,6 @@ class _UnavailableStorage:
     def ensure_available(self, directory, required_bytes, reserve_bytes=0):
         del directory, required_bytes, reserve_bytes
         raise StorageUnavailableError("disk_full", "可用磁盘空间不足，请释放空间后重试")
-
-
-class _RecordingStorage(_UnavailableStorage):
-    def __init__(self) -> None:
-        self.required = []
-
-    def ensure_available(self, directory, required_bytes, reserve_bytes=0):
-        del directory
-        self.required.append((required_bytes, reserve_bytes))
-        super().ensure_available(None, 0)
 
 
 def _entry(content: bytes) -> ModelManifestEntry:
@@ -65,53 +52,6 @@ def test_export_disk_preflight_preserves_existing_target_and_sanitizes_error(
     assert error.value.code == "output_disk_full"
     assert target.read_bytes() == b"existing-safe-content"
     assert str(tmp_path) not in str(error.value)
-
-
-def test_model_download_disk_preflight_does_not_create_partial_files(
-    tmp_path: Path,
-) -> None:
-    content = b"model-content"
-    part = tmp_path / "download" / "model.part"
-    state = tmp_path / "download" / "model.json"
-    downloader = HttpRangeModelDownloader(storage_guard=_UnavailableStorage())
-
-    with pytest.raises(ModelDeliveryError, match="磁盘空间不足"):
-        downloader.download(_entry(content), part, state, lambda: False)
-    assert not part.exists()
-    assert not state.exists()
-
-
-def test_model_download_only_credits_a_trusted_resume_file(tmp_path: Path) -> None:
-    content = b"0123456789"
-    entry = _entry(content)
-    part = tmp_path / "model.part"
-    state = tmp_path / "model.json"
-    part.write_bytes(content[:4])
-    guard = _RecordingStorage()
-    downloader = HttpRangeModelDownloader(storage_guard=guard)
-
-    with pytest.raises(ModelDeliveryError):
-        downloader.download(entry, part, state, lambda: False)
-    assert guard.required[-1][0] == len(content)
-
-    state.write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "model_id": entry.model_id,
-                "version": entry.version,
-                "platform": entry.platform,
-                "architecture": entry.architecture,
-                "object_version": entry.object_version,
-                "size_bytes": entry.size_bytes,
-                "sha256": entry.sha256,
-            }
-        ),
-        encoding="utf-8",
-    )
-    with pytest.raises(ModelDeliveryError):
-        downloader.download(entry, part, state, lambda: False)
-    assert guard.required[-1][0] == len(content) - 4
 
 
 def test_model_install_disk_preflight_preserves_previous_active_version(

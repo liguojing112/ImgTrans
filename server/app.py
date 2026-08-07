@@ -17,7 +17,6 @@ from server.api.contracts import ApiError, ErrorResponse
 from server.api.activation import activation_router, admin_activation_router
 from server.api.correlation import CORRELATION_HEADER, normalize_correlation_id
 from server.api.image_limits import admin_image_limits_router, client_config_router
-from server.api.models import admin_models_router, model_manifest_router
 from server.api.payment import admin_payment_router, payment_router
 from server.api.product_llm import llm_router
 from server.api.routes import health_router, v1_router
@@ -34,7 +33,6 @@ from server.application.activation import (
 )
 from server.application.audit import AuditManagementAction
 from server.application.admin_users import ManageAdminUsers
-from server.application.models import GetModelManifest, ManageModelReleases, ObjectStorageSigner
 from server.application.payment import (
     CreatePaymentOrder,
     GetPaymentOrder,
@@ -76,11 +74,6 @@ from server.domain.image_limits import (
     ImageLimitError,
     ImageLimitNotFound,
 )
-from server.domain.models import (
-    ModelReleaseConflict,
-    ModelReleaseError,
-    ModelReleaseNotFound,
-)
 from server.domain.payment import (
     PaymentConflict,
     PaymentError,
@@ -90,18 +83,12 @@ from server.infrastructure.microsoft_translator import (
     MicrosoftTranslatorAdapter,
     UnavailableTranslationProvider,
 )
-from server.infrastructure.model_repository import SqlAlchemyModelReleaseRepository
-from server.infrastructure.object_storage import (
-    UnavailableObjectStorageSigner,
-    create_s3_signer,
-)
 
 
 def create_app(
     settings: ServerSettings | None = None,
     database: Database | None = None,
     translation_provider: TranslationProvider | None = None,
-    object_storage_signer: ObjectStorageSigner | None = None,
 ) -> FastAPI:
     settings = settings or ServerSettings.from_env()
     database = database or Database(settings.database_url)
@@ -155,24 +142,6 @@ def create_app(
     app.state.get_client_config = GetClientConfig(
         image_limit_repository,
         settings.client_config_ttl_seconds,
-    )
-    model_repository = SqlAlchemyModelReleaseRepository(database)
-    app.state.manage_model_releases = ManageModelReleases(model_repository)
-    if object_storage_signer is None:
-        if settings.object_storage_endpoint is not None:
-            object_storage_signer = create_s3_signer(
-                endpoint=settings.object_storage_endpoint,
-                region=settings.object_storage_region,
-                bucket=settings.object_storage_bucket or "",
-                access_key=settings.object_storage_access_key or "",
-                secret_key=settings.object_storage_secret_key or "",
-                ttl_seconds=settings.model_download_url_ttl_seconds,
-            )
-        else:
-            object_storage_signer = UnavailableObjectStorageSigner()
-    app.state.get_model_manifest = GetModelManifest(
-        model_repository,
-        object_storage_signer,
     )
     settings_cipher = SecretsCipher.load(
         Path(__file__).resolve().parent.parent / "config" / "settings-key.bin"
@@ -358,12 +327,12 @@ def create_app(
     async def domain_error(request: Request, error: ValueError) -> JSONResponse:
         if isinstance(
             error,
-            (ActivationNotFound, ImageLimitNotFound, ModelReleaseNotFound),
+            (ActivationNotFound, ImageLimitNotFound),
         ):
             status_code = 404
         elif isinstance(
             error,
-            (ActivationConflict, ImageLimitConflict, ModelReleaseConflict),
+            (ActivationConflict, ImageLimitConflict),
         ):
             status_code = 409
         else:
@@ -375,7 +344,7 @@ def create_app(
             str(error),
         )
 
-    for error_type in (ActivationError, ImageLimitError, ModelReleaseError, PaymentError):
+    for error_type in (ActivationError, ImageLimitError, PaymentError):
         app.add_exception_handler(error_type, domain_error)
 
     app.include_router(health_router)
@@ -383,8 +352,6 @@ def create_app(
     app.include_router(client_config_router)
     app.include_router(admin_image_limits_router)
     app.include_router(translation_router)
-    app.include_router(model_manifest_router)
-    app.include_router(admin_models_router)
     app.include_router(activation_router)
     app.include_router(admin_activation_router)
     app.include_router(payment_router)

@@ -34,7 +34,6 @@ from src.application.composition import (
 )
 from src.application.image_io import ExportImage, ImportImage
 from src.application.image_limits import ImageLimitsRefreshResult
-from src.domain.models import ModelUpdateResult
 from src.domain.activation import ActivationSession
 from src.application.inpainting import RepairTranslatedRegions
 from src.application.manual_region import ProcessManualRegion
@@ -120,7 +119,6 @@ class MainWindow(QMainWindow):
         export_batch_selection: ExportBatchSelection | None = None,
         confirm_discard: Callable[[str], bool] | None = None,
         refresh_image_limits: Callable[[], ImageLimitsRefreshResult] | None = None,
-        update_models: Callable[[], ModelUpdateResult] | None = None,
         activate_device: Callable[[str], ActivationSession] | None = None,
         activation_status: Callable[[], ActivationSession | None] | None = None,
         clear_activation: Callable[[], None] | None = None,
@@ -153,7 +151,6 @@ class MainWindow(QMainWindow):
         self._export_batch_selection = export_batch_selection
         self._confirm_discard_callback = confirm_discard
         self._refresh_image_limits = refresh_image_limits
-        self._update_models = update_models
         self._activate_device = activate_device
         self._activation_status = activation_status
         self._clear_activation = clear_activation
@@ -178,7 +175,6 @@ class MainWindow(QMainWindow):
         self.last_error: str | None = None
         self._activation_dialog: ActivationDialog | None = None
         self._image_limits_refresh_running = False
-        self._model_update_running = False
         self._activation_check_running = False
         self.setObjectName("mainWindow")
         self.setWindowTitle(startup.product.name)
@@ -355,21 +351,6 @@ class MainWindow(QMainWindow):
         self._image_limits_refresh_running = False
         self.statusBar().showMessage(f"图片限制刷新失败：{error}", 7000)
 
-    def request_model_update(self) -> None:
-        if (
-            self._update_models is None
-            or self._task_runner is None
-            or self._model_update_running
-        ):
-            return
-        self._model_update_running = True
-        self.statusBar().showMessage("正在后台检查本地模型…")
-        self._task_runner.submit(
-            self._update_models,
-            self._model_update_finished,
-            self._model_update_failed,
-        )
-
     def show_activation_dialog(self) -> None:
         if (
             self._activate_device is None
@@ -425,8 +406,6 @@ class MainWindow(QMainWindow):
 
     def _activation_check_finished(self, result: object) -> None:
         self._activation_check_running = False
-        if isinstance(result, ActivationSession):
-            self.request_model_update()
 
     def _activation_check_failed(self, error: Exception) -> None:
         self._activation_check_running = False
@@ -438,12 +417,9 @@ class MainWindow(QMainWindow):
         self.request_image_limits_refresh()
         if self._activation_status is not None:
             self.request_activation_check()
-        else:
-            self.request_model_update()
 
     def _activation_succeeded(self, _session: ActivationSession) -> None:
         self.statusBar().showMessage("设备激活成功，安全凭据已保存", 8000)
-        self.request_model_update()
 
     def _activation_cleared(self) -> None:
         self.statusBar().showMessage("本机激活凭据已清除", 6000)
@@ -490,25 +466,6 @@ class MainWindow(QMainWindow):
             product_window.close()
             self._product_window = None
         self.show()
-
-    def _model_update_finished(self, result: ModelUpdateResult) -> None:
-        self._model_update_running = False
-        if result.failed_count:
-            self.statusBar().showMessage(
-                f"模型检查完成：{result.failed_count} 项失败，继续保留旧版本",
-                8000,
-            )
-        elif result.installed_count:
-            self.statusBar().showMessage(
-                f"已安全安装 {result.installed_count} 个模型，新版本将在下次启动加载",
-                8000,
-            )
-        else:
-            self.statusBar().showMessage("本地模型已是最新版本", 5000)
-
-    def _model_update_failed(self, error: Exception) -> None:
-        self._model_update_running = False
-        self.statusBar().showMessage(f"模型更新不可用，继续使用本地版本：{error}", 8000)
 
     def request_import(self, source: Path) -> None:
         if not self._import_image or not self._task_runner:

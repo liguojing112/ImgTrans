@@ -112,8 +112,6 @@ def test_subuser_login_and_permission_gating() -> None:
 
             # 有 activation 权限 → 可访问
             assert (await client.get("/admin/activation")).status_code == 200
-            # 无 models 权限 → 403
-            assert (await client.get("/admin/models")).status_code == 403
             # 无 image_limits / translation / audit → 403
             assert (await client.get("/admin/image-limits")).status_code == 403
             assert (await client.get("/admin/translation")).status_code == 403
@@ -123,7 +121,6 @@ def test_subuser_login_and_permission_gating() -> None:
 
             # 导航不包含无权限模块链接
             page = await client.get("/admin/activation")
-            assert "/admin/models" not in page.text
             assert "/admin/users" not in page.text
             assert "修改密码" in page.text
 
@@ -141,20 +138,20 @@ def test_super_admin_grants_and_revokes_permissions() -> None:
         async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
             csrf = await _login(client, USERNAME, PASSWORD)
 
-            # 授予 models 权限
+            # 授予 translation 权限
             resp = await client.post(
                 f"/admin/users/{sub.user_id}/permissions",
                 data={
                     "csrf_token": csrf,
                     "perm_activation": "true",
-                    "perm_models": "true",
+                    "perm_translation": "true",
                 },
                 follow_redirects=False,
             )
             assert resp.status_code == 303
             refreshed = app.state.manage_admin_users.list_all()
             target = next(u for u in refreshed if u.username == SUB_USERNAME)
-            assert target.permissions == frozenset({"activation", "models"})
+            assert target.permissions == frozenset({"activation", "translation"})
 
             # 清空全部权限
             resp = await client.post(

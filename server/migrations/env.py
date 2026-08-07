@@ -9,7 +9,6 @@ from server.infrastructure import (
     activation_repository,
     audit_repository,
     image_limits_repository,
-    model_repository,
 )
 
 

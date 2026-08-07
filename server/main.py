@@ -146,7 +146,6 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "/v1/service-info",
                 "/v1/client-config",
                 "/v1/translations",
-                "/v1/models/manifest",
                 "/v1/activations/validate",
                 "/admin/login",
             }
