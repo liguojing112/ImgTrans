@@ -356,3 +356,24 @@ def test_native_prepay_raises_when_no_code_url(monkeypatch) -> None:
         assert False, "缺 code_url 应抛 PaymentConflict"
     except PaymentConflict as error:
         assert "付款二维码" in str(error)
+
+
+def test_parse_notify_flattens_resource(monkeypatch) -> None:
+    gateway = WechatPayV3Gateway(lambda: {"configured": True})
+
+    class _FakeCallbackClient:
+        def callback(self, headers, body):
+            return {
+                "event_type": "TRANSACTION.SUCCESS",
+                "resource": {
+                    "out_trade_no": "order123",
+                    "trade_state": "SUCCESS",
+                    "amount": {"total": 1},
+                },
+            }
+
+    monkeypatch.setattr(gateway, "_pay", lambda: _FakeCallbackClient())
+    notify = gateway.parse_notify(b"{}", {})
+    assert notify["out_trade_no"] == "order123"
+    assert notify["trade_state"] == "SUCCESS"
+    assert notify["amount"]["total"] == 1

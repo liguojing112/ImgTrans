@@ -42,7 +42,15 @@ class WechatPayV3Gateway:
 
     def parse_notify(self, body: bytes, headers: dict[str, str]) -> dict:
         result = self._pay().callback(headers, body)
-        return result if isinstance(result, dict) else {}
+        if not isinstance(result, dict):
+            return {}
+        # wechatpayv3 把交易字段（out_trade_no/trade_state/amount 等）放在
+        # resource 子对象里，合并到顶层供 HandlePaymentCallback 读取
+        resource = result.get("resource")
+        if isinstance(resource, dict):
+            result = dict(result)
+            result.update(resource)
+        return result
 
     def _pay(self):
         config = self._provider()
