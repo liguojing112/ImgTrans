@@ -268,6 +268,33 @@ class EditorMainWindow(QMainWindow):
         renew_action = QAction("续购时长/次数…", self)
         renew_action.triggered.connect(self._open_renew_dialog)
         account_menu.addAction(renew_action)
+        quota_action = QAction("查看额度…", self)
+        quota_action.triggered.connect(self._show_quota_dialog)
+        account_menu.addAction(quota_action)
+
+    def _show_quota_dialog(self) -> None:
+        session = self._activation_status() if self._activation_status else None
+        if session is None or not session.active:
+            from PySide6.QtWidgets import QMessageBox
+
+            QMessageBox.warning(self, "提示", "请先激活后，再查看额度")
+            return
+        refresh_usage = None
+        if self._quota_client is not None:
+            token = session.access_token
+            refresh_usage = lambda: self._quota_client.get_usage(token)
+        from src.ui.quota_dialog import QuotaDialog
+
+        dialog = QuotaDialog(
+            session.code or "",
+            session.expires_at,
+            session.quota_total,
+            session.quota_remaining,
+            refresh_usage=refresh_usage,
+            task_runner=self._task_runner,
+            parent=self,
+        )
+        dialog.show()
 
     def show_activation_dialog(self) -> None:
         if (
