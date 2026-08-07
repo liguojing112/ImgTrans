@@ -153,12 +153,13 @@
 <p class="muted">共 {{ total }} 条激活码</p>
 <table><tr><th>激活码</th><th>方案</th><th>方案名称</th><th>状态</th><th>激活日期</th><th>过期时间</th><th>剩余次数</th><th>操作</th></tr>{% for item in codes %}<tr><td>{% if item.plaintext %}<code>{{ item.plaintext }}</code> <button data-copy="{{ item.plaintext }}">复制</button>{% else %}<span class="muted">不可见</span>{% endif %}</td><td>{{ item.plan_id }}</td><td>{{ plan_names.get(item.plan_id, "-") }}</td><td>{{ "已停用" if item.disabled else ("已绑定" if item.bound else "未绑定") }}</td><td>{{ item.activated_at.strftime("%Y-%m-%d %H:%M") if item.activated_at else "-" }}</td><td>{{ item.expires_at.strftime("%Y-%m-%d %H:%M") if item.expires_at else "-" }}</td><td>{{ item.quota_remaining }}/{{ item.quota_total }}</td><td>{% if item.disabled %}<form method="post" action="/admin/activation/codes/{{ item.code_id }}/enable"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button>启用</button></form>{% else %}<form method="post" action="/admin/activation/codes/{{ item.code_id }}/disable"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button>停用</button></form>{% endif %}</td></tr>{% endfor %}</table>
 {% if search and not codes %}<p class="muted">未找到匹配的激活码</p>{% endif %}
-{% if pages > 1 %}
-<div class="pagination">
-  {% if page > 1 %}<a href="/admin/activation?page={{ page - 1 }}{% if status != 'all' %}&amp;status={{ status }}{% endif %}{% if search %}&amp;q={{ search }}{% endif %}">上一页</a>{% endif %}
-  <span>第 {{ page }} / {{ pages }} 页</span>
-  {% if page < pages %}<a href="/admin/activation?page={{ page + 1 }}{% if status != 'all' %}&amp;status={{ status }}{% endif %}{% if search %}&amp;q={{ search }}{% endif %}">下一页</a>{% endif %}
-</div>
-{% endif %}
+<nav class="pagination" aria-label="激活码记录分页">
+  <span class="pagination-summary">共 {{ total }} 条 · 每页 {{ page_size }} 条 · 第 {{ page }}/{{ pages }} 页</span>
+  <span class="pagination-controls">
+    {% if page > 1 %}<a class="page-button" href="/admin/activation?page={{ page - 1 }}{% if status != 'all' %}&amp;status={{ status }}{% endif %}{% if search %}&amp;q={{ search }}{% endif %}">上一页</a>{% else %}<span class="page-button disabled">上一页</span>{% endif %}
+    {% for number in page_numbers %}{% if number is none %}<span class="page-ellipsis">…</span>{% elif number == page %}<span class="page-button current">{{ number }}</span>{% else %}<a class="page-button" href="/admin/activation?page={{ number }}{% if status != 'all' %}&amp;status={{ status }}{% endif %}{% if search %}&amp;q={{ search }}{% endif %}">{{ number }}</a>{% endif %}{% endfor %}
+    {% if page < pages %}<a class="page-button" href="/admin/activation?page={{ page + 1 }}{% if status != 'all' %}&amp;status={{ status }}{% endif %}{% if search %}&amp;q={{ search }}{% endif %}">下一页</a>{% else %}<span class="page-button disabled">下一页</span>{% endif %}
+  </span>
+</nav>
 </section>
 {% endblock %}

@@ -10,6 +10,9 @@ from server.admin.security import SESSION_COOKIE, hash_admin_password, verify_pa
 from server.app import create_app
 from server.config import ServerSettings
 from server.infrastructure.database import Base, Database
+from server.infrastructure.payment_repository import SqlAlchemyPaymentRepository
+from server.domain.activation import ActivationPlanValues
+from server.domain.payment import PaymentOrder, PaymentStatus
 from server.domain.translation import TranslationProviderItem
 
 
@@ -134,6 +137,57 @@ def test_account_permissions_use_grouped_checkbox_picker() -> None:
             assert 'class="permission-option"' in page.text
             assert 'class="permission-check"' not in page.text
             assert 'name="perm_image_limits"' in page.text
+
+    try:
+        _run(scenario)
+    finally:
+        app.state.database.close()
+
+
+def test_payment_orders_show_snapshots_and_filter_refunded_activation_codes() -> None:
+    app = _app()
+    repository = SqlAlchemyPaymentRepository(app.state.database)
+    plan = app.state.manage_activation_plans.create(
+        ActivationPlanValues(
+            name="退款测试套餐",
+            amount_minor=5000,
+            currency="CNY",
+            duration_hours=24,
+            plan_type="combo",
+            quota=10,
+        )
+    )
+    issued = app.state.manage_activation_codes.issue(plan.plan_id, 1)[0]
+    repository.create(
+        PaymentOrder(
+            order_id="refunded-payment-order",
+            plan_id=plan.plan_id,
+            amount_minor=5000,
+            currency="CNY",
+            status=PaymentStatus.PAID,
+            code_id=issued.activation.code_id,
+            activation_code=issued.plaintext,
+            created_at=datetime.now(timezone.utc),
+            plan_type="combo",
+        )
+    )
+    app.state.manage_activation_codes.disable(issued.activation.code_id)
+
+    async def scenario():
+        transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://testserver"
+        ) as client:
+            await _login(client)
+            response = await client.get(
+                f"/admin/payments?activation_code={issued.plaintext}&status=refunded&amount=5000"
+            )
+            assert response.status_code == 200
+            assert "序号" in response.text
+            assert "组合包" in response.text
+            assert "¥50.00" in response.text
+            assert "已退款" in response.text
+            assert issued.plaintext in response.text
 
     try:
         _run(scenario)

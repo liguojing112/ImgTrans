@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from datetime import datetime, timezone
 
 import httpx
 
@@ -25,7 +26,7 @@ from server.application.payment import (
 )
 from server.config import ServerSettings
 from server.domain.activation import ActivationPlanValues
-from server.domain.payment import PaymentConflict, PaymentStatus
+from server.domain.payment import PaymentConflict, PaymentOrder, PaymentStatus
 from server.infrastructure.activation_repository import SqlAlchemyActivationRepository
 from server.infrastructure.database import Base, Database
 from server.infrastructure.payment_repository import SqlAlchemyPaymentRepository
@@ -286,6 +287,51 @@ def test_create_order_uses_original_price_after_sale_ends() -> None:
     )
     order, _ = app.state.create_payment_order.execute(plan.plan_id)
     assert order.amount_minor == 3000
+
+
+def test_order_listing_persists_type_and_filters_historical_order_data() -> None:
+    database = Database("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(database.engine)
+    repository = SqlAlchemyPaymentRepository(database)
+    now = datetime.now(timezone.utc)
+    try:
+        repository.create(
+            PaymentOrder(
+                order_id="duration-order",
+                plan_id=1,
+                amount_minor=3000,
+                currency="CNY",
+                status=PaymentStatus.PAID,
+                code_id=None,
+                activation_code="IT-DURATION",
+                created_at=now,
+                plan_type="duration",
+            )
+        )
+        repository.create(
+            PaymentOrder(
+                order_id="combo-order",
+                plan_id=999,
+                amount_minor=5000,
+                currency="CNY",
+                status=PaymentStatus.CREATED,
+                code_id=None,
+                activation_code="IT-COMBO",
+                created_at=now,
+                plan_type="combo",
+            )
+        )
+
+        orders, total = repository.list_page(
+            activation_code="COMBO", status="created", amount_minor=5000
+        )
+
+        assert total == 1
+        assert orders[0].order_id == "combo-order"
+        assert orders[0].plan_type == "combo"
+        assert repository.list_amounts() == ((3000, "CNY"), (5000, "CNY"))
+    finally:
+        database.close()
 
 
 def test_plans_api_includes_promotion() -> None:

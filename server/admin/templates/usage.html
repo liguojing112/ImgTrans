@@ -17,12 +17,13 @@
 {% endfor %}
 </table>
 {% if search and not records %}<p class="muted">未找到匹配的用量记录</p>{% endif %}
-{% if pages > 1 %}
-<div class="pagination">
-  {% if page > 1 %}<a href="/admin/usage?page={{ page - 1 }}{% if search %}&amp;q={{ search }}{% endif %}">上一页</a>{% endif %}
-  <span>第 {{ page }} / {{ pages }} 页</span>
-  {% if page < pages %}<a href="/admin/usage?page={{ page + 1 }}{% if search %}&amp;q={{ search }}{% endif %}">下一页</a>{% endif %}
-</div>
-{% endif %}
+<nav class="pagination" aria-label="用量记录分页">
+  <span class="pagination-summary">共 {{ total }} 条 · 每页 {{ page_size }} 条 · 第 {{ page }}/{{ pages }} 页</span>
+  <span class="pagination-controls">
+    {% if page > 1 %}<a class="page-button" href="/admin/usage?page={{ page - 1 }}{% if search %}&amp;q={{ search }}{% endif %}">上一页</a>{% else %}<span class="page-button disabled">上一页</span>{% endif %}
+    {% for number in page_numbers %}{% if number is none %}<span class="page-ellipsis">…</span>{% elif number == page %}<span class="page-button current">{{ number }}</span>{% else %}<a class="page-button" href="/admin/usage?page={{ number }}{% if search %}&amp;q={{ search }}{% endif %}">{{ number }}</a>{% endif %}{% endfor %}
+    {% if page < pages %}<a class="page-button" href="/admin/usage?page={{ page + 1 }}{% if search %}&amp;q={{ search }}{% endif %}">下一页</a>{% else %}<span class="page-button disabled">下一页</span>{% endif %}
+  </span>
+</nav>
 </section>
 {% endblock %}

@@ -114,7 +114,10 @@ class AdminSecurity:
 
     def create_login_nonce(self) -> tuple[str, str]:
         nonce = secrets.token_urlsafe(24)
-        return nonce, self._sign("login", nonce)
+        return nonce, self.login_csrf_token(nonce)
+
+    def login_csrf_token(self, nonce: str) -> str:
+        return self._sign("login", nonce)
 
     def verify_login_csrf(self, nonce: str | None, token: str) -> bool:
         if nonce is None or len(nonce) > 256:

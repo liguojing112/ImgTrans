@@ -1,5 +1,13 @@
 {% extends "base.html" %}
 {% block content %}
 <h1>操作审计</h1>
-<section class="card"><table><tr><th>时间（北京时间）</th><th>管理员</th><th>动作</th><th>资源</th><th>状态</th><th>关联 ID</th></tr>{% for item in events %}<tr><td>{{ format_beijing_time(item.occurred_at) }}</td><td>{{ item.actor }}</td><td>{{ audit_labels.get(item.action, item.action) }}</td><td>{{ item.resource }}</td><td>{{ item.status_code }}</td><td><code>{{ item.correlation_id }}</code></td></tr>{% endfor %}</table></section>
+<section class="card"><table><tr><th>时间（北京时间）</th><th>管理员</th><th>动作</th><th>资源</th><th>状态</th><th>关联 ID</th></tr>{% for item in events %}<tr><td>{{ format_beijing_time(item.occurred_at) }}</td><td>{{ item.actor }}</td><td>{{ audit_labels.get(item.action, item.action) }}</td><td>{{ item.resource }}</td><td>{{ item.status_code }}</td><td><code>{{ item.correlation_id }}</code></td></tr>{% else %}<tr><td colspan="6">暂无操作审计记录</td></tr>{% endfor %}</table>
+<nav class="pagination" aria-label="操作审计分页">
+  <span class="pagination-summary">共 {{ total }} 条 · 每页 {{ page_size }} 条 · 第 {{ page }}/{{ pages }} 页</span>
+  <span class="pagination-controls">
+    {% if page > 1 %}<a class="page-button" href="/admin/audit?page={{ page - 1 }}">上一页</a>{% else %}<span class="page-button disabled">上一页</span>{% endif %}
+    {% for number in page_numbers %}{% if number is none %}<span class="page-ellipsis">…</span>{% elif number == page %}<span class="page-button current">{{ number }}</span>{% else %}<a class="page-button" href="/admin/audit?page={{ number }}">{{ number }}</a>{% endif %}{% endfor %}
+    {% if page < pages %}<a class="page-button" href="/admin/audit?page={{ page + 1 }}">下一页</a>{% else %}<span class="page-button disabled">下一页</span>{% endif %}
+  </span>
+</nav></section>
 {% endblock %}

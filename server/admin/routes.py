@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, urlencode
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, HTTPException, Request, Response, status
@@ -43,7 +43,12 @@ def login_page(request: Request) -> Response:
     security = _security(request)
     if security.parse_session(request.cookies.get(SESSION_COOKIE)) is not None:
         return RedirectResponse("/admin", status_code=303)
-    nonce, csrf_token = security.create_login_nonce()
+    nonce = request.cookies.get(LOGIN_NONCE_COOKIE)
+    should_set_nonce = nonce is None or len(nonce) > 256
+    if should_set_nonce:
+        nonce, csrf_token = security.create_login_nonce()
+    else:
+        csrf_token = security.login_csrf_token(nonce)
     response = _render(
         "login.html",
         request,
@@ -51,15 +56,16 @@ def login_page(request: Request) -> Response:
         login_csrf=csrf_token,
         error=None,
     )
-    response.set_cookie(
-        LOGIN_NONCE_COOKIE,
-        nonce,
-        max_age=600,
-        httponly=True,
-        secure=_secure_cookie(request),
-        samesite="strict",
-        path="/admin",
-    )
+    if should_set_nonce:
+        response.set_cookie(
+            LOGIN_NONCE_COOKIE,
+            nonce,
+            max_age=600,
+            httponly=True,
+            secure=_secure_cookie(request),
+            samesite="strict",
+            path="/admin",
+        )
     return response
 
 
@@ -337,11 +343,12 @@ async def issue_activation_codes(request: Request) -> Response:
 
 @admin_router.post("/activation/codes/{code_id}/disable")
 async def disable_activation_code(code_id: str, request: Request) -> Response:
-    session, _ = await _protected_form(request)
+    session, form = await _protected_form(request)
     _require_permission(request, session, "activation")
     request.app.state.manage_activation_codes.disable(code_id)
     request.state.audit_action = "disable_activation_code"
-    return _redirect("/admin/activation")
+    target = form.get("next", "")
+    return _redirect(target if target.startswith("/admin/") else "/admin/activation")
 
 
 @admin_router.post("/activation/codes/{code_id}/enable")
@@ -392,14 +399,22 @@ def _format_beijing_time(value: datetime) -> str:
 def audit_page(request: Request) -> Response:
     session = _require_session(request)
     _require_permission(request, session, "audit")
+    page = max(1, _query_int(request, "page", 1))
+    events, total = request.app.state.audit_management.list_page(page, _RECORD_PAGE_SIZE)
+    pages = max(1, -(-total // _RECORD_PAGE_SIZE))
     return _render_protected(
         "audit.html",
         request,
         session,
         title="操作审计",
-        events=request.app.state.audit_management.list_recent(),
+        events=events,
         audit_labels=_AUDIT_LABELS,
         format_beijing_time=_format_beijing_time,
+        page=page,
+        pages=pages,
+        total=total,
+        page_size=_RECORD_PAGE_SIZE,
+        page_numbers=_pagination_numbers(page, pages),
     )
 
 
@@ -412,16 +427,43 @@ def payments_page(request: Request) -> Response:
     _require_permission(request, session, "payments")
     listing = getattr(request.app.state, "list_payment_orders", None)
     page = max(1, _query_int(request, "page", 1))
-    search = (request.query_params.get("q") or "").strip() or None
+    activation_code = (
+        request.query_params.get("activation_code") or ""
+    ).strip() or None
+    status = (request.query_params.get("status") or "").strip()
+    if status not in {"", "created", "paid", "cancelled", "refunded"}:
+        status = ""
+    amount_minor = _optional_query_int(request, "amount")
     orders, total = (
-        listing.execute(page, _PAGE_SIZE, search)
+        listing.execute(
+            page,
+            _RECORD_PAGE_SIZE,
+            activation_code=activation_code,
+            status=status or None,
+            amount_minor=amount_minor,
+        )
         if listing is not None
         else ((), 0)
     )
-    pages = max(1, -(-total // _PAGE_SIZE))
+    pages = max(1, -(-total // _RECORD_PAGE_SIZE))
     code_states = request.app.state.manage_activation_codes.states(
         tuple(order.code_id for order in orders if order.code_id)
     )
+    order_statuses = {
+        order.order_id: (
+            "refunded"
+            if order.status.value == "paid" and code_states.get(order.code_id)
+            else order.status.value
+        )
+        for order in orders
+    }
+    amounts = listing.list_amounts() if listing is not None else ()
+    filters = {
+        "activation_code": activation_code or "",
+        "status": status,
+        "amount": "" if amount_minor is None else str(amount_minor),
+    }
+    payment_query = urlencode({key: value for key, value in filters.items() if value})
     return _render_protected(
         "payments.html",
         request,
@@ -431,7 +473,26 @@ def payments_page(request: Request) -> Response:
         page=page,
         pages=pages,
         total=total,
-        search=search or "",
+        activation_code=activation_code or "",
+        status=status,
+        amount_minor=amount_minor,
+        amounts=amounts,
+        payment_query=payment_query,
+        payment_statuses={
+            "created": "待支付",
+            "paid": "已支付",
+            "cancelled": "已取消",
+            "refunded": "已退款",
+        },
+        order_statuses=order_statuses,
+        plan_types={
+            "duration": "时长包",
+            "quota": "次数包",
+            "combo": "组合包",
+            "unknown": "未知（历史订单）",
+        },
+        page_size=_RECORD_PAGE_SIZE,
+        page_numbers=_pagination_numbers(page, pages),
         code_states=code_states,
     )
 
@@ -502,11 +563,11 @@ def usage_page(request: Request) -> Response:
     page = max(1, _query_int(request, "page", 1))
     search = (request.query_params.get("q") or "").strip() or None
     records, total = (
-        manage.list_page(page, _PAGE_SIZE, search)
+        manage.list_page(page, _RECORD_PAGE_SIZE, search)
         if manage is not None
         else ((), 0)
     )
-    pages = max(1, -(-total // _PAGE_SIZE))
+    pages = max(1, -(-total // _RECORD_PAGE_SIZE))
     return _render_protected(
         "usage.html",
         request,
@@ -517,6 +578,8 @@ def usage_page(request: Request) -> Response:
         pages=pages,
         total=total,
         search=search or "",
+        page_size=_RECORD_PAGE_SIZE,
+        page_numbers=_pagination_numbers(page, pages),
     )
 
 
@@ -767,9 +830,9 @@ def _activation_response(
     status = (request.query_params.get("status") or "").strip() or None
     search = (request.query_params.get("q") or "").strip()
     codes, total = request.app.state.manage_activation_codes.list_page(
-        page, _PAGE_SIZE, status, search or None
+        page, _ACTIVATION_PAGE_SIZE, status, search or None
     )
-    pages = max(1, -(-total // _PAGE_SIZE))
+    pages = max(1, -(-total // _ACTIVATION_PAGE_SIZE))
     plans = request.app.state.manage_activation_plans.list_all()
     return _render_protected(
         "activation.html",
@@ -786,6 +849,8 @@ def _activation_response(
         page=page,
         pages=pages,
         total=total,
+        page_size=_ACTIVATION_PAGE_SIZE,
+        page_numbers=_pagination_numbers(page, pages),
         error=error,
     )
 
@@ -832,7 +897,22 @@ def _required(form: dict[str, str], name: str) -> str:
     return value
 
 
-_PAGE_SIZE = 50
+_ACTIVATION_PAGE_SIZE = 10
+_RECORD_PAGE_SIZE = 20
+
+
+def _pagination_numbers(page: int, pages: int) -> tuple[int | None, ...]:
+    if pages <= 7:
+        return tuple(range(1, pages + 1))
+    visible = {1, pages, page, max(1, page - 1), min(pages, page + 1)}
+    numbers: list[int | None] = []
+    previous = 0
+    for value in sorted(visible):
+        if value - previous > 1:
+            numbers.append(None)
+        numbers.append(value)
+        previous = value
+    return tuple(numbers)
 
 
 def _query_int(request: Request, name: str, default: int) -> int:
@@ -843,6 +923,17 @@ def _query_int(request: Request, name: str, default: int) -> int:
         return int(raw)
     except ValueError:
         return default
+
+
+def _optional_query_int(request: Request, name: str) -> int | None:
+    raw = (request.query_params.get(name) or "").strip()
+    if not raw:
+        return None
+    try:
+        value = int(raw)
+    except ValueError:
+        return None
+    return value if value >= 0 else None
 
 
 def _integer(form: dict[str, str], name: str) -> int:

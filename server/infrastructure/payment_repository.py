@@ -7,6 +7,7 @@ from sqlalchemy import BigInteger, DateTime, Integer, String, func, or_, select,
 from sqlalchemy.orm import Mapped, mapped_column
 
 from server.domain.payment import PaymentOrder, PaymentStatus
+from server.infrastructure.activation_repository import ActivationCodeRecord
 from server.infrastructure.database import Base, Database
 
 
@@ -15,6 +16,7 @@ class PaymentOrderRecord(Base):
 
     order_id: Mapped[str] = mapped_column(String(32), primary_key=True)
     plan_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    plan_type: Mapped[str] = mapped_column(String(10), nullable=False, default="unknown")
     amount_minor: Mapped[int] = mapped_column(BigInteger, nullable=False)
     currency: Mapped[str] = mapped_column(String(3), nullable=False)
     status: Mapped[str] = mapped_column(String(16), nullable=False)
@@ -34,6 +36,7 @@ class SqlAlchemyPaymentRepository:
         record = PaymentOrderRecord(
             order_id=order.order_id,
             plan_id=order.plan_id,
+            plan_type=order.plan_type,
             amount_minor=order.amount_minor,
             currency=order.currency,
             status=order.status.value,
@@ -88,6 +91,9 @@ class SqlAlchemyPaymentRepository:
         page: int = 1,
         page_size: int = 50,
         search: str | None = None,
+        activation_code: str | None = None,
+        status: str | None = None,
+        amount_minor: int | None = None,
     ) -> tuple[list[PaymentOrder], int]:
         """分页查询订单，可按订单号或激活码搜索。返回 (订单列表, 总数)。"""
         with self._database.session() as session:
@@ -100,6 +106,29 @@ class SqlAlchemyPaymentRepository:
                         PaymentOrderRecord.activation_code.ilike(like),
                     )
                 )
+            if activation_code:
+                statement = statement.where(
+                    PaymentOrderRecord.activation_code.ilike(
+                        f"%{activation_code.strip()}%"
+                    )
+                )
+            if amount_minor is not None:
+                statement = statement.where(
+                    PaymentOrderRecord.amount_minor == amount_minor
+                )
+            if status == "refunded":
+                statement = (
+                    statement.join(
+                        ActivationCodeRecord,
+                        ActivationCodeRecord.code_id == PaymentOrderRecord.code_id,
+                    )
+                    .where(
+                        PaymentOrderRecord.status == PaymentStatus.PAID.value,
+                        ActivationCodeRecord.disabled.is_(True),
+                    )
+                )
+            elif status in {item.value for item in PaymentStatus}:
+                statement = statement.where(PaymentOrderRecord.status == status)
             total = (
                 session.scalar(select(func.count()).select_from(statement.subquery()))
                 or 0
@@ -110,6 +139,18 @@ class SqlAlchemyPaymentRepository:
                 .limit(page_size)
             ).all()
             return [_to_order(record) for record in records], total
+
+    def list_amounts(self) -> tuple[tuple[int, str], ...]:
+        with self._database.session() as session:
+            rows = session.execute(
+                select(PaymentOrderRecord.amount_minor, PaymentOrderRecord.currency)
+                .distinct()
+                .order_by(
+                    PaymentOrderRecord.currency,
+                    PaymentOrderRecord.amount_minor,
+                )
+            ).all()
+            return tuple((amount_minor, currency) for amount_minor, currency in rows)
 
 
 def _to_order(record: PaymentOrderRecord) -> PaymentOrder:
@@ -123,4 +164,5 @@ def _to_order(record: PaymentOrderRecord) -> PaymentOrder:
         created_at=record.created_at,
         paid_at=record.paid_at,
         activation_code=record.activation_code,
+        plan_type=record.plan_type,
     )

@@ -59,6 +59,31 @@ async def _login(client: httpx.AsyncClient, username: str, password: str) -> str
     return _csrf(dashboard.text)
 
 
+def test_multiple_login_pages_keep_the_same_csrf_token() -> None:
+    app = _app()
+
+    async def scenario():
+        transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+            first_page = await client.get("/admin/login")
+            first_token = _csrf(first_page.text)
+            second_page = await client.get("/admin/login")
+            assert _csrf(second_page.text) == first_token
+
+            response = await client.post(
+                "/admin/login",
+                data={
+                    "csrf_token": first_token,
+                    "username": USERNAME,
+                    "password": PASSWORD,
+                },
+                follow_redirects=False,
+            )
+            assert response.status_code == 303
+
+    _run(scenario)
+
+
 def test_seed_super_user_is_created_from_env() -> None:
     app = _app()
     users = app.state.manage_admin_users.list_all()

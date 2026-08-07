@@ -35,8 +35,15 @@ class PaymentRepository(Protocol):
     ) -> None: ...
     def list_recent(self, limit: int = 100) -> list[PaymentOrder]: ...
     def list_page(
-        self, page: int = 1, page_size: int = 50, search: str | None = None
+        self,
+        page: int = 1,
+        page_size: int = 50,
+        search: str | None = None,
+        activation_code: str | None = None,
+        status: str | None = None,
+        amount_minor: int | None = None,
     ) -> tuple[list[PaymentOrder], int]: ...
+    def list_amounts(self) -> tuple[tuple[int, str], ...]: ...
 
 
 class CreatePaymentOrder:
@@ -94,6 +101,7 @@ class CreatePaymentOrder:
             status=PaymentStatus.CREATED,
             code_id=code_id,
             created_at=now,
+            plan_type=plan.values.plan_type,
         )
         self._orders.create(order)
         code_url = self._gateway.native_prepay(
@@ -171,6 +179,22 @@ class ListPaymentOrders:
         self._orders = order_repository
 
     def execute(
-        self, page: int = 1, page_size: int = 50, search: str | None = None
+        self,
+        page: int = 1,
+        page_size: int = 50,
+        search: str | None = None,
+        activation_code: str | None = None,
+        status: str | None = None,
+        amount_minor: int | None = None,
     ) -> tuple[list[PaymentOrder], int]:
-        return self._orders.list_page(page, page_size, search)
+        return self._orders.list_page(
+            page,
+            page_size,
+            search,
+            activation_code,
+            status,
+            amount_minor,
+        )
+
+    def list_amounts(self) -> tuple[tuple[int, str], ...]:
+        return self._orders.list_amounts()

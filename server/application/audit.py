@@ -19,6 +19,8 @@ class AuditRepository(Protocol):
 
     def list_recent(self, limit: int) -> tuple[AuditEvent, ...]: ...
 
+    def list_page(self, page: int, page_size: int) -> tuple[tuple[AuditEvent, ...], int]: ...
+
 
 class AuditManagementAction:
     def __init__(self, repository: AuditRepository) -> None:
@@ -45,4 +47,9 @@ class AuditManagementAction:
         if not 1 <= limit <= 1000:
             raise ValueError("Audit list limit is invalid")
         return self._repository.list_recent(limit)
+
+    def list_page(self, page: int, page_size: int) -> tuple[tuple[AuditEvent, ...], int]:
+        if page < 1 or not 1 <= page_size <= 1000:
+            raise ValueError("Audit page is invalid")
+        return self._repository.list_page(page, page_size)
 

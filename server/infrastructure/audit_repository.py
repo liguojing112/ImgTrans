@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, Integer, String, select
+from sqlalchemy import DateTime, Integer, String, func, select
 from sqlalchemy.orm import Mapped, mapped_column
 
 from server.domain.audit import AuditEvent
@@ -55,6 +55,17 @@ class SqlAlchemyAuditRepository:
                 .limit(limit)
             )
             return tuple(_to_domain(record) for record in records)
+
+    def list_page(self, page: int, page_size: int) -> tuple[tuple[AuditEvent, ...], int]:
+        with self._database.session() as session:
+            total = session.scalar(select(func.count()).select_from(AuditEventRecord)) or 0
+            records = session.scalars(
+                select(AuditEventRecord)
+                .order_by(AuditEventRecord.event_id.desc())
+                .offset((page - 1) * page_size)
+                .limit(page_size)
+            )
+            return tuple(_to_domain(record) for record in records), total
 
 
 def _to_domain(record: AuditEventRecord) -> AuditEvent:

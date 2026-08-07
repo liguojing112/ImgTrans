@@ -36,3 +36,4 @@ class PaymentOrder:
     created_at: datetime
     paid_at: datetime | None = None
     activation_code: str | None = None
+    plan_type: str = "unknown"
