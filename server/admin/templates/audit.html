@@ -1,5 +1,5 @@
 {% extends "base.html" %}
 {% block content %}
 <h1>操作审计</h1>
-<section class="card"><table><tr><th>时间</th><th>管理员</th><th>动作</th><th>资源</th><th>状态</th><th>关联 ID</th></tr>{% for item in events %}<tr><td>{{ item.occurred_at.strftime("%Y-%m-%d %H:%M:%S") }}</td><td>{{ item.actor }}</td><td>{{ audit_labels.get(item.action, item.action) }}</td><td>{{ item.resource }}</td><td>{{ item.status_code }}</td><td><code>{{ item.correlation_id }}</code></td></tr>{% endfor %}</table></section>
+<section class="card"><table><tr><th>时间（北京时间）</th><th>管理员</th><th>动作</th><th>资源</th><th>状态</th><th>关联 ID</th></tr>{% for item in events %}<tr><td>{{ format_beijing_time(item.occurred_at) }}</td><td>{{ item.actor }}</td><td>{{ audit_labels.get(item.action, item.action) }}</td><td>{{ item.resource }}</td><td>{{ item.status_code }}</td><td><code>{{ item.correlation_id }}</code></td></tr>{% endfor %}</table></section>
 {% endblock %}

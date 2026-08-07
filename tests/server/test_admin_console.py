@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+from datetime import datetime, timezone
 
 import httpx
 
@@ -126,7 +127,8 @@ def test_account_permissions_use_grouped_checkbox_picker() -> None:
             await _login(client)
             page = await client.get("/admin/users")
             assert page.status_code == 200
-            assert 'href="/admin/static/admin.css?v=2"' in page.text
+            assert 'href="/admin/static/admin.css?v=3"' in page.text
+            assert 'class="card user-create-card"' in page.text
             assert 'class="permission-picker"' in page.text
             assert 'class="permission-grid"' in page.text
             assert 'class="permission-option"' in page.text
@@ -363,6 +365,33 @@ def test_bearer_admin_api_write_is_audited_as_api_token() -> None:
             assert event.action == "post"
             assert event.resource == "/v1/admin/image-limits/drafts"
             assert event.status_code == 201
+
+    try:
+        _run(scenario)
+    finally:
+        app.state.database.close()
+
+
+def test_audit_page_formats_utc_events_as_beijing_time() -> None:
+    app = _app()
+    app.state.audit_management._repository.record(
+        actor="admin",
+        action="get",
+        resource="/admin/test",
+        correlation_id="audit-timezone-test",
+        status_code=200,
+        occurred_at=datetime(2026, 8, 8, 3, 4, 5, tzinfo=timezone.utc),
+    )
+
+    async def scenario():
+        transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+            await _login(client)
+            page = await client.get("/admin/audit")
+            assert page.status_code == 200
+            assert "时间（北京时间）" in page.text
+            assert "2026-08-08 11:04:05" in page.text
+            assert "2026-08-08 03:04:05" not in page.text
 
     try:
         _run(scenario)

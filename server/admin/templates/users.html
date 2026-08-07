@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block content %}
 <h1>账号管理</h1>
-<section class="card"><h2>新建客服子账号</h2>
+<section class="card user-create-card"><h2>新建客服子账号</h2>
 <form method="post" action="/admin/users" class="form-grid">
 <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
 <label>用户名<input name="username" pattern="[A-Za-z0-9._-]{1,64}" required></label>

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import parse_qs
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, HTTPException, Request, Response, status
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -31,6 +33,7 @@ _TEMPLATES = Environment(
     autoescape=select_autoescape(("html", "xml")),
 )
 _MAX_FORM_BYTES = 64 * 1024
+_BEIJING_TIMEZONE = ZoneInfo("Asia/Shanghai")
 
 admin_router = APIRouter(prefix="/admin", tags=["admin-console"])
 
@@ -379,6 +382,12 @@ _AUDIT_LABELS = {
 }
 
 
+def _format_beijing_time(value: datetime) -> str:
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(_BEIJING_TIMEZONE).strftime("%Y-%m-%d %H:%M:%S")
+
+
 @admin_router.get("/audit", response_class=HTMLResponse)
 def audit_page(request: Request) -> Response:
     session = _require_session(request)
@@ -390,6 +399,7 @@ def audit_page(request: Request) -> Response:
         title="操作审计",
         events=request.app.state.audit_management.list_recent(),
         audit_labels=_AUDIT_LABELS,
+        format_beijing_time=_format_beijing_time,
     )
 
 
