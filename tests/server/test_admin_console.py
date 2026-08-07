@@ -84,6 +84,40 @@ def test_password_hash_is_salted_and_verifies_without_embedding_password() -> No
     assert not verify_password("wrong-password-value", PASSWORD_HASH)
 
 
+def test_admin_pages_use_product_brand_and_serve_browser_icons() -> None:
+    app = _app()
+
+    async def scenario():
+        transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+        async with httpx.AsyncClient(
+            transport=transport,
+            base_url="http://testserver",
+        ) as client:
+            page = await client.get("/admin/login")
+            assert page.status_code == 200
+            assert "优译图AI 管理后台" in page.text
+            assert 'href="/admin/static/favicon.ico"' in page.text
+            assert 'src="/admin/static/imgtrans.png"' in page.text
+
+            favicon = await client.get("/admin/static/favicon.ico")
+            assert favicon.status_code == 200
+            assert favicon.headers["content-type"] in {
+                "image/vnd.microsoft.icon",
+                "image/x-icon",
+            }
+            assert favicon.content
+
+            logo = await client.get("/admin/static/imgtrans.png")
+            assert logo.status_code == 200
+            assert logo.headers["content-type"] == "image/png"
+            assert logo.content.startswith(b"\x89PNG\r\n\x1a\n")
+
+    try:
+        _run(scenario)
+    finally:
+        app.state.database.close()
+
+
 def test_admin_console_defaults_closed_and_unauthenticated_pages_redirect() -> None:
     app = _app(configured=False)
 

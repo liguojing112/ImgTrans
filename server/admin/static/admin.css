@@ -1,7 +1,8 @@
 :root { color-scheme: light; font-family: system-ui, sans-serif; background: #f4f6f8; color: #17202a; }
 body { margin: 0; }
 .topbar { display: flex; justify-content: space-between; padding: 1rem 2rem; background: #14213d; color: white; }
-.brand { color: white; font-weight: 700; text-decoration: none; }
+.brand { display: inline-flex; align-items: center; gap: .65rem; color: white; font-weight: 700; text-decoration: none; }
+.brand-logo { width: 32px; height: 32px; border-radius: 7px; object-fit: contain; }
 nav { display: flex; align-items: center; gap: 1rem; padding: .75rem 2rem; background: white; border-bottom: 1px solid #dfe4ea; }
 nav a { color: #1d4ed8; text-decoration: none; }
 nav form { margin-left: auto; }
