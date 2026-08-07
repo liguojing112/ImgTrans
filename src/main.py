@@ -96,7 +96,7 @@ def _create_translation_adapter(
 ) -> MockTranslationAdapter | ServerTranslationAdapter:
     translation_mode = os.environ.get(
         "IMGTRANS_TRANSLATION_MODE",
-        "mock",
+        "server",
     ).strip().lower()
     token_source = access_token or _create_access_token_source(activation)
 
