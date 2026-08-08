@@ -45,7 +45,7 @@ class StepAnalysis(QFrame):
         # 标题行
         header = QHBoxLayout()
         title = QLabel("第 2 步：AI 商品分析")
-        title.setStyleSheet("color: #212733; font-size: 18px; font-weight: 650;")
+        title.setObjectName("sectionTitle")
         header.addWidget(title)
         header.addStretch()
 
@@ -57,7 +57,7 @@ class StepAnalysis(QFrame):
             "  stop:0 #4a8af4, stop:1 #3973db);"
             "  color: #ffffff; border: 1px solid #5a9af4;"
             "  border-radius: 8px; padding: 8px 20px;"
-            "  font-size: 13px; font-weight: 600;"
+            " font-weight: 600;"
             "}"
             "QPushButton#primaryButton:hover {"
             "  background: qlineargradient(x1:0, y1:0, x2:0, y2:1,"
@@ -93,7 +93,7 @@ class StepAnalysis(QFrame):
         vision_layout = QVBoxLayout(self._vision_group)
         self._vision_content = QLabel("分析后将显示图片内容理解结果...")
         self._vision_content.setWordWrap(True)
-        self._vision_content.setStyleSheet("color: #626b7a; font-size: 12px;")
+        self._vision_content.setStyleSheet("color: #626b7a;")
         vision_layout.addWidget(self._vision_content)
         left_layout.addWidget(self._vision_group)
 
@@ -130,7 +130,7 @@ class StepAnalysis(QFrame):
             "  stop:0 #4a8af4, stop:1 #3973db);"
             "  color: #ffffff; border: 1px solid #5a9af4;"
             "  border-radius: 8px; padding: 10px 24px;"
-            "  font-size: 14px; font-weight: 600;"
+            " font-weight: 600;"
             "}"
             "QPushButton:hover {"
             "  background: qlineargradient(x1:0, y1:0, x2:0, y2:1,"
@@ -172,14 +172,14 @@ class StepAnalysis(QFrame):
             if u.background:
                 lines.append(f"背景: {u.background}")
             self._vision_content.setText("\n".join(lines))
-            self._vision_content.setStyleSheet("color: #626b7a; font-size: 12px;")
+            self._vision_content.setStyleSheet("color: #626b7a;")
         else:
             self._vision_content.setText(
                 "暂无图片理解结果\n\n"
                 "提示: 请检查 LLM 提供商设置是否正确。\n"
                 "当前使用的提供商和模型可能不支持 Vision 功能或 API Key 无效。"
             )
-            self._vision_content.setStyleSheet("color: #d97706; font-size: 12px;")
+            self._vision_content.setStyleSheet("color: #d97706;")
 
         # 事实编辑
         if result.product_fact:
@@ -189,7 +189,7 @@ class StepAnalysis(QFrame):
     def set_error(self, message: str) -> None:
         self._ocr_text.setPlainText("")
         self._vision_content.setText(f"分析失败:\n{message}")
-        self._vision_content.setStyleSheet("color: #dc2626; font-size: 12px;")
+        self._vision_content.setStyleSheet("color: #dc2626;")
 
     def current_fact(self) -> ProductFact | None:
         return self._fact

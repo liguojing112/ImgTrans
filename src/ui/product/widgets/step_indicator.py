@@ -61,7 +61,7 @@ class StepIndicator(QFrame):
                     "  background: qlineargradient(x1:0, y1:0, x2:0, y2:1,"
                     "  stop:0 #4a8af4, stop:1 #3973db);"
                     "  color: #ffffff; border: 1px solid #5a9af4;"
-                    "  font-size: 13px; font-weight: 600;"
+                    " font-weight: 600;"
                     "  padding: 8px 16px; border-radius: 6px;"
                     "}"
                 )
@@ -69,7 +69,7 @@ class StepIndicator(QFrame):
                 btn.setChecked(False)
                 btn.setStyleSheet(
                     "QPushButton#stepButton {"
-                    "  background: #ffffff; color: #626b7a; font-size: 13px;"
+                    "  background: #ffffff; color: #626b7a;"
                     "  border: 1px solid #d5d9e0; padding: 8px 16px;"
                     "  border-radius: 4px;"
                     "}"
@@ -81,7 +81,7 @@ class StepIndicator(QFrame):
                 btn.setChecked(False)
                 btn.setStyleSheet(
                     "QPushButton#stepButton {"
-                    "  background: #f4f5f7; color: #98a0ad; font-size: 13px;"
+                    "  background: #f4f5f7; color: #98a0ad;"
                     "  border: 1px solid #2e2e48; padding: 8px 16px;"
                     "  border-radius: 4px;"
                     "}"

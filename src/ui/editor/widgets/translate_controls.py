@@ -47,6 +47,13 @@ _LANGUAGE_DISPLAY = {
 }
 
 
+def _group_title(text: str) -> QLabel:
+    """功能分组标题（H3）。"""
+    label = QLabel(text)
+    label.setObjectName("groupTitle")
+    return label
+
+
 class TranslateControls(QFrame):
     """翻译配置控件 — 语言选择 + 品牌词 + 翻译按钮 + 进度 + 摘要 + 取消。"""
 
@@ -71,7 +78,7 @@ class TranslateControls(QFrame):
         layout.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
 
         title = QLabel("图片翻译")
-        title.setObjectName("propertyTitle")
+        title.setObjectName("pageTitle")
 
         # OCR 语言
         ocr_row = QHBoxLayout()
@@ -102,7 +109,7 @@ class TranslateControls(QFrame):
         ocr_mode_row.addWidget(ocr_mode_label)
         ocr_mode_row.addWidget(self.ocr_mode)
         self.ocr_mode_hint = QLabel()
-        self.ocr_mode_hint.setObjectName("propertyFieldLabel")
+        self.ocr_mode_hint.setObjectName("captionLabel")
         self.ocr_mode_hint.setWordWrap(True)
 
         self.high_recall_controls = QFrame()
@@ -113,7 +120,7 @@ class TranslateControls(QFrame):
         high_recall_hint = QLabel(
             "自动检测圆心和文字环带；需要时可填写圆心及内外半径。"
         )
-        high_recall_hint.setObjectName("propertyFieldLabel")
+        high_recall_hint.setObjectName("captionLabel")
         high_recall_hint.setWordWrap(True)
         high_recall_layout.addWidget(high_recall_hint)
         center_row = QHBoxLayout()
@@ -228,7 +235,7 @@ class TranslateControls(QFrame):
         )
 
         self.service_status = QLabel("翻译服务：启动时检测")
-        self.service_status.setObjectName("propertyFieldLabel")
+        self.service_status.setObjectName("captionLabel")
 
         terminology_label = QLabel("精确术语表（源词 => 目标词）")
         terminology_label.setObjectName("propertyFieldLabel")
@@ -236,7 +243,7 @@ class TranslateControls(QFrame):
         self.terminology_editor.setPlaceholderText("每行一条，例如：卡箍 => Clamp")
         self.terminology_editor.setMaximumHeight(92)
         self.terminology_status = QLabel("")
-        self.terminology_status.setObjectName("propertyFieldLabel")
+        self.terminology_status.setObjectName("captionLabel")
 
         # 翻译按钮
         self.translate_button = QPushButton("开始翻译")
@@ -257,7 +264,7 @@ class TranslateControls(QFrame):
 
         # 翻译提示（翻译开始后无法取消）
         self.translate_hint = QLabel("翻译开始后无法取消，请耐心等待完成")
-        self.translate_hint.setObjectName("propertyFieldLabel")
+        self.translate_hint.setObjectName("captionLabel")
         self.translate_hint.setWordWrap(True)
         self.translate_hint.setVisible(False)
 
@@ -270,35 +277,51 @@ class TranslateControls(QFrame):
         self.progress.setVisible(False)
 
         self.stage_label = QLabel("")
-        self.stage_label.setObjectName("propertyFieldLabel")
+        self.stage_label.setObjectName("captionLabel")
 
         # 翻译摘要 + 耗时
         self.summary_label = QLabel("")
-        self.summary_label.setObjectName("propertyFieldLabel")
+        self.summary_label.setObjectName("captionLabel")
         self.summary_label.setWordWrap(True)
         self.summary_label.setVisible(False)
 
         layout.addWidget(title)
         layout.addSpacing(4)
+
+        # —— 语言设置 ——
+        layout.addWidget(_group_title("语言设置"))
         layout.addLayout(ocr_row)
         layout.addLayout(ocr_mode_row)
         layout.addWidget(self.ocr_mode_hint)
         layout.addWidget(self.high_recall_controls)
+
+        # —— 翻译范围 ——
+        layout.addWidget(_group_title("翻译范围"))
         layout.addWidget(mode_label)
         layout.addWidget(self.all_mode_radio)
         layout.addWidget(self.specific_mode_radio)
         layout.addSpacing(2)
         layout.addLayout(src_row)
         layout.addLayout(tgt_row)
+
+        # —— 保护规则 ——
+        layout.addWidget(_group_title("保护规则"))
         layout.addLayout(brand_row)
         layout.addLayout(model_row)
         layout.addWidget(self.preserve_numbers)
+
+        # —— 识别与复核 ——
+        layout.addWidget(_group_title("识别与复核"))
         layout.addLayout(confidence_row)
         layout.addWidget(self.allow_low_confidence)
         layout.addWidget(self.service_status)
+
+        # —— 精准术语表 ——
+        layout.addWidget(_group_title("精准术语表"))
         layout.addWidget(terminology_label)
         layout.addWidget(self.terminology_editor)
         layout.addWidget(self.terminology_status)
+
         layout.addLayout(action_row)
         layout.addWidget(self.translate_hint)
         layout.addWidget(self.progress)

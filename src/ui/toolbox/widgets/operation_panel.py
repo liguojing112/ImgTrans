@@ -46,7 +46,7 @@ class OperationPanel(QFrame):
         layout.setSpacing(12)
 
         title = QLabel("操作设置")
-        title.setStyleSheet("color: #212733; font-size: 16px; font-weight: 650;")
+        title.setObjectName("sectionTitle")
         layout.addWidget(title)
 
         scroll = QScrollArea()
@@ -60,7 +60,7 @@ class OperationPanel(QFrame):
         # ── 裁剪 ─
         crop_group = QGroupBox("裁剪")
         crop_group.setStyleSheet(
-            "QGroupBox { color: #626b7a; font-size: 12px; border: 1px solid #d5d9e0;"
+            "QGroupBox { color: #626b7a; border: 1px solid #d5d9e0;"
             "  border-radius: 6px; margin-top: 8px; padding-top: 12px; }"
         )
         crop_outer = QVBoxLayout(crop_group)
@@ -174,7 +174,7 @@ class OperationPanel(QFrame):
         self._wm_list.setMaximumHeight(90)
         self._wm_list.setStyleSheet(
             "QListWidget { background: #e6e8ec; border: 1px solid #d5d9e0;"
-            "  border-radius: 4px; color: #212733; font-size: 12px; }"
+            "  border-radius: 4px; color: #212733; }"
         )
         self._wm_list.currentRowChanged.connect(self._on_wm_selected)
         wm_outer.addWidget(self._wm_list)
@@ -218,7 +218,7 @@ class OperationPanel(QFrame):
         self._wm_color_btn.clicked.connect(self._on_pick_color)
         self._wm_color_value = "#00FF00"
         self._wm_color_label = QLabel("■ #00FF00")
-        self._wm_color_label.setStyleSheet("color: #212733; font-size: 12px;")
+        self._wm_color_label.setStyleSheet("color: #212733;")
         color_row = QHBoxLayout()
         color_row.addWidget(self._wm_color_btn)
         color_row.addWidget(self._wm_color_label)
@@ -232,7 +232,7 @@ class OperationPanel(QFrame):
         wm_edit.addRow("透明度:", self._wm_opacity_w)
 
         self._wm_tiled = QCheckBox("平铺水印")
-        self._wm_tiled.setStyleSheet("color: #212733; font-size: 12px;")
+        self._wm_tiled.setStyleSheet("color: #212733;")
         self._wm_tiled.toggled.connect(self._on_wm_field_changed)
         wm_edit.addRow("", self._wm_tiled)
 
@@ -249,10 +249,10 @@ class OperationPanel(QFrame):
         wm_edit.addRow("位置:", self._wm_position)
 
         self._wm_flip_h = QCheckBox("水平翻转")
-        self._wm_flip_h.setStyleSheet("color: #212733; font-size: 12px;")
+        self._wm_flip_h.setStyleSheet("color: #212733;")
         self._wm_flip_h.toggled.connect(self._on_wm_field_changed)
         self._wm_flip_v = QCheckBox("垂直翻转")
-        self._wm_flip_v.setStyleSheet("color: #212733; font-size: 12px;")
+        self._wm_flip_v.setStyleSheet("color: #212733;")
         self._wm_flip_v.toggled.connect(self._on_wm_field_changed)
         flip_row = QHBoxLayout()
         flip_row.addWidget(self._wm_flip_h)
@@ -288,7 +288,7 @@ class OperationPanel(QFrame):
             "  stop:0 #4a8af4, stop:1 #3973db);"
             "  color: #ffffff; border: 1px solid #5a9af4;"
             "  border-radius: 8px; padding: 10px 20px;"
-            "  font-size: 13px; font-weight: 600;"
+            " font-weight: 600;"
             "}"
             "QPushButton#primaryButton:hover {"
             "  background: qlineargradient(x1:0, y1:0, x2:0, y2:1,"
@@ -307,7 +307,7 @@ class OperationPanel(QFrame):
     def _combo_style() -> str:
         return (
             "QComboBox { background: #ffffff; color: #212733; border: 1px solid #d5d9e0;"
-            "  padding: 4px 8px; border-radius: 4px; font-size: 12px; }"
+            "  padding: 4px 8px; border-radius: 4px; }"
             "QComboBox:hover { border-color: #3973db; }"
         )
 
@@ -315,7 +315,7 @@ class OperationPanel(QFrame):
     def _line_style() -> str:
         return (
             "QLineEdit { background: #ffffff; color: #212733; border: 1px solid #d5d9e0;"
-            "  padding: 4px 8px; border-radius: 4px; font-size: 12px; }"
+            "  padding: 4px 8px; border-radius: 4px; }"
         )
 
     @staticmethod
@@ -325,7 +325,7 @@ class OperationPanel(QFrame):
             "  background: qlineargradient(x1:0, y1:0, x2:0, y2:1,"
             "    stop:0 #4a8af4, stop:1 #3973db);"
             "  color: #ffffff; border: 1px solid #5a9af4;"
-            "  font-size: 11px; border-radius: 4px; padding: 3px 8px;"
+            " border-radius: 4px; padding: 3px 8px;"
             "}"
             "QPushButton:hover {"
             "  background: qlineargradient(x1:0, y1:0, x2:0, y2:1,"
@@ -346,7 +346,7 @@ class OperationPanel(QFrame):
     def _spin_no_buttons_style() -> str:
         return (
             "QSpinBox { background: #ffffff; color: #212733; border: 1px solid #d5d9e0;"
-            "  padding: 4px 6px; border-radius: 4px; font-size: 12px; }"
+            "  padding: 4px 6px; border-radius: 4px; }"
         )
 
     @staticmethod
@@ -374,7 +374,7 @@ class OperationPanel(QFrame):
         btn_smaller.setFixedSize(22, 16)
         btn_smaller.setStyleSheet(
             "QToolButton { background: #2a2a44; color: #212733;"
-            "  border: 1px solid #d5d9e0; border-radius: 4px; font-size: 11px; }"
+            "  border: 1px solid #d5d9e0; border-radius: 4px; }"
             "QToolButton:hover { background: #34345a; }"
             "QToolButton:pressed { background: #3a3a5e; }"
         )
@@ -387,7 +387,7 @@ class OperationPanel(QFrame):
         btn_larger.setFixedSize(22, 16)
         btn_larger.setStyleSheet(
             "QToolButton { background: #2a2a44; color: #212733;"
-            "  border: 1px solid #d5d9e0; border-radius: 4px; font-size: 11px; }"
+            "  border: 1px solid #d5d9e0; border-radius: 4px; }"
             "QToolButton:hover { background: #34345a; }"
             "QToolButton:pressed { background: #3a3a5e; }"
         )
@@ -593,7 +593,7 @@ class OperationPanel(QFrame):
         text_color = "#000000" if luminance > 150 else "#ffffff"
         self._wm_color_label.setText(f"■ {self._wm_color_value}")
         self._wm_color_label.setStyleSheet(
-            f"color: {text_color}; font-size: 12px;"
+            f"color: {text_color};"
             f"background: {self._wm_color_value}; padding: 2px 6px;"
             f"border-radius: 3px;"
         )

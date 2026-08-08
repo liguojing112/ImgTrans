@@ -25,16 +25,16 @@ QFrame#homeCard:disabled:hover {
 }
 QLabel#homeCardTitle {
     color: #212733;
-    font-size: 20px;
-    font-weight: 650;
+    font-size: 18px;
+    font-weight: 600;
 }
 QLabel#homeCardDesc {
     color: #626b7a;
-    font-size: 13px;
+    font-size: 12px;
 }
 QLabel#homeCardDisabled {
     color: #98a0ad;
-    font-size: 13px;
+    font-size: 12px;
 }
 """
 
@@ -47,15 +47,54 @@ QMainWindow[editorStyle="true"], QWidget[editorStyle="true"] {
     font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
 }
 
+/* === Typography tokens（统一字体层级） === */
+QLabel#pageTitle {
+    color: #212733;
+    font-size: 22px;
+    font-weight: 700;
+}
+QLabel#sectionTitle {
+    color: #212733;
+    font-size: 18px;
+    font-weight: 600;
+}
+QLabel#groupTitle {
+    color: #212733;
+    font-size: 15px;
+    font-weight: 600;
+}
+QLabel#fieldLabel {
+    color: #212733;
+    font-size: 14px;
+    font-weight: 500;
+}
+QLabel#captionLabel {
+    color: #626b7a;
+    font-size: 12px;
+    font-weight: 400;
+}
+QGroupBox {
+    font-size: 15px;
+    font-weight: 600;
+}
+/* 默认字体（Body）— 控件未显式分级时统一 14px */
+QLabel[editorStyle="true"] {
+    font-size: 14px;
+    font-weight: 500;
+}
+QPushButton[editorStyle="true"] {
+    font-size: 14px;
+}
+
 /* 首页标题 */
 QLabel#homeTitle {
     color: #212733;
-    font-size: 28px;
+    font-size: 22px;
     font-weight: 700;
 }
 QLabel#homeSubtitle {
     color: #626b7a;
-    font-size: 14px;
+    font-size: 12px;
 }
 
 /* 首页卡片 */
@@ -71,7 +110,7 @@ QFrame[editorStyle="true"]#homeCard:hover {
 QLabel#homeCardTitle {
     color: #212733;
     font-size: 18px;
-    font-weight: 650;
+    font-weight: 600;
 }
 QLabel#homeCardDesc {
     color: #626b7a;
@@ -104,7 +143,6 @@ QPushButton#toolButton {
     border: none;
     border-radius: 8px;
     padding: 4px;
-    font-size: 12px;
     min-width: 36px;
     min-height: 36px;
 }
@@ -157,16 +195,17 @@ QFrame#propertyPanel {
 }
 QLabel#propertyTitle {
     color: #212733;
-    font-size: 16px;
-    font-weight: 650;
+    font-size: 18px;
+    font-weight: 600;
 }
 QLabel#propertyFieldLabel {
-    color: #626b7a;
-    font-size: 12px;
+    color: #212733;
+    font-size: 14px;
+    font-weight: 500;
 }
 QLabel#propertyNoSelection {
     color: #98a0ad;
-    font-size: 13px;
+    font-size: 12px;
 }
 QDoubleSpinBox, QSpinBox, QComboBox, QPlainTextEdit {
     background: #eef0f4;
@@ -208,7 +247,6 @@ QPushButton#applyPropertyButton {
     border-radius: 8px;
     padding: 8px 16px;
     font-weight: 600;
-    font-size: 13px;
 }
 QPushButton#applyPropertyButton:hover {
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
@@ -236,7 +274,6 @@ QPushButton#enterEditorButton {
     border-radius: 10px;
     padding: 12px 28px;
     font-weight: 600;
-    font-size: 15px;
 }
 QPushButton#enterEditorButton:hover {
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
@@ -256,7 +293,6 @@ QPushButton#backButton {
     border: 1px solid #d5d9e0;
     border-radius: 6px;
     padding: 6px 14px;
-    font-size: 13px;
 }
 QPushButton#backButton:hover {
     background: #eef0f4;
@@ -365,7 +401,6 @@ QPushButton.primary, QPushButton[primary="true"] {
     border-radius: 8px;
     padding: 8px 16px;
     font-weight: 600;
-    font-size: 13px;
 }
 QPushButton.primary:hover, QPushButton[primary="true"]:hover {
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,

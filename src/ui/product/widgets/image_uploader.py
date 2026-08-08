@@ -59,7 +59,7 @@ class ImageUploader(QFrame):
             "  stop:0 #4a8af4, stop:1 #3973db);"
             "  color: #ffffff; border: 1px solid #5a9af4;"
             "  border-radius: 10px; padding: 12px 32px;"
-            "  font-size: 15px; font-weight: 600;"
+            " font-weight: 600;"
             "}"
             "QPushButton:hover {"
             "  background: qlineargradient(x1:0, y1:0, x2:0, y2:1,"
@@ -71,7 +71,7 @@ class ImageUploader(QFrame):
         self._clear_btn.setMinimumHeight(48)
         self._clear_btn.setStyleSheet(
             "QPushButton {"
-            "  background: #ffffff; color: #626b7a; font-size: 15px;"
+            "  background: #ffffff; color: #626b7a;"
             "  padding: 12px 24px; border: 1px solid #d5d9e0; border-radius: 8px;"
             "}"
             "QPushButton:hover { background: #eef0f4; color: #212733; }"
@@ -133,14 +133,14 @@ class ImageUploader(QFrame):
 
         # 文件名
         name = QLabel(img.path.name)
-        name.setStyleSheet("color: #212733; font-size: 12px;")
+        name.setStyleSheet("color: #212733;")
         layout.addWidget(name, stretch=1)
 
         # 主图标记
         if img.is_primary:
             primary = QLabel("主图")
             primary.setStyleSheet(
-                "color: #3973db; font-size: 11px; font-weight: bold;"
+                "color: #3973db; font-weight: bold;"
             )
             layout.addWidget(primary)
 
@@ -158,7 +158,7 @@ class ImageUploader(QFrame):
         del_btn = QPushButton("×")
         del_btn.setFixedSize(24, 24)
         del_btn.setStyleSheet(
-            "QPushButton { border: none; color: #dc2626; font-size: 14px; }"
+            "QPushButton { border: none; color: #dc2626; }"
             "QPushButton:hover { color: #ff3b3b; }"
         )
         del_btn.clicked.connect(lambda: self._on_remove(img.id))

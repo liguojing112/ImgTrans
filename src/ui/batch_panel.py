@@ -60,7 +60,7 @@ def _external_stepper(spin: QSpinBox) -> tuple[QHBoxLayout, QPushButton, QPushBu
             "QPushButton#batchStepperButton {"
             "background: #2b2b3d; color: #e7e7f3; "
             "border: 1px solid #5d6284; border-radius: 4px; "
-            "font-size: 16px; padding: 0; }"
+            " padding: 0; }"
             "QPushButton#batchStepperButton:hover {"
             "background: #3a3a55; border-color: #7c83ad; }"
             "QPushButton#batchStepperButton:pressed {"

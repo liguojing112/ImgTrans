@@ -121,7 +121,7 @@ class ProductWindow(QMainWindow):
         top_layout.addWidget(back_btn)
 
         title = QLabel("商品详情生成")
-        title.setStyleSheet("color: #212733; font-size: 15px; font-weight: bold;")
+        title.setObjectName("pageTitle")
         top_layout.addWidget(title)
 
         top_layout.addStretch()

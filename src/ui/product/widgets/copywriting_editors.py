@@ -59,7 +59,7 @@ class TagEditor(QFrame):
 
         hint = QLabel("尚未生成，请先生成文案")
         hint.setObjectName("emptyHint")
-        hint.setStyleSheet("color: #98a0ad; font-size: 12px; padding: 8px;")
+        hint.setStyleSheet("color: #98a0ad; padding: 8px;")
         hint.setWordWrap(True)
         layout.addWidget(hint)
         self._empty_hint = hint
@@ -289,9 +289,9 @@ class TitleEditor(QFrame):
         star_btn = QPushButton("★" if title.is_selected else "☆")
         star_btn.setFixedSize(28, 28)
         star_btn.setStyleSheet(
-            "QPushButton { border: none; color: #ca8a04; font-size: 16px; }"
+            "QPushButton { border: none; color: #ca8a04; }"
             if title.is_selected
-            else "QPushButton { border: none; color: #98a0ad; font-size: 16px; }"
+            else "QPushButton { border: none; color: #98a0ad; }"
         )
         star_btn.clicked.connect(lambda tid=title.id: self._on_star_clicked(tid))
         row.addWidget(star_btn)
@@ -305,7 +305,7 @@ class TitleEditor(QFrame):
         row.addWidget(edit, stretch=1)
 
         count = QLabel(f"{len(title.title)}字")
-        count.setStyleSheet("color: #626b7a; font-size: 11px;")
+        count.setStyleSheet("color: #626b7a;")
         count.setFixedWidth(40)
         edit.textChanged.connect(lambda t, lbl=count: lbl.setText(f"{len(t)}字"))
         row.addWidget(count)
@@ -398,7 +398,7 @@ class SellingPointEditor(QFrame):
         cat_label = QLabel(_CATEGORY_LABELS.get(sp.category, sp.category))
         cat_label.setFixedWidth(40)
         cat_label.setStyleSheet(
-            "color: #3973db; font-size: 11px; font-weight: bold;"
+            "color: #3973db; font-weight: bold;"
         )
         row.addWidget(cat_label)
 
@@ -418,7 +418,7 @@ class SellingPointEditor(QFrame):
 
         lock_btn = QPushButton("🔒" if sp.locked else "🔓")
         lock_btn.setFixedSize(28, 28)
-        lock_btn.setStyleSheet("QPushButton { border: none; font-size: 14px; }")
+        lock_btn.setStyleSheet("QPushButton { border: none; }")
         lock_btn.clicked.connect(lambda: self.item_locked.emit(sp.id))
         row.addWidget(lock_btn)
 

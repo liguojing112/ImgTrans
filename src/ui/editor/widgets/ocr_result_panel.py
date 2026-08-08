@@ -93,7 +93,7 @@ class OcrResultPanel(QFrame):
             "}"
             "QHeaderView::section {"
             "  background: #ffffff; color: #626b7a;"
-            "  border: none; padding: 4px; font-size: 11px;"
+            "  border: none; padding: 4px;"
             "}"
         )
         action_row = QHBoxLayout()

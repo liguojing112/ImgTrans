@@ -176,21 +176,21 @@ class PurchaseDialog(QDialog):
         # 价格区（仿电商：大红促销价 + 划线原价）
         if plan.is_on_sale and plan.sale_amount_minor is not None:
             parts.append(
-                f'<span style="font-size:28px;font-weight:bold;color:#ff4400;">'
+                f'<span style="font-weight:bold;color:#ff4400;">'
                 f'¥{plan.sale_amount_minor / 100:.2f}</span>'
                 f'&nbsp;&nbsp;'
-                f'<span style="font-size:14px;color:#999;text-decoration:line-through;">'
+                f'<span style="color:#999;text-decoration:line-through;">'
                 f'¥{plan.amount_minor / 100:.2f}</span>'
             )
         else:
             parts.append(
-                f'<span style="font-size:28px;font-weight:bold;color:#ff4400;">'
+                f'<span style="font-weight:bold;color:#ff4400;">'
                 f'¥{plan.amount_minor / 100:.2f}</span>'
             )
         # 权益描述
         if plan.benefits:
             parts.append(
-                f'<span style="color:#666;font-size:12px;">{plan.benefits}</span>'
+                f'<span style="color:#666;">{plan.benefits}</span>'
             )
         self._plan_info_base = "<br/>".join(parts)
         self._plan_info_label.setTextFormat(Qt.TextFormat.RichText)
@@ -214,14 +214,14 @@ class PurchaseDialog(QDialog):
         if remaining.total_seconds() <= 0:
             self._countdown_timer.stop()
             self._plan_info_label.setText(
-                f"{base}<br/><span style='color:#999;font-size:12px;'>促销已结束</span>"
+                f"{base}<br/><span style='color:#999;'>促销已结束</span>"
             )
             return
         total = int(remaining.total_seconds())
         hours, remainder = divmod(total, 3600)
         minutes, seconds = divmod(remainder, 60)
         self._plan_info_label.setText(
-            f"{base}<br/><span style='color:#ff4400;font-size:12px;font-weight:bold;'>"
+            f"{base}<br/><span style='color:#ff4400;font-weight:bold;'>"
             f"优惠剩余 {hours:02d}:{minutes:02d}:{seconds:02d}</span>"
         )
 

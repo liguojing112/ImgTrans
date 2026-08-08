@@ -239,7 +239,7 @@ class CopywritingSettingsPanel(QFrame):
         btn_smaller.setFixedSize(24, 18)
         btn_smaller.setStyleSheet(
             "QToolButton { background: #2a2a44; color: #212733;"
-            "  border: 1px solid #d5d9e0; border-radius: 4px; font-size: 11px; }"
+            "  border: 1px solid #d5d9e0; border-radius: 4px; }"
             "QToolButton:hover { background: #34345a; }"
             "QToolButton:pressed { background: #3a3a5e; }"
         )
@@ -252,7 +252,7 @@ class CopywritingSettingsPanel(QFrame):
         btn_larger.setFixedSize(24, 18)
         btn_larger.setStyleSheet(
             "QToolButton { background: #2a2a44; color: #212733;"
-            "  border: 1px solid #d5d9e0; border-radius: 4px; font-size: 11px; }"
+            "  border: 1px solid #d5d9e0; border-radius: 4px; }"
             "QToolButton:hover { background: #34345a; }"
             "QToolButton:pressed { background: #3a3a5e; }"
         )

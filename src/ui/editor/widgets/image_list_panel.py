@@ -33,7 +33,7 @@ class ImageListPanel(QFrame):
         layout.setSpacing(8)
 
         title = QLabel("图片列表")
-        title.setStyleSheet("color: #212733; font-size: 13px; font-weight: 650;")
+        title.setStyleSheet("color: #212733; font-weight: 650;")
         layout.addWidget(title)
 
         self._remove_btn = QPushButton("删除选中")
@@ -42,7 +42,7 @@ class ImageListPanel(QFrame):
         self._remove_btn.setStyleSheet(
             "QPushButton { background: #2a2a44; color: #212733;"
             "  border: 1px solid #d5d9e0; border-radius: 6px;"
-            "  padding: 4px 10px; font-size: 12px; }"
+            "  padding: 4px 10px; }"
             "QPushButton:disabled { color: #98a0ad; }"
             "QPushButton:hover { background: #34345a; }"
         )
@@ -58,7 +58,7 @@ class ImageListPanel(QFrame):
         layout.addWidget(self._list, stretch=1)
 
         self._count_label = QLabel("0 张图片")
-        self._count_label.setStyleSheet("color: #98a0ad; font-size: 11px;")
+        self._count_label.setStyleSheet("color: #98a0ad;")
         layout.addWidget(self._count_label)
 
         self._items: dict[str, QListWidgetItem] = {}

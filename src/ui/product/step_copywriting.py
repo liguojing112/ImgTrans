@@ -71,7 +71,7 @@ class StepCopywriting(QFrame):
         # 标题行
         header = QHBoxLayout()
         title = QLabel("第 3 步：文案生成")
-        title.setStyleSheet("color: #212733; font-size: 18px; font-weight: 650;")
+        title.setObjectName("sectionTitle")
         header.addWidget(title)
         header.addStretch()
 
@@ -83,7 +83,7 @@ class StepCopywriting(QFrame):
             "  stop:0 #4a8af4, stop:1 #3973db);"
             "  color: #ffffff; border: 1px solid #5a9af4;"
             "  border-radius: 8px; padding: 8px 20px;"
-            "  font-size: 13px; font-weight: 600;"
+            " font-weight: 600;"
             "}"
             "QPushButton#primaryButton:hover {"
             "  background: qlineargradient(x1:0, y1:0, x2:0, y2:1,"
@@ -195,7 +195,7 @@ class StepCopywriting(QFrame):
             copy_btn = QPushButton("复制此节")
             copy_btn.setFixedSize(72, 22)
             copy_btn.setStyleSheet(
-                "QPushButton { background: #eef0f4; color: #a0a0c0; font-size: 11px;"
+                "QPushButton { background: #eef0f4; color: #a0a0c0;"
                 "  border: 1px solid #d5d9e0; border-radius: 3px; }"
                 "QPushButton:hover { background: #4d4d6e; }"
             )
@@ -205,7 +205,7 @@ class StepCopywriting(QFrame):
             regen_btn = QPushButton("重新生成此节")
             regen_btn.setFixedSize(88, 22)
             regen_btn.setStyleSheet(
-                "QPushButton { background: #eef0f4; color: #a0a0c0; font-size: 11px;"
+                "QPushButton { background: #eef0f4; color: #a0a0c0;"
                 "  border: 1px solid #d5d9e0; border-radius: 3px; }"
                 "QPushButton:hover { background: #4d4d6e; }"
             )
@@ -266,7 +266,7 @@ class StepCopywriting(QFrame):
             "  stop:0 #4a8af4, stop:1 #3973db);"
             "  color: #ffffff; border: 1px solid #5a9af4;"
             "  border-radius: 8px; padding: 10px 24px;"
-            "  font-size: 14px; font-weight: 600;"
+            " font-weight: 600;"
             "}"
             "QPushButton:hover {"
             "  background: qlineargradient(x1:0, y1:0, x2:0, y2:1,"

@@ -43,14 +43,14 @@ class ImageListPanel(QFrame):
             "QPushButton { background: qlineargradient(x1:0, y1:0, x2:0, y2:1,"
             "  stop:0 #4a8af4, stop:1 #3973db); color: #fff;"
             "  border: 1px solid #5a9af4; border-radius: 6px;"
-            "  padding: 6px 12px; font-size: 12px; font-weight: 600; }"
+            "  padding: 6px 12px; font-weight: 600; }"
             "QPushButton:hover { background: qlineargradient(x1:0, y1:0, x2:0, y2:1,"
             "  stop:0 #5a9af4, stop:1 #4a8af4); border-color: #6aaaf4; }"
         )
         add_folder_btn = QPushButton("+ 添加文件夹")
         add_folder_btn.clicked.connect(self._on_add_folder_clicked)
         add_folder_btn.setStyleSheet(
-            "QPushButton { background: #ffffff; color: #626b7a; font-size: 12px;"
+            "QPushButton { background: #ffffff; color: #626b7a;"
             "  padding: 6px 12px; border: 1px solid #d5d9e0; border-radius: 4px; }"
             "QPushButton:hover { background: #eef0f4; color: #212733; }"
         )
@@ -64,7 +64,7 @@ class ImageListPanel(QFrame):
         select_all_btn = QPushButton("全选")
         select_all_btn.clicked.connect(lambda: self._model.select_all())
         select_all_btn.setStyleSheet(
-            "QPushButton { background: transparent; color: #626b7a; font-size: 11px;"
+            "QPushButton { background: transparent; color: #626b7a;"
             "  border: 1px solid #d5d9e0; padding: 3px 10px; border-radius: 4px; }"
             "QPushButton:hover { background: #eef0f4; color: #212733; }"
         )
@@ -91,7 +91,7 @@ class ImageListPanel(QFrame):
 
         # 统计信息
         self._stats_label = QLabel("0 张图片")
-        self._stats_label.setStyleSheet("color: #98a0ad; font-size: 11px;")
+        self._stats_label.setStyleSheet("color: #98a0ad;")
         layout.addWidget(self._stats_label)
 
         self._model.images_changed.connect(self._refresh)
@@ -181,14 +181,14 @@ class ImageListPanel(QFrame):
             row_layout.addWidget(thumb)
 
             name_label = QLabel(img.path.name)
-            name_label.setStyleSheet("color: #212733; font-size: 11px;")
+            name_label.setStyleSheet("color: #212733;")
             name_label.setWordWrap(False)
             row_layout.addWidget(name_label, stretch=1)
 
             del_btn = QPushButton("×")
             del_btn.setFixedSize(20, 20)
             del_btn.setStyleSheet(
-                "QPushButton { border: none; color: #dc2626; font-size: 14px; }"
+                "QPushButton { border: none; color: #dc2626; }"
                 "QPushButton:hover { color: #ff3b3b; }"
             )
             del_btn.clicked.connect(

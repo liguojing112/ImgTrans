@@ -1767,12 +1767,10 @@ QMainWindow, QWidget#workspace {
 }
 QLabel#productTitle {
     color: #172033;
-    font-size: 26px;
     font-weight: 700;
 }
 QLabel#productSubtitle, QLabel#versionLabel, QLabel#emptyStateHint {
     color: #647087;
-    font-size: 13px;
 }
 QFrame#pipelineCard {
     background: #ffffff;
@@ -1781,7 +1779,6 @@ QFrame#pipelineCard {
 }
 QLabel#pipelineStage {
     color: #546078;
-    font-size: 13px;
     font-weight: 600;
     padding: 6px;
 }
@@ -1794,14 +1791,12 @@ QLabel#imageMarker {
     background: #e9f0ff;
     color: #3667c8;
     border-radius: 28px;
-    font-size: 11px;
     font-weight: 700;
     min-width: 64px;
     min-height: 56px;
 }
 QLabel#emptyStateTitle {
     color: #172033;
-    font-size: 20px;
     font-weight: 650;
 }
 QPushButton#importButton, QPushButton#headerImportButton, QPushButton#batchImportButton, QPushButton#ocrButton,
@@ -1847,24 +1842,19 @@ QTabBar::tab:selected {
 }
 QLabel#panelTitle {
     color: #172033;
-    font-size: 18px;
     font-weight: 650;
 }
 QLabel#panelHint, QLabel#ocrStatusLabel {
     color: #647087;
-    font-size: 12px;
 }
 QLabel#translationStatusLabel, QLabel#protectionSummary {
     color: #647087;
-    font-size: 12px;
 }
 QLabel#inpaintingStatusLabel {
     color: #647087;
-    font-size: 12px;
 }
 QLabel#pipelineStatusLabel {
     color: #52647e;
-    font-size: 12px;
 }
 QListWidget#pipelineStages {
     background: #f7f9fc;
@@ -1951,7 +1941,6 @@ QPushButton#deleteTextLayerButton {
 }
 QLabel#styleSelectedLabel {
     color: #52647e;
-    font-size: 12px;
 }
 QListWidget#editableLayers, QPlainTextEdit#translatedTextEditor {
     background: #ffffff;
@@ -1962,19 +1951,15 @@ QListWidget#editableLayers, QPlainTextEdit#translatedTextEditor {
 }
 QLabel#editStatusLabel {
     color: #52647e;
-    font-size: 12px;
 }
 QLabel#manualSelectionLabel, QLabel#manualRegionStatus {
     color: #52647e;
-    font-size: 12px;
 }
 QLabel#batchStatusLabel {
     color: #52647e;
-    font-size: 12px;
 }
 QLabel#curveSelectedLabel, QLabel#curveStatusLabel {
     color: #52647e;
-    font-size: 12px;
 }
 QTreeWidget#batchItems {
     background: #ffffff;
@@ -1998,7 +1983,6 @@ QPushButton:disabled {
 }
 QLabel#readinessLabel {
     color: #53627a;
-    font-size: 12px;
 }
 QStatusBar {
     background: #ffffff;

@@ -115,7 +115,7 @@ class _FactRow(QFrame):
         # 标签
         lbl = QLabel(label)
         lbl.setFixedWidth(80)
-        lbl.setStyleSheet("color: #626b7a; font-size: 12px;")
+        lbl.setStyleSheet("color: #626b7a;")
         layout.addWidget(lbl)
 
         # 值
@@ -129,7 +129,7 @@ class _FactRow(QFrame):
         # 来源
         self._source_label = QLabel()
         self._source_label.setFixedWidth(50)
-        self._source_label.setStyleSheet("color: #98a0ad; font-size: 10px;")
+        self._source_label.setStyleSheet("color: #98a0ad;")
         layout.addWidget(self._source_label)
 
         # 确认按钮
@@ -138,7 +138,7 @@ class _FactRow(QFrame):
         self._confirm_btn.setToolTip("确认此信息")
         self._confirm_btn.setStyleSheet(
             "QPushButton { border: 1px solid #d5d9e0; border-radius: 4px;"
-            "  color: #16a34a; font-size: 14px; }"
+            "  color: #16a34a; }"
             "QPushButton:hover { background: #2a4a2a; }"
         )
         self._confirm_btn.clicked.connect(
@@ -152,7 +152,7 @@ class _FactRow(QFrame):
         self._uncertain_btn.setToolTip("标记为不确定")
         self._uncertain_btn.setStyleSheet(
             "QPushButton { border: 1px solid #d5d9e0; border-radius: 4px;"
-            "  color: #d97706; font-size: 14px; }"
+            "  color: #d97706; }"
             "QPushButton:hover { background: #4a3a2a; }"
         )
         self._uncertain_btn.clicked.connect(

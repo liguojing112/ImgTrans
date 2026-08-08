@@ -35,8 +35,7 @@ class StepSource(QFrame):
         layout.setSpacing(16)
 
         title = QLabel("第 1 步：商品来源")
-        title.setObjectName("stepTitle")
-        title.setStyleSheet("color: #212733; font-size: 18px; font-weight: 650;")
+        title.setObjectName("sectionTitle")
         layout.addWidget(title)
 
         # 链接解析区域
@@ -64,7 +63,7 @@ class StepSource(QFrame):
             "QPushButton { background: qlineargradient(x1:0, y1:0, x2:0, y2:1,"
             "  stop:0 #4a8af4, stop:1 #3973db); color: #ffffff;"
             "  border: 1px solid #5a9af4; border-radius: 6px;"
-            "  padding: 6px 16px; font-size: 12px; font-weight: 600; }"
+            "  padding: 6px 16px; font-weight: 600; }"
             "QPushButton:hover { background: qlineargradient(x1:0, y1:0, x2:0, y2:1,"
             "  stop:0 #5a9af4, stop:1 #4a8af4); border-color: #6aaaf4; }"
             "QPushButton:disabled { background: #ffffff; color: #98a0ad;"
@@ -74,7 +73,7 @@ class StepSource(QFrame):
         link_layout.addWidget(self._parse_btn)
 
         self._link_status = QLabel("")
-        self._link_status.setStyleSheet("color: #626b7a; font-size: 11px;")
+        self._link_status.setStyleSheet("color: #626b7a;")
         link_layout.addWidget(self._link_status)
 
         layout.addWidget(link_group)
@@ -115,7 +114,7 @@ class StepSource(QFrame):
             "  stop:0 #4a8af4, stop:1 #3973db);"
             "  color: #ffffff; border: 1px solid #5a9af4;"
             "  border-radius: 8px; padding: 10px 24px;"
-            "  font-size: 14px; font-weight: 600;"
+            " font-weight: 600;"
             "}"
             "QPushButton#primaryButton:hover {"
             "  background: qlineargradient(x1:0, y1:0, x2:0, y2:1,"
@@ -157,7 +156,7 @@ class StepSource(QFrame):
     def set_parse_hint(self, message: str) -> None:
         """显示人工验证提示（如验证码/登录墙）。"""
         self._link_status.setText(message)
-        self._link_status.setStyleSheet("color: #ca8a04; font-size: 11px;")
+        self._link_status.setStyleSheet("color: #ca8a04;")
         self._link_status.setWordWrap(True)
 
     def set_parse_result(
@@ -185,17 +184,17 @@ class StepSource(QFrame):
         self._form.set_info(updated)
         platform_text = f"[{platform}] " if platform else ""
         self._link_status.setText(f"{platform_text}解析完成 ✓")
-        self._link_status.setStyleSheet("color: #626b7a; font-size: 11px;")
+        self._link_status.setStyleSheet("color: #626b7a;")
         self._link_status.setWordWrap(False)
 
     def set_parse_error(self, message: str) -> None:
         self._link_status.setText(f"✗ {message}")
-        self._link_status.setStyleSheet("color: #dc2626; font-size: 11px;")
+        self._link_status.setStyleSheet("color: #dc2626;")
         self._link_status.setWordWrap(True)
 
     def set_parse_idle(self) -> None:
         self._link_status.setText("")
-        self._link_status.setStyleSheet("color: #626b7a; font-size: 11px;")
+        self._link_status.setStyleSheet("color: #626b7a;")
         self._link_status.setWordWrap(False)
 
     def _on_parse_clicked(self) -> None:

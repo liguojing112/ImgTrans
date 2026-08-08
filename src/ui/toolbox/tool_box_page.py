@@ -51,20 +51,20 @@ class ToolBoxPage(QFrame):
 
         back_btn = QLabel("← 返回首页")
         back_btn.setStyleSheet(
-            "QLabel { color: #212733; font-size: 13px; padding: 4px 12px; }"
+            "QLabel { color: #212733; padding: 4px 12px; }"
             "QLabel:hover { color: #3973db; }"
         )
         back_btn.mousePressEvent = lambda _: self.back_requested.emit()
         top_layout.addWidget(back_btn)
 
         title = QLabel("图片工具箱")
-        title.setStyleSheet("color: #212733; font-size: 15px; font-weight: bold;")
+        title.setObjectName("pageTitle")
         top_layout.addWidget(title)
 
         top_layout.addStretch()
 
         status_label = QLabel("")
-        status_label.setStyleSheet("color: #626b7a; font-size: 12px;")
+        status_label.setStyleSheet("color: #626b7a;")
         self._status_label = status_label
         top_layout.addWidget(status_label)
 
@@ -155,7 +155,7 @@ class ToolBoxPage(QFrame):
         images = [img for img in self._model.images if img.selected]
         if not images:
             self._status_label.setText("请先选择至少一张图片")
-            self._status_label.setStyleSheet("color: #d97706; font-size: 12px;")
+            self._status_label.setStyleSheet("color: #d97706;")
             return
 
         if self._task_runner is None:
@@ -163,7 +163,7 @@ class ToolBoxPage(QFrame):
             return
 
         self._status_label.setText(f"正在处理 {len(images)} 张图片...")
-        self._status_label.setStyleSheet("color: #626b7a; font-size: 12px;")
+        self._status_label.setStyleSheet("color: #626b7a;")
 
         # 裁剪只作用于当前预览的图片，其他图片跳过裁剪
         preview_id = self._preview_panel.current_preview_id()
@@ -208,15 +208,15 @@ class ToolBoxPage(QFrame):
                             f"  —  {name}: {r[:80]}"
                         )
                         break
-                self._status_label.setStyleSheet("color: #d97706; font-size: 12px;")
+                self._status_label.setStyleSheet("color: #d97706;")
             else:
                 self._status_label.setText(f"处理完成：{success_count} 张图片")
-                self._status_label.setStyleSheet("color: #16a34a; font-size: 12px;")
+                self._status_label.setStyleSheet("color: #16a34a;")
             self._preview_panel._update_preview()
 
         def _on_error(error: Exception):
             self._status_label.setText(f"处理失败: {error}")
-            self._status_label.setStyleSheet("color: #dc2626; font-size: 12px;")
+            self._status_label.setStyleSheet("color: #dc2626;")
 
         self._task_runner.submit(_run, on_success=_on_success, on_error=_on_error)
 
@@ -255,5 +255,5 @@ class ToolBoxPage(QFrame):
                 pass
 
         self._status_label.setText(f"已导出 {exported}/{len(images)} 张图片到 {target_dir}")
-        self._status_label.setStyleSheet("color: #16a34a; font-size: 12px;")
+        self._status_label.setStyleSheet("color: #16a34a;")
         self.export_completed.emit(str(target_dir))
