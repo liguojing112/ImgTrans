@@ -1219,6 +1219,7 @@ class EditorMainWindow(QMainWindow):
             # 已关闭但引用残留：清理后重建
             existing.close()
             self._product_window = None
+        logger.info("nav_enter_product create new")
         from src.ui.product.product_window import ProductWindow
         from src.infrastructure.server_llm_adapter import ServerLLMAdapter
 
