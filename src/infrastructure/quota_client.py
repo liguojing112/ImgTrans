@@ -101,7 +101,7 @@ def _http_code(status: int) -> str:
 
 def _http_message(status: int) -> str:
     if status == 401:
-        return "激活码已停用或授权已失效，请重新激活"
+        return "激活码已停用或授权已失效，请重新激活或续费"
     if status in {408, 500, 502, 503, 504}:
         return "用量服务暂时不可用"
     return "用量操作失败，请稍后重试"
