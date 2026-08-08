@@ -80,6 +80,19 @@ class SqlAlchemyPaymentRepository:
             )
             return result.rowcount > 0
 
+    def restore_paid_by_code(self, code_id: str) -> int:
+        """重新启用激活码时，把该码关联的 refunded 订单恢复为 paid。"""
+        with self._database.session() as session:
+            result = session.execute(
+                update(PaymentOrderRecord)
+                .where(
+                    PaymentOrderRecord.code_id == code_id,
+                    PaymentOrderRecord.status == PaymentStatus.REFUNDED.value,
+                )
+                .values(status=PaymentStatus.PAID.value)
+            )
+            return result.rowcount
+
     def set_activation_code(
         self, order_id: str, code_id: str, activation_code: str, now: datetime
     ) -> None:

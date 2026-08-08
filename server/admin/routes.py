@@ -25,7 +25,7 @@ from server.domain.admin_users import (
 from server.domain.image_limits import ImageLimitConflict, ImageLimitValues
 from server.api.rate_limit import enforce_rate_limit
 from server.domain.translation import TranslationTextItem, TranslationTextRequest
-from server.application.payment import RefundPaymentOrder
+from server.application.payment import RefundPaymentOrder, RestorePaymentOrder
 from server.infrastructure.payment_repository import SqlAlchemyPaymentRepository
 
 
@@ -368,6 +368,14 @@ async def enable_activation_code(code_id: str, request: Request) -> Response:
     session, form = await _protected_form(request)
     _require_permission(request, session, "activation")
     request.app.state.manage_activation_codes.enable(code_id)
+    restore_payment_order = getattr(
+        request.app.state, "restore_payment_order", None
+    )
+    if restore_payment_order is None:
+        restore_payment_order = RestorePaymentOrder(
+            SqlAlchemyPaymentRepository(request.app.state.database)
+        )
+    restore_payment_order.execute(code_id)
     request.state.audit_action = "enable_activation_code"
     target = form.get("next", "")
     return _redirect(target if target.startswith("/admin/") else "/admin/activation")
