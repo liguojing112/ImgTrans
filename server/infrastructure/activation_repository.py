@@ -311,7 +311,6 @@ class SqlAlchemyActivationRepository:
             if not record.disabled:
                 record.disabled = True
                 record.disabled_at = now
-                record.token_digest = None
             session.flush()
             return _code_to_domain(record, self._cipher)
 
