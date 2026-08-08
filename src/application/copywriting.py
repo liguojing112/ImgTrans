@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 import json
 import uuid
 
@@ -63,42 +64,32 @@ class GenerateCopywriting:
         settings: CopywritingSettings,
     ) -> CopywritingResult:
         print("[Copywriting] 开始生成文案...", flush=True)
-        tags = []
-        try:
-            tags = self._generate_tags(fact, settings)
-            print(f"[Copywriting] 标签生成完成: {len(tags)} 条", flush=True)
-        except Exception as e:
-            print(f"[Copywriting] 标签生成失败: {e}", flush=True)
-        keywords = []
-        try:
-            keywords = self._generate_keywords(fact, settings)
-            print(f"[Copywriting] 场景词生成完成: {len(keywords)} 条", flush=True)
-        except Exception as e:
-            print(f"[Copywriting] 场景词生成失败: {e}", flush=True)
-        titles = []
-        try:
-            titles = self._generate_titles(fact, manual_info, settings)
-            print(f"[Copywriting] 标题生成完成: {len(titles)} 条", flush=True)
-        except Exception as e:
-            print(f"[Copywriting] 标题生成失败: {e}", flush=True)
-        selling_points = []
-        try:
-            selling_points = self._generate_selling_points(fact, settings)
-            print(f"[Copywriting] 卖点生成完成: {len(selling_points)} 条", flush=True)
-        except Exception as e:
-            print(f"[Copywriting] 卖点生成失败: {e}", flush=True)
-        intro = ProductIntro()
-        try:
-            intro = self._generate_intro(fact, settings)
-            print("[Copywriting] 简介生成完成", flush=True)
-        except Exception as e:
-            print(f"[Copywriting] 简介生成失败: {e}", flush=True)
-        detail_modules = []
-        try:
-            detail_modules = self._generate_detail_modules(fact, settings)
-            print(f"[Copywriting] 详情文案生成完成: {len(detail_modules)} 个模块", flush=True)
-        except Exception as e:
-            print(f"[Copywriting] 详情文案生成失败: {e}", flush=True)
+        # 各类文案互相独立，并行调用 LLM 显著缩短总耗时（原为 8 次串行）
+        with ThreadPoolExecutor(max_workers=6) as pool:
+            tags_future = pool.submit(
+                self._run_safe, self._generate_tags, fact, settings
+            )
+            keywords_future = pool.submit(
+                self._run_safe, self._generate_keywords, fact, settings
+            )
+            titles_future = pool.submit(
+                self._run_safe, self._generate_titles, fact, manual_info, settings
+            )
+            selling_points_future = pool.submit(
+                self._run_safe, self._generate_selling_points, fact, settings
+            )
+            intro_future = pool.submit(
+                self._run_safe, self._generate_intro, fact, settings
+            )
+            detail_future = pool.submit(
+                self._run_safe, self._generate_detail_modules, fact, settings
+            )
+            tags = tags_future.result() or []
+            keywords = keywords_future.result() or []
+            titles = titles_future.result() or []
+            selling_points = selling_points_future.result() or []
+            intro = intro_future.result() or ProductIntro()
+            detail_modules = detail_future.result() or []
 
         return CopywritingResult(
             tags=tags,
@@ -109,6 +100,13 @@ class GenerateCopywriting:
             detail_modules=detail_modules,
             target_language=settings.target_language,
         )
+
+    def _run_safe(self, fn, *args):
+        try:
+            return fn(*args)
+        except Exception as error:
+            print(f"[Copywriting] 生成失败: {error}", flush=True)
+            return None
 
     def regenerate_item(
         self,
@@ -328,24 +326,31 @@ class GenerateCopywriting:
         ]
 
         generated: dict[str, DetailModule] = {}
-        try:
-            specs = self._generate_specs(fact, settings)
-            generated[specs.section] = specs
-        except Exception as e:
-            print(f"[Copywriting] specs generation failed: {e}", flush=True)
         # 分批生成：每批 4 个模块，避免单个请求 JSON 过大
-        # 被 GLM max_tokens=1024 限制截断导致解析失败
+        # 被 GLM max_tokens=1024 限制截断导致解析失败；各批次与规格并行
         batch_size = 4
         non_specs = [item for item in sections if item[0] != "specs"]
-        for start in range(0, len(non_specs), batch_size):
-            batch = non_specs[start:start + batch_size]
-            try:
-                batch_modules = self._generate_detail_batch(
-                    fact, settings, batch)
-                generated.update({module.section: module for module in batch_modules})
-            except Exception as e:
-                print(f"[Copywriting] 详情文案批次 {start//batch_size + 1} 失败: {e}",
-                      flush=True)
+        batches = [
+            non_specs[start:start + batch_size]
+            for start in range(0, len(non_specs), batch_size)
+        ]
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            specs_future = pool.submit(
+                self._run_safe, self._generate_specs, fact, settings
+            )
+            batch_futures = [
+                pool.submit(
+                    self._run_safe, self._generate_detail_batch, fact, settings, batch
+                )
+                for batch in batches
+            ]
+            specs = specs_future.result()
+            batch_results = [future.result() for future in batch_futures]
+        if specs:
+            generated[specs.section] = specs
+        for batch_result in batch_results:
+            if batch_result:
+                generated.update({module.section: module for module in batch_result})
         return [generated.get(sec, DetailModule(section=sec, title=label, content=""))
                 for sec, label in sections]
 
