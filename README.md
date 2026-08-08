@@ -1,28 +1,50 @@
-# 图片翻译软件 (Image Translator)
+# 图片翻译软件（ImgTrans）
 
-将图片中的文字识别、翻译并渲染回图片中。
+图片翻译与商品文案工具：识别图片文字 → 翻译 → 回填；上传商品图片 → AI 分析 → 生成多语言文案。
 
-## 阶段
+## 功能
 
-- **M0**：已完成，部分非阻塞验证延期
-- **M1**：单图翻译闭环完成
-- **M2**：批量处理和完整编辑完成
-- **M3**：后端、管理后台和激活码基础闭环完成
-- **M4**：Windows V1 发布候选已生成；macOS arm64 等待真实设备、签名和公证验收
+- **图片翻译**：OCR 识别图片文字（内置 RapidOCR 模型），服务端代理翻译（微软 Translator），背景修复（内置 LaMa 模型），译文回填渲染。
+- **商品详情生成**：上传商品图片，AI 视觉分析（GLM，服务端代理）提取信息，生成多语言标题、卖点、详情文案。
+- **套餐与支付**：时长包 / 次数包 / 组合包，微信扫码购买与续购，续购叠加到原激活码。
+- **激活体系**：激活码一机一码、设备绑定、自助解绑换机、后台停用/启用。
+- **管理后台**：套餐、订单、激活码、图片限制、翻译服务配置、账号权限、审计日志（中文界面）。
+- **OCR/修复模型内置**：模型打进安装包，客户开箱即用，无需联网下载。
 
-## 快速开始
+## 架构
 
-要求 Python 3.11 和项目声明的依赖。
-
-```powershell
-python -m src
+```
+客户端（PySide6 桌面应用，Win x64 / macOS arm64）
+    │  激活 / 翻译 / 商品详情 / 支付 均通过 API
+    ▼
+服务端（FastAPI，Clean Architecture）
+    ├─ 微软 Translator（翻译）
+    ├─ GLM 智谱（商品详情，OpenAI 兼容代理）
+    ├─ 微信支付 Native（下单/回调）
+    └─ PostgreSQL + Alembic 迁移
 ```
 
-无交互启动冒烟：
+- 客户端不持有任何密钥，翻译/商品详情/支付均由服务端代理。
+- 服务端依赖客户配置：微软翻译密钥、GLM API、微信商户号。
+
+## 客户端构建
+
+要求 Python 3.11 与项目依赖。
 
 ```powershell
-python -m src --smoke-test
+# 正式 Windows x64 构建（含内置模型 + 文件日志）
+python -m scripts.build_desktop --target windows-x64
 ```
+
+默认输出：`dist/release-candidate/windows-x64/ImgTrans`。
+
+制作 Inno Setup 安装包（需本机安装 Inno Setup 6）：
+
+```powershell
+& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" packaging\imgtrans_installer.iss
+```
+
+产物：`dist/installer/ImgTrans-Setup-<version>.exe`（简体中文向导，LZMA2 压缩）。
 
 运行测试：
 
@@ -30,95 +52,34 @@ python -m src --smoke-test
 python -m pytest -q
 ```
 
-发布维护者可先进行不产生安装产物的正式构建 dry-run：
+## 服务端部署
+
+服务端通过环境变量注入配置，关键项：
+
+| 变量 | 用途 |
+|------|------|
+| `IMGTRANS_DATABASE_URL` | PostgreSQL 连接 |
+| `IMGTRANS_ADMIN_USERNAME` / `IMGTRANS_ADMIN_PASSWORD_HASH` / `IMGTRANS_ADMIN_SESSION_SECRET` | 后台超管 |
+| `IMGTRANS_ACTIVATION_SECRET` | 激活码签名（≥32 字符） |
+| `IMGTRANS_TRANSLATOR_KEY` / `IMGTRANS_TRANSLATOR_REGION` | 微软翻译 |
+| `IMGTRANS_SETTINGS_ENCRYPTION_KEY` | 后台第三方配置加密 |
+
+微信支付、GLM 密钥在后台「第三方配置」页面配置（加密存储）。
 
 ```powershell
-python -m scripts.build_desktop --target windows-x64 --dry-run
-```
-
-正式 Windows x64 和 macOS arm64 构建由 `.github/workflows/m4-desktop-release-build.yml` 在对应原生 runner 执行。构建产物不包含 ONNX 模型权重；OCR 与背景修复模型继续由版本化对象存储清单独立安装。
-
-## V1 发布候选
-
-Windows 10/11 x64 原生构建：
-
-```powershell
-python -m scripts.release_hardening check-source
-python -m scripts.build_desktop --target windows-x64
-python -m scripts.verify_desktop_artifact --target windows-x64
-```
-
-默认输出为 `dist/release-candidate/windows-x64/ImgTrans`。验证器检查 PE 架构、Qt 图片插件、RapidOCR 配置、ONNX Runtime、OpenCV、Qt Core、模型权重隔离、敏感内容和打包后启动。发布 ZIP 与 manifest 由 `scripts.release_hardening` 生成并校验。
-
-macOS 只支持 macOS 13+ Apple Silicon arm64，不支持 Intel Mac 或 Universal 2。构建命令与 Windows 相同，仅将 target 改为 `macos-arm64`；必须在原生 Apple Silicon runner 执行。构建流程已准备，但未在真实 macOS Apple Silicon 设备验收。签名、公证和真机检查见 `MANUAL_ACTIONS.md`。
-
-当前候选默认使用离线 mock 翻译。生产部署必须通过外部配置设置 `IMGTRANS_TRANSLATION_MODE=server` 和 HTTPS `IMGTRANS_API_BASE_URL`，并完成设备激活；不要将服务端 Microsoft Translator 密钥或管理密钥写入客户端配置。
-
-## 当前可用功能
-
-- 单张 JPG/JPEG、PNG、WebP 导入和画布自适应预览。
-- EXIF 方向规范化、文件/宽高/像素安全限制和格式内容校验。
-- JPG、PNG、WebP、静态单帧 GIF、单页 TIFF 导出。
-- 图片解码和编码在后台任务执行，不阻塞 Qt 主线程。
-- RapidOCR 本地文字识别、识别模型语言选择、画布文字框和原文/置信度列表。
-- 全部/指定语言筛选、品牌/型号/SKU/网址/数字保护和无密钥模拟翻译结果列表。
-- 已翻译区域自动擦除蒙版、LaMa ONNX 本地背景修复、OpenCV 明确降级和蒙版可视化。
-- 修复图/原图切换、重新修复、撤销保留原图，以及修复结果五种格式导出。
-- 一键执行单图五阶段流水线，显示当前阶段并支持取消。
-- 使用合法系统字体进行译文颜色近似、字号拟合、换行、旋转和图像合成；长译文无法容纳时显示溢出提示。
-- 自动翻译后可选择译文图层、修改文字并重新排版渲染，支持有界撤销和重做。
-- 编辑画布支持指针锚点缩放、中键平移、文字框选择、移动、缩放和旋转；几何操作可撤销和重做。
-- “样式”页支持字体、字号、颜色、水平/垂直对齐、换行、描边、阴影和旋转，并可新增或删除文字框；所有操作支持撤销和重做。
-- “手动”页可在画布框选漏翻区域，支持自动 OCR/翻译、输入原文后翻译或直接输入最终译文；擦除框与译文框可独立调整，处理结果可整体撤销和重做。
-- 已完成正式批量调度内核：路径惰性解码、最多两张活动图片、重型工作流串行、单图失败隔离、批次取消和磁盘结果缓存。
-- “批量”页已接入正式调度器：支持多图列表、逐图状态/错误、进度与取消、双击结果预览、成功项勾选，以及 JPG/PNG/WebP/GIF/TIFF 选择性导出。
-- “弧形”页支持默认弧线、起点/控制点/终点、反向排列和画布控制点拖动；样式页提供已安装字体推荐及描边、海报、立体阴影近似预设，全部可撤销和重做。
-- 未导出的单图编辑或批量成功结果在重新导入、丢弃批次和关闭应用前会显示确认提示；应用不生成可再次打开的项目文件。
-- M2 的 100 张混合图片资源测试已通过；该测试覆盖正式调度、真实编解码和结果缓存，不替代真实模型质量验收。
-- 高 DPI/Retina 使用逻辑坐标与原图像素坐标分离；系统恢复或网络重新在线后会在后台去重刷新配置、激活和模型状态。
-- 图片导出和模型下载/安装具有磁盘空间预检、权限错误脱敏和原子失败保护，不覆盖已有导出文件或旧模型活动版本。
-
-LaMa 模型不随源码提供。开发环境可通过 `IMGTRANS_LAMA_MODEL` 指向已校验模型；未安装模型时应用仍可使用 OpenCV 降级完成本地闭环。
-
-## 后端开发入口
-
-M3 后端与桌面默认依赖隔离。安装服务端可选依赖后运行：
-
-```powershell
-python -m server
-```
-
-无需监听端口的基础烟测：
-
-```powershell
+python -m server            # 启动服务
 python -m server --smoke-test
 ```
 
-当前提供 `/health/live`、`/health/ready` 和 `/v1/service-info`；数据库地址通过 `IMGTRANS_DATABASE_URL` 注入，公共响应不回显该值。
+数据库迁移：`alembic upgrade head`。
 
-M3 图片限制接口现已提供 `/v1/client-config`。桌面端通过 `IMGTRANS_API_BASE_URL` 配置后端地址，在后台刷新五项限制并将最近有效版本原子缓存；服务不可用时继续使用缓存或内置安全值。图片限制、模型、翻译状态和激活管理均已接入 `/admin` 服务端渲染后台。
+## 目录结构
 
-服务端翻译模式使用以下非源码环境配置：服务端读取 `IMGTRANS_TRANSLATOR_KEY`、可选区域和非生产 `IMGTRANS_CLIENT_API_TOKEN`；桌面设置 `IMGTRANS_TRANSLATION_MODE=server` 和 `IMGTRANS_API_BASE_URL`，再通过“账户 → 激活…”绑定设备。默认仍为无网络的 `mock` 模式。`IMGTRANS_API_TOKEN` 只保留为开发/自动化覆盖；Microsoft 密钥绝不进入客户端。
-
-模型交付接口现已提供 `/v1/models/manifest` 和模型发布管理 API。服务端对象存储配置通过 `IMGTRANS_OBJECT_STORAGE_ENDPOINT`、`IMGTRANS_OBJECT_STORAGE_BUCKET`、可选区域及访问凭据注入；数据库和响应不回显凭据。桌面设置后端地址并完成设备激活后，会在后台按 Windows x64/macOS arm64 清单续传、校验并原子安装模型，失败继续使用旧版本；新安装模型在下次启动加载。
-
-无支付激活基础 API 已提供方案、手工发码、停用和 `/v1/activations/validate`。服务端必须通过 `IMGTRANS_ACTIVATION_SECRET` 注入至少 32 字符的独立 pepper 才会启用发码和激活；激活码明文只在创建响应显示一次。桌面将设备 ID 和验证成功返回的设备令牌保存到 Windows Credential Manager 或 macOS Keychain，不写入应用数据文件；令牌过期或后台停用后立即失效。真实 Apple Silicon 的 Keychain 与安装包验证在发布阶段完成。
-
-管理员密码摘要可通过以下命令交互生成：
-
-```powershell
-python -m server --hash-admin-password
 ```
-
-部署时分别注入 `IMGTRANS_ADMIN_USERNAME`、`IMGTRANS_ADMIN_PASSWORD_HASH` 和至少 32 字符的 `IMGTRANS_ADMIN_SESSION_SECRET`，然后访问 `/admin/login`。生产环境禁止使用临时 `IMGTRANS_ADMIN_TOKEN`；该变量只保留给非生产自动测试。后台所有写表单使用 CSRF 并写入脱敏审计。当前内置限流按服务进程生效，多实例部署还需在网关配置共享限流。
-
-## 图片翻译编辑器确认范围
-
-- 左侧工具：选择、文字区域、新增文字、框选翻译、AI 消除、裁剪、图层、水印；抠图已取消。
-- 文字框支持移动、四角缩放、旋转和边界限制；弧形路径随文字框同步变换。
-- 框选翻译支持自动 OCR、输入原文后翻译和直接输入译文，擦除区与译文区独立调整。
-- AI 消除使用本地 LaMa，并在不可用时降级至 OpenCV；矩形、画笔、橡皮擦均只提交蒙版内像素。
-- 裁剪会同步转换当前文字、弧形路径、修复补丁和水印，撤销后恢复完整画布；原图对比始终保留初始导入图。
-- 水印首版只支持添加文字或本地图片，不提供去水印；支持单个居中、平铺、透明度、移动、缩放、旋转、显隐、锁定和排序。
-- 保存与导出只写最终合成图片，不生成可再次打开的项目文件。PNG、JPEG、WebP、静态 GIF 和单页 TIFF 均可导出。
-- 所有编辑操作共用最多 100 步会话内撤销/重做；失败操作不提交状态。
+src/       客户端（PySide6 + 领域/应用/基础设施分层）
+server/    FastAPI 服务端（domain/application/infrastructure/api/admin）
+packaging/ PyInstaller spec + Inno Setup 安装脚本
+scripts/   构建/验证脚本
+tests/     测试
+docs/      需求与决策文档
+```
