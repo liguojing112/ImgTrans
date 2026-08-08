@@ -172,6 +172,19 @@ def test_payment_orders_show_snapshots_and_filter_refunded_orders() -> None:
             plan_type="combo",
             )
         )
+    repository.create(
+        PaymentOrder(
+            order_id="legacy-payment-order",
+            plan_id=plan.plan_id,
+            amount_minor=5000,
+            currency="CNY",
+            status=PaymentStatus.PAID,
+            code_id=issued.activation.code_id,
+            activation_code=None,
+            created_at=datetime.now(timezone.utc),
+            plan_type="combo",
+        )
+    )
 
     async def scenario():
         transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
@@ -179,6 +192,10 @@ def test_payment_orders_show_snapshots_and_filter_refunded_orders() -> None:
             transport=transport, base_url="http://testserver"
         ) as client:
             csrf_token = await _login(client)
+            page = await client.get("/admin/payments")
+            assert page.text.count(f"<code>{issued.plaintext}</code>") == 3
+            assert page.text.count(f'data-copy="{issued.plaintext}"') == 3
+            delattr(app.state, "refund_payment_order")
             disabled = await client.post(
                 f"/admin/activation/codes/{issued.activation.code_id}/disable",
                 data={

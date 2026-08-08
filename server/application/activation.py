@@ -51,6 +51,7 @@ class ActivationRepository(Protocol):
     ) -> tuple[tuple[ActivationCode, ...], int]: ...
 
     def list_code_states(self, code_ids) -> dict[str, bool]: ...
+    def list_code_details(self, code_ids) -> dict[str, ActivationCode]: ...
 
     def disable_code(self, code_id: str, now: datetime) -> ActivationCode: ...
 
@@ -213,6 +214,9 @@ class ManageActivationCodes:
 
     def states(self, code_ids) -> dict[str, bool]:
         return self._repository.list_code_states(code_ids)
+
+    def details(self, code_ids) -> dict[str, ActivationCode]:
+        return self._repository.list_code_details(code_ids)
 
     def disable(self, code_id: str) -> ActivationCode:
         return self._repository.disable_code(code_id, datetime.now(timezone.utc))

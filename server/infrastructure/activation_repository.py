@@ -288,6 +288,21 @@ class SqlAlchemyActivationRepository:
             )
             return {code_id: disabled for code_id, disabled in rows}
 
+    def list_code_details(self, code_ids) -> dict[str, ActivationCode]:
+        ids = tuple(cid for cid in code_ids if cid)
+        if not ids:
+            return {}
+        with self._database.session() as session:
+            records = session.scalars(
+                select(ActivationCodeRecord).where(
+                    ActivationCodeRecord.code_id.in_(ids)
+                )
+            )
+            return {
+                record.code_id: _code_to_domain(record, self._cipher)
+                for record in records
+            }
+
     def disable_code(self, code_id: str, now: datetime) -> ActivationCode:
         with self._database.session() as session:
             record = session.get(ActivationCodeRecord, code_id)

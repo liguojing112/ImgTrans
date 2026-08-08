@@ -25,6 +25,8 @@ from server.domain.admin_users import (
 from server.domain.image_limits import ImageLimitConflict, ImageLimitValues
 from server.api.rate_limit import enforce_rate_limit
 from server.domain.translation import TranslationTextItem, TranslationTextRequest
+from server.application.payment import RefundPaymentOrder
+from server.infrastructure.payment_repository import SqlAlchemyPaymentRepository
 
 
 _ROOT = Path(__file__).resolve().parent
@@ -348,7 +350,14 @@ async def disable_activation_code(code_id: str, request: Request) -> Response:
     request.app.state.manage_activation_codes.disable(code_id)
     order_id = (form.get("order_id") or "").strip()
     if order_id:
-        request.app.state.refund_payment_order.execute(order_id, code_id)
+        refund_payment_order = getattr(
+            request.app.state, "refund_payment_order", None
+        )
+        if refund_payment_order is None:
+            refund_payment_order = RefundPaymentOrder(
+                SqlAlchemyPaymentRepository(request.app.state.database)
+            )
+        refund_payment_order.execute(order_id, code_id)
     request.state.audit_action = "disable_activation_code"
     target = form.get("next", "")
     return _redirect(target if target.startswith("/admin/") else "/admin/activation")
@@ -449,9 +458,20 @@ def payments_page(request: Request) -> Response:
         else ((), 0)
     )
     pages = max(1, -(-total // _RECORD_PAGE_SIZE))
-    code_states = request.app.state.manage_activation_codes.states(
-        tuple(order.code_id for order in orders if order.code_id)
-    )
+    code_ids = tuple(order.code_id for order in orders if order.code_id)
+    code_states = request.app.state.manage_activation_codes.states(code_ids)
+    code_details = request.app.state.manage_activation_codes.details(code_ids)
+    display_codes = {
+        order.order_id: (
+            order.activation_code
+            or (
+                code_details[order.code_id].plaintext
+                if order.code_id in code_details
+                else None
+            )
+        )
+        for order in orders
+    }
     amounts = listing.list_amounts() if listing is not None else ()
     filters = {
         "activation_code": activation_code or "",
@@ -488,6 +508,7 @@ def payments_page(request: Request) -> Response:
         page_size=_RECORD_PAGE_SIZE,
         page_numbers=_pagination_numbers(page, pages),
         code_states=code_states,
+        display_codes=display_codes,
     )
 
 
