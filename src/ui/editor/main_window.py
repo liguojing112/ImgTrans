@@ -1204,13 +1204,18 @@ class EditorMainWindow(QMainWindow):
 
     def _enter_product(self) -> None:
         """打开商品详情生成窗口（LLM 由服务端代理）；已存在且可见则复用。"""
+        import logging
+
+        logger = logging.getLogger("imgtrans")
         existing = self._product_window
         if existing is not None:
             if existing.isVisible():
+                logger.info("nav_enter_product reuse visible")
                 existing.show()
                 existing.raise_()
                 self.hide()
                 return
+            logger.info("nav_enter_product rebuild stale window")
             # 已关闭但引用残留：清理后重建
             existing.close()
             self._product_window = None
@@ -1237,11 +1242,17 @@ class EditorMainWindow(QMainWindow):
 
     def _on_product_closed(self) -> None:
         """商品详情窗口关闭（含点 X）时回到首页并确保商品窗口销毁。"""
+        import logging
+
+        logger = logging.getLogger("imgtrans")
         window = self._product_window
         self._product_window = None
         if window is not None:
+            logger.info("nav_product_closed closing window")
             window.close()
             window.deleteLater()
+        else:
+            logger.info("nav_product_closed no window ref")
         self._stack.setCurrentWidget(self._home_page)
         self.show()
         self.raise_()
