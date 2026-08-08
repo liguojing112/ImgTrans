@@ -73,7 +73,7 @@ class StepSource(QFrame):
         link_layout.addWidget(self._parse_btn)
 
         self._link_status = QLabel("")
-        self._link_status.setStyleSheet("color: #626b7a;")
+        self._link_status.setStyleSheet("color: #000000;")
         link_layout.addWidget(self._link_status)
 
         layout.addWidget(link_group)
@@ -184,7 +184,7 @@ class StepSource(QFrame):
         self._form.set_info(updated)
         platform_text = f"[{platform}] " if platform else ""
         self._link_status.setText(f"{platform_text}解析完成 ✓")
-        self._link_status.setStyleSheet("color: #626b7a;")
+        self._link_status.setStyleSheet("color: #000000;")
         self._link_status.setWordWrap(False)
 
     def set_parse_error(self, message: str) -> None:
@@ -194,7 +194,7 @@ class StepSource(QFrame):
 
     def set_parse_idle(self) -> None:
         self._link_status.setText("")
-        self._link_status.setStyleSheet("color: #626b7a;")
+        self._link_status.setStyleSheet("color: #000000;")
         self._link_status.setWordWrap(False)
 
     def _on_parse_clicked(self) -> None:

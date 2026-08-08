@@ -69,7 +69,7 @@ class StepIndicator(QFrame):
                 btn.setChecked(False)
                 btn.setStyleSheet(
                     "QPushButton#stepButton {"
-                    "  background: #ffffff; color: #626b7a;"
+                    "  background: #ffffff; color: #000000;"
                     "  border: 1px solid #d5d9e0; padding: 8px 16px;"
                     "  border-radius: 4px;"
                     "}"

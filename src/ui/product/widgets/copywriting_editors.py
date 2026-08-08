@@ -195,7 +195,7 @@ class KeywordEditor(QFrame):
         meaning_edit.setMaximumWidth(150)
         meaning_edit.setStyleSheet(
             "QLineEdit { background: transparent; border: 1px solid #d5d9e0;"
-            "  color: #626b7a; padding: 2px 6px; border-radius: 4px; }"
+            "  color: #000000; padding: 2px 6px; border-radius: 4px; }"
         )
         meaning_edit.textChanged.connect(
             lambda t, kid=kw.id: self.item_edited.emit(
@@ -305,7 +305,7 @@ class TitleEditor(QFrame):
         row.addWidget(edit, stretch=1)
 
         count = QLabel(f"{len(title.title)}字")
-        count.setStyleSheet("color: #626b7a;")
+        count.setStyleSheet("color: #000000;")
         count.setFixedWidth(40)
         edit.textChanged.connect(lambda t, lbl=count: lbl.setText(f"{len(t)}字"))
         row.addWidget(count)
@@ -411,7 +411,7 @@ class SellingPointEditor(QFrame):
             edit.setReadOnly(True)
             edit.setStyleSheet(
                 "QLineEdit { background: #ffffff; border: 1px solid #d5d9e0;"
-                "  color: #626b7a; padding: 2px 6px; border-radius: 4px; }"
+                "  color: #000000; padding: 2px 6px; border-radius: 4px; }"
             )
         edit.textChanged.connect(lambda t, sid=sp.id: self.item_edited.emit(sid, t))
         row.addWidget(edit, stretch=1)

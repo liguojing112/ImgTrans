@@ -115,7 +115,7 @@ class _FactRow(QFrame):
         # 标签
         lbl = QLabel(label)
         lbl.setFixedWidth(80)
-        lbl.setStyleSheet("color: #626b7a;")
+        lbl.setStyleSheet("color: #000000;")
         layout.addWidget(lbl)
 
         # 值

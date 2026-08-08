@@ -169,7 +169,7 @@ class TextLayerItem(QGraphicsItem):
         elif self._status in ("overflow", "failed"):
             base_color = QColor("#dc2626")  # 红色 — 溢出/失败
         elif self._status in ("skipped_language", "skipped_protected"):
-            base_color = QColor("#626b7a")  # 灰色 — 跳过
+            base_color = QColor("#000000")  # 灰色 — 跳过
         else:
             base_color = QColor("#3973db")  # 蓝色 — 正常翻译
 

@@ -50,7 +50,7 @@ class ImageListPanel(QFrame):
         add_folder_btn = QPushButton("+ 添加文件夹")
         add_folder_btn.clicked.connect(self._on_add_folder_clicked)
         add_folder_btn.setStyleSheet(
-            "QPushButton { background: #ffffff; color: #626b7a;"
+            "QPushButton { background: #ffffff; color: #000000;"
             "  padding: 6px 12px; border: 1px solid #d5d9e0; border-radius: 4px; }"
             "QPushButton:hover { background: #eef0f4; color: #212733; }"
         )
@@ -64,7 +64,7 @@ class ImageListPanel(QFrame):
         select_all_btn = QPushButton("全选")
         select_all_btn.clicked.connect(lambda: self._model.select_all())
         select_all_btn.setStyleSheet(
-            "QPushButton { background: transparent; color: #626b7a;"
+            "QPushButton { background: transparent; color: #000000;"
             "  border: 1px solid #d5d9e0; padding: 3px 10px; border-radius: 4px; }"
             "QPushButton:hover { background: #eef0f4; color: #212733; }"
         )

@@ -71,7 +71,7 @@ class ImageUploader(QFrame):
         self._clear_btn.setMinimumHeight(48)
         self._clear_btn.setStyleSheet(
             "QPushButton {"
-            "  background: #ffffff; color: #626b7a;"
+            "  background: #ffffff; color: #000000;"
             "  padding: 12px 24px; border: 1px solid #d5d9e0; border-radius: 8px;"
             "}"
             "QPushButton:hover { background: #eef0f4; color: #212733; }"

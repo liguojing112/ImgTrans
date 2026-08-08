@@ -40,11 +40,11 @@ class ImageListPanel(QFrame):
         self._remove_btn.setEnabled(False)
         self._remove_btn.setToolTip("从工作台移除选中图片（不影响磁盘文件）")
         self._remove_btn.setStyleSheet(
-            "QPushButton { background: #2a2a44; color: #212733;"
+            "QPushButton { background: #eef0f4; color: #212733;"
             "  border: 1px solid #d5d9e0; border-radius: 6px;"
             "  padding: 4px 10px; }"
             "QPushButton:disabled { color: #98a0ad; }"
-            "QPushButton:hover { background: #34345a; }"
+            "QPushButton:hover { background: #e0e4ec; }"
         )
         self._remove_btn.clicked.connect(self._on_remove_clicked)
         layout.addWidget(self._remove_btn)

@@ -50,6 +50,7 @@ class ProductWindow(QMainWindow):
     """商品详情生成主窗口 — 三步式工作流。"""
 
     back_requested = Signal()
+    closed = Signal()  # 窗口被关闭（含点右上角 X），供宿主恢复主界面
     parse_hint_signal = Signal(str)  # 解析中的用户提示（跨线程）
 
     _AUTO_SAVE_INTERVAL = 60_000  # 自动保存间隔（毫秒）
@@ -653,6 +654,10 @@ class ProductWindow(QMainWindow):
         if self._project_id and self._model.is_dirty:
             self._on_save_project(silent=True)
             self._model.is_dirty = False
+
+    def closeEvent(self, event) -> None:
+        self.closed.emit()
+        super().closeEvent(event)
 
     def _on_save_project(self, silent: bool = False) -> None:
         store = self._init_project_store()

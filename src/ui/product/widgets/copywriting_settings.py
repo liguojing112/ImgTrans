@@ -238,10 +238,10 @@ class CopywritingSettingsPanel(QFrame):
         btn_smaller.setToolTip("减小")
         btn_smaller.setFixedSize(24, 18)
         btn_smaller.setStyleSheet(
-            "QToolButton { background: #2a2a44; color: #212733;"
+            "QToolButton { background: #eef0f4; color: #212733;"
             "  border: 1px solid #d5d9e0; border-radius: 4px; }"
-            "QToolButton:hover { background: #34345a; }"
-            "QToolButton:pressed { background: #3a3a5e; }"
+            "QToolButton:hover { background: #e0e4ec; }"
+            "QToolButton:pressed { background: #d5d9e0; }"
         )
         btn_smaller.clicked.connect(spin.stepDown)
         hbox.addWidget(btn_smaller)
@@ -251,10 +251,10 @@ class CopywritingSettingsPanel(QFrame):
         btn_larger.setToolTip("增大")
         btn_larger.setFixedSize(24, 18)
         btn_larger.setStyleSheet(
-            "QToolButton { background: #2a2a44; color: #212733;"
+            "QToolButton { background: #eef0f4; color: #212733;"
             "  border: 1px solid #d5d9e0; border-radius: 4px; }"
-            "QToolButton:hover { background: #34345a; }"
-            "QToolButton:pressed { background: #3a3a5e; }"
+            "QToolButton:hover { background: #e0e4ec; }"
+            "QToolButton:pressed { background: #d5d9e0; }"
         )
         btn_larger.clicked.connect(spin.stepUp)
         hbox.addWidget(btn_larger)

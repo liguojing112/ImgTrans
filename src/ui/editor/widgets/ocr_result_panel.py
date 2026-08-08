@@ -92,7 +92,7 @@ class OcrResultPanel(QFrame):
             "  background: #4a8af4;"
             "}"
             "QHeaderView::section {"
-            "  background: #ffffff; color: #626b7a;"
+            "  background: #ffffff; color: #000000;"
             "  border: none; padding: 4px;"
             "}"
         )
@@ -199,7 +199,7 @@ class OcrResultPanel(QFrame):
             else:
                 translated_text = "—"
                 status_text = "标准"
-                status_fg = QColor("#626b7a")
+                status_fg = QColor("#000000")
             status_value = (
                 str(unit.status.value)
                 if unit is not None
@@ -314,11 +314,11 @@ def _translation_status(status: str) -> tuple[str, QColor]:
     return {
         "translated": ("已翻译", QColor("#15803d")),
         "review_required": ("待复核", QColor("#e5b83c")),
-        "skipped_protected": ("已保护", QColor("#626b7a")),
-        "skipped_user": ("用户保留", QColor("#626b7a")),
-        "skipped_language": ("保留", QColor("#626b7a")),
+        "skipped_protected": ("已保护", QColor("#000000")),
+        "skipped_user": ("用户保留", QColor("#000000")),
+        "skipped_language": ("保留", QColor("#000000")),
         "failed": ("失败", QColor("#dc2626")),
-    }.get(status, (status, QColor("#626b7a")))
+    }.get(status, (status, QColor("#000000")))
 
 
 def _status_tooltip(status: str, region: TextRegion) -> str:

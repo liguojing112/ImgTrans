@@ -54,7 +54,7 @@ class PreviewPanel(QFrame):
         # 预览区域（占满剩余空间）
         preview_group = QGroupBox("当前预览")
         preview_group.setStyleSheet(
-            "QGroupBox { color: #626b7a; border: 1px solid #d5d9e0;"
+            "QGroupBox { color: #000000; border: 1px solid #d5d9e0;"
             "  border-radius: 6px; margin-top: 8px; padding-top: 12px; }"
         )
         preview_layout = QVBoxLayout(preview_group)
@@ -93,7 +93,7 @@ class PreviewPanel(QFrame):
         browse_btn = QPushButton("浏览...")
         browse_btn.setFixedSize(60, 24)
         browse_btn.setStyleSheet(
-            "QPushButton { background: #ffffff; color: #626b7a; border: 1px solid #d5d9e0;"
+            "QPushButton { background: #ffffff; color: #000000; border: 1px solid #d5d9e0;"
             " border-radius: 4px; } QPushButton:hover { color: #212733; }"
         )
         browse_btn.clicked.connect(self._on_browse_target)
@@ -158,10 +158,10 @@ class PreviewPanel(QFrame):
         btn_smaller.setToolTip("减小")
         btn_smaller.setFixedSize(22, 16)
         btn_smaller.setStyleSheet(
-            "QToolButton { background: #2a2a44; color: #212733;"
+            "QToolButton { background: #eef0f4; color: #212733;"
             "  border: 1px solid #d5d9e0; border-radius: 4px; }"
-            "QToolButton:hover { background: #34345a; }"
-            "QToolButton:pressed { background: #3a3a5e; }"
+            "QToolButton:hover { background: #e0e4ec; }"
+            "QToolButton:pressed { background: #d5d9e0; }"
         )
         btn_smaller.clicked.connect(spin.stepDown)
         hbox.addWidget(btn_smaller)
@@ -171,10 +171,10 @@ class PreviewPanel(QFrame):
         btn_larger.setToolTip("增大")
         btn_larger.setFixedSize(22, 16)
         btn_larger.setStyleSheet(
-            "QToolButton { background: #2a2a44; color: #212733;"
+            "QToolButton { background: #eef0f4; color: #212733;"
             "  border: 1px solid #d5d9e0; border-radius: 4px; }"
-            "QToolButton:hover { background: #34345a; }"
-            "QToolButton:pressed { background: #3a3a5e; }"
+            "QToolButton:hover { background: #e0e4ec; }"
+            "QToolButton:pressed { background: #d5d9e0; }"
         )
         btn_larger.clicked.connect(spin.stepUp)
         hbox.addWidget(btn_larger)

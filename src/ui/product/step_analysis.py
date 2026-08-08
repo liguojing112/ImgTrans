@@ -93,7 +93,7 @@ class StepAnalysis(QFrame):
         vision_layout = QVBoxLayout(self._vision_group)
         self._vision_content = QLabel("分析后将显示图片内容理解结果...")
         self._vision_content.setWordWrap(True)
-        self._vision_content.setStyleSheet("color: #626b7a;")
+        self._vision_content.setStyleSheet("color: #000000;")
         vision_layout.addWidget(self._vision_content)
         left_layout.addWidget(self._vision_group)
 
@@ -172,7 +172,7 @@ class StepAnalysis(QFrame):
             if u.background:
                 lines.append(f"背景: {u.background}")
             self._vision_content.setText("\n".join(lines))
-            self._vision_content.setStyleSheet("color: #626b7a;")
+            self._vision_content.setStyleSheet("color: #000000;")
         else:
             self._vision_content.setText(
                 "暂无图片理解结果\n\n"

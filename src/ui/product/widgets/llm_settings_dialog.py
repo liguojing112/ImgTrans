@@ -79,7 +79,7 @@ class LlmSettingsDialog(QDialog):
 
         # 状态提示
         self._status = QLabel("")
-        self._status.setStyleSheet("color: #626b7a;")
+        self._status.setStyleSheet("color: #000000;")
         layout.addWidget(self._status)
 
         # 按钮

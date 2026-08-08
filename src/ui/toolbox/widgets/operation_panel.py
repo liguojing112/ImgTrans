@@ -60,7 +60,7 @@ class OperationPanel(QFrame):
         # ── 裁剪 ─
         crop_group = QGroupBox("裁剪")
         crop_group.setStyleSheet(
-            "QGroupBox { color: #626b7a; border: 1px solid #d5d9e0;"
+            "QGroupBox { color: #000000; border: 1px solid #d5d9e0;"
             "  border-radius: 6px; margin-top: 8px; padding-top: 12px; }"
         )
         crop_outer = QVBoxLayout(crop_group)
@@ -373,10 +373,10 @@ class OperationPanel(QFrame):
         btn_smaller.setToolTip("减小")
         btn_smaller.setFixedSize(22, 16)
         btn_smaller.setStyleSheet(
-            "QToolButton { background: #2a2a44; color: #212733;"
+            "QToolButton { background: #eef0f4; color: #212733;"
             "  border: 1px solid #d5d9e0; border-radius: 4px; }"
-            "QToolButton:hover { background: #34345a; }"
-            "QToolButton:pressed { background: #3a3a5e; }"
+            "QToolButton:hover { background: #e0e4ec; }"
+            "QToolButton:pressed { background: #d5d9e0; }"
         )
         btn_smaller.clicked.connect(spin.stepDown)
         hbox.addWidget(btn_smaller)
@@ -386,10 +386,10 @@ class OperationPanel(QFrame):
         btn_larger.setToolTip("增大")
         btn_larger.setFixedSize(22, 16)
         btn_larger.setStyleSheet(
-            "QToolButton { background: #2a2a44; color: #212733;"
+            "QToolButton { background: #eef0f4; color: #212733;"
             "  border: 1px solid #d5d9e0; border-radius: 4px; }"
-            "QToolButton:hover { background: #34345a; }"
-            "QToolButton:pressed { background: #3a3a5e; }"
+            "QToolButton:hover { background: #e0e4ec; }"
+            "QToolButton:pressed { background: #d5d9e0; }"
         )
         btn_larger.clicked.connect(spin.stepUp)
         hbox.addWidget(btn_larger)

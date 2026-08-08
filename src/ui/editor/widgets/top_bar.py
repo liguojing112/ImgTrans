@@ -60,7 +60,7 @@ class TopBar(QFrame):
         # 2. 文件名
         self.file_label = QLabel("未打开图片")
         self.file_label.setStyleSheet(
-            "color: #626b7a; padding: 0 8px;"
+            "color: #000000; padding: 0 8px;"
         )
 
         layout.addWidget(self.back_btn)
@@ -177,7 +177,7 @@ class TopBar(QFrame):
         # 11. 缩放比例
         self.zoom_label = QLabel("100%")
         self.zoom_label.setStyleSheet(
-            "color: #626b7a; min-width: 44px;"
+            "color: #000000; min-width: 44px;"
         )
         self.zoom_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
 

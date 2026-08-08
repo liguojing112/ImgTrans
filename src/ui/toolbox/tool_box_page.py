@@ -64,7 +64,7 @@ class ToolBoxPage(QFrame):
         top_layout.addStretch()
 
         status_label = QLabel("")
-        status_label.setStyleSheet("color: #626b7a;")
+        status_label.setStyleSheet("color: #000000;")
         self._status_label = status_label
         top_layout.addWidget(status_label)
 
@@ -163,7 +163,7 @@ class ToolBoxPage(QFrame):
             return
 
         self._status_label.setText(f"正在处理 {len(images)} 张图片...")
-        self._status_label.setStyleSheet("color: #626b7a;")
+        self._status_label.setStyleSheet("color: #000000;")
 
         # 裁剪只作用于当前预览的图片，其他图片跳过裁剪
         preview_id = self._preview_panel.current_preview_id()

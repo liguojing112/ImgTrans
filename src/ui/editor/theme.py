@@ -29,7 +29,7 @@ QLabel#homeCardTitle {
     font-weight: 600;
 }
 QLabel#homeCardDesc {
-    color: #626b7a;
+    color: #000000;
     font-size: 12px;
 }
 QLabel#homeCardDisabled {
@@ -69,7 +69,7 @@ QLabel#fieldLabel {
     font-weight: 500;
 }
 QLabel#captionLabel {
-    color: #626b7a;
+    color: #000000;
     font-size: 12px;
     font-weight: 400;
 }
@@ -93,7 +93,7 @@ QLabel#homeTitle {
     font-weight: 700;
 }
 QLabel#homeSubtitle {
-    color: #626b7a;
+    color: #000000;
     font-size: 12px;
 }
 
@@ -113,7 +113,7 @@ QLabel#homeCardTitle {
     font-weight: 600;
 }
 QLabel#homeCardDesc {
-    color: #626b7a;
+    color: #000000;
     font-size: 12px;
 }
 
@@ -139,7 +139,7 @@ QSplitter::handle:hover {
 }
 QPushButton#toolButton {
     background: transparent;
-    color: #626b7a;
+    color: #000000;
     border: none;
     border-radius: 8px;
     padding: 4px;
@@ -170,7 +170,7 @@ QTabWidget#editorRightTabs::pane {
 }
 QTabWidget#editorRightTabs QTabBar::tab {
     background: #f8f9fb;
-    color: #626b7a;
+    color: #000000;
     border: none;
     padding: 9px 8px;
     min-width: 58px;
@@ -289,7 +289,7 @@ QPushButton#enterEditorButton:pressed {
 /* 返回按钮 */
 QPushButton#backButton {
     background: transparent;
-    color: #626b7a;
+    color: #000000;
     border: 1px solid #d5d9e0;
     border-radius: 6px;
     padding: 6px 14px;
@@ -367,7 +367,7 @@ QSplitter::handle:horizontal {
 /* 状态栏 */
 QStatusBar[editorStyle="true"] {
     background: #f4f5f7;
-    color: #626b7a;
+    color: #000000;
     border-top: 1px solid #d5d9e0;
 }
 
@@ -390,7 +390,7 @@ QPushButton { border-radius: 8px; }
 QDoubleSpinBox, QSpinBox, QComboBox, QPlainTextEdit, QLineEdit { border-radius: 6px; }
 
 /* QLabel disabled 可读 */
-QLabel:disabled { color: #626b7a; }
+QLabel:disabled { color: #000000; }
 
 /* 通用主要按钮样式 - 现代渐变 */
 QPushButton.primary, QPushButton[primary="true"] {

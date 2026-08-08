@@ -1203,7 +1203,13 @@ class EditorMainWindow(QMainWindow):
         self.__product_window = value
 
     def _enter_product(self) -> None:
-        """打开商品详情生成窗口（LLM 由服务端代理）。"""
+        """打开商品详情生成窗口（LLM 由服务端代理）；已存在则复用避免多窗口。"""
+        existing = self._product_window
+        if existing is not None:
+            existing.show()
+            existing.raise_()
+            self.hide()
+            return
         from src.ui.product.product_window import ProductWindow
         from src.infrastructure.server_llm_adapter import ServerLLMAdapter
 
@@ -1217,15 +1223,22 @@ class EditorMainWindow(QMainWindow):
             access_token=self._access_token,
         )
         win.back_requested.connect(self._on_product_back)
+        win.closed.connect(self._on_product_closed)
         self._product_window = win
         self.hide()
         win.show()
 
     def _on_product_back(self) -> None:
-        if self._product_window:
-            self._product_window.close()
-            self._product_window = None
-        self.show()
+        self._on_product_closed()
+
+    def _on_product_closed(self) -> None:
+        """商品详情窗口关闭（含点 X）时恢复主窗口，避免卡在隐藏态。"""
+        window = self._product_window
+        self._product_window = None
+        if window is not None:
+            window.close()
+        if not self.isVisible():
+            self.show()
 
     # —— 图片工具箱 ——
 
