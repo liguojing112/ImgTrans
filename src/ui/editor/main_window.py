@@ -1219,7 +1219,7 @@ class EditorMainWindow(QMainWindow):
             # 已关闭但引用残留：清理后重建
             existing.close()
             self._product_window = None
-        logger.info("nav_enter_product create new")
+        logger.info("nav_enter_product create new self=%s", id(self))
         from src.ui.product.product_window import ProductWindow
         from src.infrastructure.server_llm_adapter import ServerLLMAdapter
 
@@ -1247,6 +1247,7 @@ class EditorMainWindow(QMainWindow):
         import logging
 
         logger = logging.getLogger("imgtrans")
+        logger.info("nav_product_closed self=%s window=%s", id(self), self._product_window)
         window = self._product_window
         logger.info("nav_product_closed window_none=%s id=%s", window is None, id(window) if window else "-")
         self._product_window = None
