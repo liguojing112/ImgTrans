@@ -51,8 +51,8 @@ class ServerLLMAdapter(LLMAdapter):
         model: str | None = None,
         max_tokens: int | None = None,
     ) -> str:
-        image_b64 = self.encode_image(image_path)
-        media_type = self._image_media_type(image_path)
+        # 压缩图片再上传，避免大图导致 GLM 视觉处理超时
+        image_b64, media_type = self._encode_compressed_image(image_path)
         messages = [
             {
                 "role": "user",
@@ -68,6 +68,30 @@ class ServerLLMAdapter(LLMAdapter):
             }
         ]
         return self._server_chat(messages, model, max_tokens)
+
+    @staticmethod
+    def _encode_compressed_image(
+        path: Path, max_side: int = 1024, quality: int = 82
+    ) -> tuple[str, str]:
+        """缩放图片最长边到 max_side 并 JPEG 压缩，返回 (base64, media_type)。"""
+        from PIL import Image
+        import base64
+        import io
+
+        with Image.open(path) as image:
+            image = image.convert("RGB")
+            width, height = image.size
+            longest = max(width, height)
+            if longest > max_side:
+                scale = max_side / longest
+                image = image.resize(
+                    (max(1, int(width * scale)), max(1, int(height * scale))),
+                    Image.Resampling.LANCZOS,
+                )
+            buffer = io.BytesIO()
+            image.save(buffer, format="JPEG", quality=quality, optimize=True)
+            encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
+        return encoded, "image/jpeg"
 
     def _server_chat(
         self,
