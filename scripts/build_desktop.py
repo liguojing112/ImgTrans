@@ -83,13 +83,19 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     root = Path(__file__).resolve().parents[1]
-    from scripts.prepare_bundled_models import prepare as prepare_bundled
+    from scripts.prepare_bundled_models import LAMA_MODEL_FILENAME, prepare as prepare_bundled
 
-    prepare_bundled(
-        root / "packaging" / "bundled_models",
-        Path(rapidocr.__file__).resolve().parent,
-        None,
-    )
+    bundled_dir = root / "packaging" / "bundled_models"
+    lama_cached = (
+        bundled_dir / "lama-inpainting" / LAMA_MODEL_FILENAME
+    ).is_file()
+    if not (bundled_dir.is_dir() and lama_cached):
+        # 模型缓存不完整才重新生成（需本地 lama 模型源）
+        prepare_bundled(
+            bundled_dir,
+            Path(rapidocr.__file__).resolve().parent,
+            None,
+        )
 
     environment = os.environ.copy()
     environment["IMGTRANS_BUILD_TARGET"] = args.target
