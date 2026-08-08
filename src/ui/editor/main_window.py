@@ -1592,6 +1592,7 @@ class EditorMainWindow(QMainWindow):
         if not is_active:
             # 用户已切到其他文档：仅保存结果，不打扰当前画布
             self._sync_translation_activity_for_active_document()
+            self._editor_page.translate_controls.set_translating(False)
             self._editor_page.translate_controls.reset_progress()
             active_ref = self._model.active_document()
             if active_ref is not None:
@@ -1657,6 +1658,9 @@ class EditorMainWindow(QMainWindow):
             ocr_count, translated, review, skipped, failed, overflow,
             ocr_ms=ocr_ms, total_ms=total_ms,
         )
+        self._editor_page.translate_controls.set_translating(False)
+        self._editor_page.translate_controls.reset_progress()
+        self.statusBar().showMessage("翻译完成")
         self._model.translation_finished.emit(result)
 
     def _on_translation_failed(
