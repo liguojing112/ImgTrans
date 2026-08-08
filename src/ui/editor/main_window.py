@@ -1236,13 +1236,15 @@ class EditorMainWindow(QMainWindow):
         self._on_product_closed()
 
     def _on_product_closed(self) -> None:
-        """商品详情窗口关闭（含点 X）时恢复主窗口，避免卡在隐藏态。"""
+        """商品详情窗口关闭（含点 X）时回到首页并确保商品窗口销毁。"""
         window = self._product_window
         self._product_window = None
         if window is not None:
             window.close()
-        if not self.isVisible():
-            self.show()
+            window.deleteLater()
+        self._stack.setCurrentWidget(self._home_page)
+        self.show()
+        self.raise_()
 
     # —— 图片工具箱 ——
 
