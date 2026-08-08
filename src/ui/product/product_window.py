@@ -832,7 +832,7 @@ class ProductWindow(QMainWindow):
     def _classify_error(self, msg: str) -> str:
         msg_lower = msg.lower()
         if "401" in msg or "unauthorized" in msg_lower or "invalid api" in msg_lower:
-            return f"未激活或授权已失效，请重新激活或续费 ({msg})"
+            return f"未激活或授权已失效，请重新激活，或联系客服 ({msg})"
         if "429" in msg or "rate limit" in msg_lower or "quota" in msg_lower or "额度" in msg:
             return f"API 额度不足或请求频率超限，请稍后重试或联系供应商 ({msg})"
         if "timeout" in msg_lower or "timed out" in msg_lower:
