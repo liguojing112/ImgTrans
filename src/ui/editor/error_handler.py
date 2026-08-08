@@ -4,7 +4,7 @@ from __future__ import annotations
 
 _ERROR_SUGGESTIONS = {
     "connection": ("连接失败", "无法连接到后端服务", "请检查服务是否已启动，或网络连接是否正常。"),
-    "unauthorized": ("认证失败", "API 认证未通过", "请检查 API Token 是否配置正确，或重新激活设备。"),
+    "unauthorized": ("认证失败", "激活码已停用或授权已失效", "请重新激活，或联系客服。"),
     "rate_limited": ("请求过多", "请求频率超过限制", "请稍后重试。"),
     "server_error": ("服务端错误", "后端服务返回异常", "请联系管理员，或稍后重试。"),
     "model_load": ("模型加载失败", "OCR/修复模型加载失败", "请检查模型文件是否完整，或重新下载模型。"),
@@ -38,7 +38,12 @@ def classify_error(error: Exception) -> tuple[str, str, str]:
         error_code = str(error_code)
 
     # HTTP 状态码判断
-    if error_code == "401" or "unauthorized" in msg.lower() or "401" in msg:
+    if (
+        error_code == "401"
+        or "unauthorized" in msg.lower()
+        or "401" in msg
+        or (error_code is not None and "authentication" in error_code.lower())
+    ):
         return _ERROR_SUGGESTIONS["unauthorized"]
     if error_code == "429" or "too many requests" in msg.lower() or "429" in msg:
         return _ERROR_SUGGESTIONS["rate_limited"]
