@@ -365,11 +365,12 @@ async def disable_activation_code(code_id: str, request: Request) -> Response:
 
 @admin_router.post("/activation/codes/{code_id}/enable")
 async def enable_activation_code(code_id: str, request: Request) -> Response:
-    session, _ = await _protected_form(request)
+    session, form = await _protected_form(request)
     _require_permission(request, session, "activation")
     request.app.state.manage_activation_codes.enable(code_id)
     request.state.audit_action = "enable_activation_code"
-    return _redirect("/admin/activation")
+    target = form.get("next", "")
+    return _redirect(target if target.startswith("/admin/") else "/admin/activation")
 
 
 _AUDIT_LABELS = {
