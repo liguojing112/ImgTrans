@@ -36,13 +36,13 @@ class StepSource(QFrame):
 
         title = QLabel("第 1 步：商品来源")
         title.setObjectName("stepTitle")
-        title.setStyleSheet("color: #e0e0f0; font-size: 18px; font-weight: 650;")
+        title.setStyleSheet("color: #212733; font-size: 18px; font-weight: 650;")
         layout.addWidget(title)
 
         # 链接解析区域
         link_group = QFrame()
         link_group.setStyleSheet(
-            "QFrame { background: #1e1e2e; border: 1px solid #3d3d5c;"
+            "QFrame { background: #f4f5f7; border: 1px solid #d5d9e0;"
             "  border-radius: 6px; padding: 8px; }"
         )
         link_layout = QHBoxLayout(link_group)
@@ -52,8 +52,8 @@ class StepSource(QFrame):
         self._link_url = QLineEdit()
         self._link_url.setPlaceholderText("粘贴商品链接，如 Amazon / AliExpress / 淘宝 / 京东 ...")
         self._link_url.setStyleSheet(
-            "QLineEdit { background: #2a2a3e; border: 1px solid #3d3d5c;"
-            "  color: #e0e0f0; padding: 6px 10px; border-radius: 4px; }"
+            "QLineEdit { background: #ffffff; border: 1px solid #d5d9e0;"
+            "  color: #212733; padding: 6px 10px; border-radius: 4px; }"
         )
         self._link_url.returnPressed.connect(self._on_parse_clicked)
         link_layout.addWidget(self._link_url, stretch=1)
@@ -67,14 +67,14 @@ class StepSource(QFrame):
             "  padding: 6px 16px; font-size: 12px; font-weight: 600; }"
             "QPushButton:hover { background: qlineargradient(x1:0, y1:0, x2:0, y2:1,"
             "  stop:0 #5a9af4, stop:1 #4a8af4); border-color: #6aaaf4; }"
-            "QPushButton:disabled { background: #2a2a3e; color: #686878;"
-            "  border-color: #3d3d5c; }"
+            "QPushButton:disabled { background: #ffffff; color: #98a0ad;"
+            "  border-color: #d5d9e0; }"
         )
         self._parse_btn.clicked.connect(self._on_parse_clicked)
         link_layout.addWidget(self._parse_btn)
 
         self._link_status = QLabel("")
-        self._link_status.setStyleSheet("color: #9898b0; font-size: 11px;")
+        self._link_status.setStyleSheet("color: #626b7a; font-size: 11px;")
         link_layout.addWidget(self._link_status)
 
         layout.addWidget(link_group)
@@ -82,7 +82,7 @@ class StepSource(QFrame):
         # 左右分栏
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.setStyleSheet(
-            "QSplitter::handle { background: #2a2a3e; width: 2px; }"
+            "QSplitter::handle { background: #ffffff; width: 2px; }"
         )
 
         left = QFrame()
@@ -157,7 +157,7 @@ class StepSource(QFrame):
     def set_parse_hint(self, message: str) -> None:
         """显示人工验证提示（如验证码/登录墙）。"""
         self._link_status.setText(message)
-        self._link_status.setStyleSheet("color: #ffd700; font-size: 11px;")
+        self._link_status.setStyleSheet("color: #ca8a04; font-size: 11px;")
         self._link_status.setWordWrap(True)
 
     def set_parse_result(
@@ -185,17 +185,17 @@ class StepSource(QFrame):
         self._form.set_info(updated)
         platform_text = f"[{platform}] " if platform else ""
         self._link_status.setText(f"{platform_text}解析完成 ✓")
-        self._link_status.setStyleSheet("color: #9898b0; font-size: 11px;")
+        self._link_status.setStyleSheet("color: #626b7a; font-size: 11px;")
         self._link_status.setWordWrap(False)
 
     def set_parse_error(self, message: str) -> None:
         self._link_status.setText(f"✗ {message}")
-        self._link_status.setStyleSheet("color: #ff6b6b; font-size: 11px;")
+        self._link_status.setStyleSheet("color: #dc2626; font-size: 11px;")
         self._link_status.setWordWrap(True)
 
     def set_parse_idle(self) -> None:
         self._link_status.setText("")
-        self._link_status.setStyleSheet("color: #9898b0; font-size: 11px;")
+        self._link_status.setStyleSheet("color: #626b7a; font-size: 11px;")
         self._link_status.setWordWrap(False)
 
     def _on_parse_clicked(self) -> None:

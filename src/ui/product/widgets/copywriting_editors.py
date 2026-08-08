@@ -59,7 +59,7 @@ class TagEditor(QFrame):
 
         hint = QLabel("尚未生成，请先生成文案")
         hint.setObjectName("emptyHint")
-        hint.setStyleSheet("color: #686878; font-size: 12px; padding: 8px;")
+        hint.setStyleSheet("color: #98a0ad; font-size: 12px; padding: 8px;")
         hint.setWordWrap(True)
         layout.addWidget(hint)
         self._empty_hint = hint
@@ -90,8 +90,8 @@ class TagEditor(QFrame):
 
         edit = QLineEdit(tag.tag)
         edit.setStyleSheet(
-            "QLineEdit { background: transparent; border: 1px solid #3d3d5c;"
-            "  color: #e0e0f0; padding: 2px 6px; border-radius: 4px; }"
+            "QLineEdit { background: transparent; border: 1px solid #d5d9e0;"
+            "  color: #212733; padding: 2px 6px; border-radius: 4px; }"
         )
         edit.textChanged.connect(lambda t, tid=tag.id: self.item_edited.emit(tid, t))
         row.addWidget(edit, stretch=1)
@@ -180,8 +180,8 @@ class KeywordEditor(QFrame):
 
         kw_edit = QLineEdit(kw.keyword)
         kw_edit.setStyleSheet(
-            "QLineEdit { background: transparent; border: 1px solid #3d3d5c;"
-            "  color: #e0e0f0; padding: 2px 6px; border-radius: 4px; }"
+            "QLineEdit { background: transparent; border: 1px solid #d5d9e0;"
+            "  color: #212733; padding: 2px 6px; border-radius: 4px; }"
         )
         kw_edit.textChanged.connect(
             lambda t, kid=kw.id: self.item_edited.emit(
@@ -194,8 +194,8 @@ class KeywordEditor(QFrame):
         meaning_edit.setPlaceholderText("中文含义")
         meaning_edit.setMaximumWidth(150)
         meaning_edit.setStyleSheet(
-            "QLineEdit { background: transparent; border: 1px solid #3d3d5c;"
-            "  color: #9898b0; padding: 2px 6px; border-radius: 4px; }"
+            "QLineEdit { background: transparent; border: 1px solid #d5d9e0;"
+            "  color: #626b7a; padding: 2px 6px; border-radius: 4px; }"
         )
         meaning_edit.textChanged.connect(
             lambda t, kid=kw.id: self.item_edited.emit(
@@ -289,23 +289,23 @@ class TitleEditor(QFrame):
         star_btn = QPushButton("★" if title.is_selected else "☆")
         star_btn.setFixedSize(28, 28)
         star_btn.setStyleSheet(
-            "QPushButton { border: none; color: #ffd700; font-size: 16px; }"
+            "QPushButton { border: none; color: #ca8a04; font-size: 16px; }"
             if title.is_selected
-            else "QPushButton { border: none; color: #686878; font-size: 16px; }"
+            else "QPushButton { border: none; color: #98a0ad; font-size: 16px; }"
         )
         star_btn.clicked.connect(lambda tid=title.id: self._on_star_clicked(tid))
         row.addWidget(star_btn)
 
         edit = QLineEdit(title.title)
         edit.setStyleSheet(
-            "QLineEdit { background: transparent; border: 1px solid #3d3d5c;"
-            "  color: #e0e0f0; padding: 2px 6px; border-radius: 4px; }"
+            "QLineEdit { background: transparent; border: 1px solid #d5d9e0;"
+            "  color: #212733; padding: 2px 6px; border-radius: 4px; }"
         )
         edit.textChanged.connect(lambda t, tid=title.id: self.item_edited.emit(tid, t))
         row.addWidget(edit, stretch=1)
 
         count = QLabel(f"{len(title.title)}字")
-        count.setStyleSheet("color: #9898b0; font-size: 11px;")
+        count.setStyleSheet("color: #626b7a; font-size: 11px;")
         count.setFixedWidth(40)
         edit.textChanged.connect(lambda t, lbl=count: lbl.setText(f"{len(t)}字"))
         row.addWidget(count)
@@ -404,14 +404,14 @@ class SellingPointEditor(QFrame):
 
         edit = QLineEdit(sp.text)
         edit.setStyleSheet(
-            "QLineEdit { background: transparent; border: 1px solid #3d3d5c;"
-            "  color: #e0e0f0; padding: 2px 6px; border-radius: 4px; }"
+            "QLineEdit { background: transparent; border: 1px solid #d5d9e0;"
+            "  color: #212733; padding: 2px 6px; border-radius: 4px; }"
         )
         if sp.locked:
             edit.setReadOnly(True)
             edit.setStyleSheet(
-                "QLineEdit { background: #2a2a3e; border: 1px solid #3d3d5c;"
-                "  color: #9898b0; padding: 2px 6px; border-radius: 4px; }"
+                "QLineEdit { background: #ffffff; border: 1px solid #d5d9e0;"
+                "  color: #626b7a; padding: 2px 6px; border-radius: 4px; }"
             )
         edit.textChanged.connect(lambda t, sid=sp.id: self.item_edited.emit(sid, t))
         row.addWidget(edit, stretch=1)

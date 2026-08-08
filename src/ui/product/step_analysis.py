@@ -45,7 +45,7 @@ class StepAnalysis(QFrame):
         # 标题行
         header = QHBoxLayout()
         title = QLabel("第 2 步：AI 商品分析")
-        title.setStyleSheet("color: #e0e0f0; font-size: 18px; font-weight: 650;")
+        title.setStyleSheet("color: #212733; font-size: 18px; font-weight: 650;")
         header.addWidget(title)
         header.addStretch()
 
@@ -64,8 +64,8 @@ class StepAnalysis(QFrame):
             "  stop:0 #5a9af4, stop:1 #4a8af4);"
             "  border-color: #6aaaf4;"
             "}"
-            "QPushButton#primaryButton:disabled { background: #2a2a3e; color: #686878;"
-            "  border-color: #3d3d5c; }"
+            "QPushButton#primaryButton:disabled { background: #ffffff; color: #98a0ad;"
+            "  border-color: #d5d9e0; }"
         )
         self._analyze_btn.clicked.connect(self.analyze_requested.emit)
         header.addWidget(self._analyze_btn)
@@ -93,7 +93,7 @@ class StepAnalysis(QFrame):
         vision_layout = QVBoxLayout(self._vision_group)
         self._vision_content = QLabel("分析后将显示图片内容理解结果...")
         self._vision_content.setWordWrap(True)
-        self._vision_content.setStyleSheet("color: #9898b0; font-size: 12px;")
+        self._vision_content.setStyleSheet("color: #626b7a; font-size: 12px;")
         vision_layout.addWidget(self._vision_content)
         left_layout.addWidget(self._vision_group)
 
@@ -172,14 +172,14 @@ class StepAnalysis(QFrame):
             if u.background:
                 lines.append(f"背景: {u.background}")
             self._vision_content.setText("\n".join(lines))
-            self._vision_content.setStyleSheet("color: #9898b0; font-size: 12px;")
+            self._vision_content.setStyleSheet("color: #626b7a; font-size: 12px;")
         else:
             self._vision_content.setText(
                 "暂无图片理解结果\n\n"
                 "提示: 请检查 LLM 提供商设置是否正确。\n"
                 "当前使用的提供商和模型可能不支持 Vision 功能或 API Key 无效。"
             )
-            self._vision_content.setStyleSheet("color: #ffaa00; font-size: 12px;")
+            self._vision_content.setStyleSheet("color: #d97706; font-size: 12px;")
 
         # 事实编辑
         if result.product_fact:
@@ -189,7 +189,7 @@ class StepAnalysis(QFrame):
     def set_error(self, message: str) -> None:
         self._ocr_text.setPlainText("")
         self._vision_content.setText(f"分析失败:\n{message}")
-        self._vision_content.setStyleSheet("color: #ff6b6b; font-size: 12px;")
+        self._vision_content.setStyleSheet("color: #dc2626; font-size: 12px;")
 
     def current_fact(self) -> ProductFact | None:
         return self._fact

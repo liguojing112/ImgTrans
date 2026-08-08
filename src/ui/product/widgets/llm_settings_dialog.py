@@ -79,7 +79,7 @@ class LlmSettingsDialog(QDialog):
 
         # 状态提示
         self._status = QLabel("")
-        self._status.setStyleSheet("color: #9898b0; font-size: 12px;")
+        self._status.setStyleSheet("color: #626b7a; font-size: 12px;")
         layout.addWidget(self._status)
 
         # 按钮
@@ -140,13 +140,13 @@ class LlmSettingsDialog(QDialog):
             ok = adapter.test_connection()
             if ok:
                 self._status.setText("✓ 连接成功")
-                self._status.setStyleSheet("color: #4dff4d; font-size: 12px;")
+                self._status.setStyleSheet("color: #16a34a; font-size: 12px;")
             else:
                 self._status.setText("✗ 连接失败")
-                self._status.setStyleSheet("color: #ff6b6b; font-size: 12px;")
+                self._status.setStyleSheet("color: #dc2626; font-size: 12px;")
         except LLMError as e:
             self._status.setText(f"✗ 错误: {e}")
-            self._status.setStyleSheet("color: #ff6b6b; font-size: 12px;")
+            self._status.setStyleSheet("color: #dc2626; font-size: 12px;")
 
     def _on_save(self) -> None:
         self._result = self._build_config()

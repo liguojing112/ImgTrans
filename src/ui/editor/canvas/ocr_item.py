@@ -100,7 +100,7 @@ class OcrRegionItem(QGraphicsItem):
         # 边框
         if selected:
             width = 2.5
-            pen_color = QColor("#ff6b6b")
+            pen_color = QColor("#dc2626")
         elif self.is_low_confidence:
             width = 1.5
             pen_color = QColor("#e59a2d")

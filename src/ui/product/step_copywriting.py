@@ -71,7 +71,7 @@ class StepCopywriting(QFrame):
         # 标题行
         header = QHBoxLayout()
         title = QLabel("第 3 步：文案生成")
-        title.setStyleSheet("color: #e0e0f0; font-size: 18px; font-weight: 650;")
+        title.setStyleSheet("color: #212733; font-size: 18px; font-weight: 650;")
         header.addWidget(title)
         header.addStretch()
 
@@ -90,8 +90,8 @@ class StepCopywriting(QFrame):
             "  stop:0 #5a9af4, stop:1 #4a8af4);"
             "  border-color: #6aaaf4;"
             "}"
-            "QPushButton#primaryButton:disabled { background: #2a2a3e; color: #686878;"
-            "  border-color: #3d3d5c; }"
+            "QPushButton#primaryButton:disabled { background: #ffffff; color: #98a0ad;"
+            "  border-color: #d5d9e0; }"
         )
         self._generate_btn.clicked.connect(self.generate_all_requested.emit)
         header.addWidget(self._generate_btn)
@@ -100,7 +100,7 @@ class StepCopywriting(QFrame):
         # 内容区 — 左：文案内容 | 中：详情文案 | 右：设置面板
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.setStyleSheet(
-            "QSplitter::handle { background: #2a2a3e; width: 2px; }"
+            "QSplitter::handle { background: #ffffff; width: 2px; }"
         )
 
         # ── 左侧：文案内容 ──
@@ -195,8 +195,8 @@ class StepCopywriting(QFrame):
             copy_btn = QPushButton("复制此节")
             copy_btn.setFixedSize(72, 22)
             copy_btn.setStyleSheet(
-                "QPushButton { background: #363650; color: #a0a0c0; font-size: 11px;"
-                "  border: 1px solid #3d3d5c; border-radius: 3px; }"
+                "QPushButton { background: #eef0f4; color: #a0a0c0; font-size: 11px;"
+                "  border: 1px solid #d5d9e0; border-radius: 3px; }"
                 "QPushButton:hover { background: #4d4d6e; }"
             )
             copy_btn.clicked.connect(lambda checked=False, s=sec: self._copy_section(s))
@@ -205,8 +205,8 @@ class StepCopywriting(QFrame):
             regen_btn = QPushButton("重新生成此节")
             regen_btn.setFixedSize(88, 22)
             regen_btn.setStyleSheet(
-                "QPushButton { background: #363650; color: #a0a0c0; font-size: 11px;"
-                "  border: 1px solid #3d3d5c; border-radius: 3px; }"
+                "QPushButton { background: #eef0f4; color: #a0a0c0; font-size: 11px;"
+                "  border: 1px solid #d5d9e0; border-radius: 3px; }"
                 "QPushButton:hover { background: #4d4d6e; }"
             )
             regen_btn.clicked.connect(

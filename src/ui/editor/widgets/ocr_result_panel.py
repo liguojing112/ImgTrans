@@ -84,15 +84,15 @@ class OcrResultPanel(QFrame):
         self.tree.currentItemChanged.connect(self._on_selection)
         self.tree.setStyleSheet(
             "QTreeWidget#ocrResultTree {"
-            "  background: #2a2a3e; color: #e0e0f0;"
-            "  border: 1px solid #3d3d5c; border-radius: 6px;"
+            "  background: #ffffff; color: #212733;"
+            "  border: 1px solid #d5d9e0; border-radius: 6px;"
             "}"
             "QTreeWidget#ocrResultTree::item { padding: 2px; }"
             "QTreeWidget#ocrResultTree::item:selected {"
             "  background: #4a8af4;"
             "}"
             "QHeaderView::section {"
-            "  background: #232336; color: #9898b0;"
+            "  background: #ffffff; color: #626b7a;"
             "  border: none; padding: 4px; font-size: 11px;"
             "}"
         )
@@ -191,15 +191,15 @@ class OcrResultPanel(QFrame):
             elif region.enhanced_only:
                 translated_text = "—"
                 status_text = "增强已确认"
-                status_fg = QColor("#20a464")
+                status_fg = QColor("#15803d")
             elif region.status.value == "low_confidence":
                 translated_text = "—"
                 status_text = "低置信"
-                status_fg = QColor("#e55353")
+                status_fg = QColor("#dc2626")
             else:
                 translated_text = "—"
                 status_text = "标准"
-                status_fg = QColor("#9898b0")
+                status_fg = QColor("#626b7a")
             status_value = (
                 str(unit.status.value)
                 if unit is not None
@@ -312,13 +312,13 @@ def _polygon_tooltip(region: TextRegion) -> str:
 
 def _translation_status(status: str) -> tuple[str, QColor]:
     return {
-        "translated": ("已翻译", QColor("#20a464")),
+        "translated": ("已翻译", QColor("#15803d")),
         "review_required": ("待复核", QColor("#e5b83c")),
-        "skipped_protected": ("已保护", QColor("#9898b0")),
-        "skipped_user": ("用户保留", QColor("#9898b0")),
-        "skipped_language": ("保留", QColor("#9898b0")),
-        "failed": ("失败", QColor("#e55353")),
-    }.get(status, (status, QColor("#9898b0")))
+        "skipped_protected": ("已保护", QColor("#626b7a")),
+        "skipped_user": ("用户保留", QColor("#626b7a")),
+        "skipped_language": ("保留", QColor("#626b7a")),
+        "failed": ("失败", QColor("#dc2626")),
+    }.get(status, (status, QColor("#626b7a")))
 
 
 def _status_tooltip(status: str, region: TextRegion) -> str:

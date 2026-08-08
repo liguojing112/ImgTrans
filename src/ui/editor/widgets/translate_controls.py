@@ -142,7 +142,7 @@ class TranslateControls(QFrame):
         self.specific_mode_radio = QRadioButton("只翻译指定语言")
         for radio in (self.all_mode_radio, self.specific_mode_radio):
             radio.setStyleSheet(
-                "QRadioButton { color: #e0e0f0; spacing: 6px; }"
+                "QRadioButton { color: #212733; spacing: 6px; }"
             )
         self._mode_group = QButtonGroup(self)
         self._mode_group.addButton(self.all_mode_radio)
@@ -381,7 +381,7 @@ class TranslateControls(QFrame):
         self.model_terms.setText(", ".join(normalize_brand_terms(terms)))
 
     def set_service_status(self, text: str, available: bool) -> None:
-        color = "#20a464" if available else "#e55353"
+        color = "#15803d" if available else "#dc2626"
         self.service_status.setText(text)
         self.service_status.setStyleSheet(f"color: {color};")
 
@@ -564,7 +564,7 @@ class TranslateControls(QFrame):
                 direction
                 + "圆环、倾斜或任意角度文字必须切换为“高召回 OCR”。"
             )
-            self.ocr_mode_hint.setStyleSheet("color: #d69e2e;")
+            self.ocr_mode_hint.setStyleSheet("color: #b45309;")
             return
         if source_code == target_code:
             correction = (
@@ -576,13 +576,13 @@ class TranslateControls(QFrame):
             self.ocr_mode_hint.setText(
                 direction + "原文与译文语言相同，无法执行有效翻译。" + correction
             )
-            self.ocr_mode_hint.setStyleSheet("color: #e55353;")
+            self.ocr_mode_hint.setStyleSheet("color: #dc2626;")
             return
         self.ocr_mode_hint.setText(
             direction
             + "高召回模式已启用；未确认候选会保留原图并标记为待复核。"
         )
-        self.ocr_mode_hint.setStyleSheet("color: #20a464;")
+        self.ocr_mode_hint.setStyleSheet("color: #15803d;")
 
 
 def _coordinate_spinbox() -> QDoubleSpinBox:

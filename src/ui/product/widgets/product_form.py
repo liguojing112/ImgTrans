@@ -38,9 +38,9 @@ class ProductForm(QFrame):
         clear_btn = QPushButton("清空")
         clear_btn.setToolTip("清空所有已填写的手动资料")
         clear_btn.setStyleSheet(
-            "QPushButton { background: #2a2a3e; color: #9898b0; font-size: 11px;"
-            "  padding: 3px 12px; border: 1px solid #3d3d5c; border-radius: 4px; }"
-            "QPushButton:hover { background: #363650; color: #e0e0f0; }"
+            "QPushButton { background: #ffffff; color: #626b7a; font-size: 11px;"
+            "  padding: 3px 12px; border: 1px solid #d5d9e0; border-radius: 4px; }"
+            "QPushButton:hover { background: #eef0f4; color: #212733; }"
         )
         clear_btn.clicked.connect(self.clear_all)
         btn_row.addWidget(clear_btn)

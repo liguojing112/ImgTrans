@@ -115,7 +115,7 @@ class _FactRow(QFrame):
         # 标签
         lbl = QLabel(label)
         lbl.setFixedWidth(80)
-        lbl.setStyleSheet("color: #9898b0; font-size: 12px;")
+        lbl.setStyleSheet("color: #626b7a; font-size: 12px;")
         layout.addWidget(lbl)
 
         # 值
@@ -129,7 +129,7 @@ class _FactRow(QFrame):
         # 来源
         self._source_label = QLabel()
         self._source_label.setFixedWidth(50)
-        self._source_label.setStyleSheet("color: #686878; font-size: 10px;")
+        self._source_label.setStyleSheet("color: #98a0ad; font-size: 10px;")
         layout.addWidget(self._source_label)
 
         # 确认按钮
@@ -137,8 +137,8 @@ class _FactRow(QFrame):
         self._confirm_btn.setFixedSize(28, 28)
         self._confirm_btn.setToolTip("确认此信息")
         self._confirm_btn.setStyleSheet(
-            "QPushButton { border: 1px solid #3d3d5c; border-radius: 4px;"
-            "  color: #4dff4d; font-size: 14px; }"
+            "QPushButton { border: 1px solid #d5d9e0; border-radius: 4px;"
+            "  color: #16a34a; font-size: 14px; }"
             "QPushButton:hover { background: #2a4a2a; }"
         )
         self._confirm_btn.clicked.connect(
@@ -151,8 +151,8 @@ class _FactRow(QFrame):
         self._uncertain_btn.setFixedSize(28, 28)
         self._uncertain_btn.setToolTip("标记为不确定")
         self._uncertain_btn.setStyleSheet(
-            "QPushButton { border: 1px solid #3d3d5c; border-radius: 4px;"
-            "  color: #ffaa00; font-size: 14px; }"
+            "QPushButton { border: 1px solid #d5d9e0; border-radius: 4px;"
+            "  color: #d97706; font-size: 14px; }"
             "QPushButton:hover { background: #4a3a2a; }"
         )
         self._uncertain_btn.clicked.connect(
@@ -166,10 +166,10 @@ class _FactRow(QFrame):
         self._value_edit.setText(value)
         self._source_label.setText(source)
         if confirmed:
-            self._value_edit.setStyleSheet("border: 1px solid #4dff4d;")
+            self._value_edit.setStyleSheet("border: 1px solid #16a34a;")
             self._uncertain_btn.setVisible(False)
         elif uncertain:
-            self._value_edit.setStyleSheet("border: 1px solid #ffaa00;")
+            self._value_edit.setStyleSheet("border: 1px solid #d97706;")
             self._confirm_btn.setVisible(True)
         else:
             self._value_edit.setStyleSheet("")

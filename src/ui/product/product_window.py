@@ -112,7 +112,7 @@ class ProductWindow(QMainWindow):
         # 顶部栏
         top_bar = QWidget()
         top_bar.setFixedHeight(44)
-        top_bar.setStyleSheet("background: #232336;")
+        top_bar.setStyleSheet("background: #ffffff;")
         top_layout = QHBoxLayout(top_bar)
         top_layout.setContentsMargins(12, 4, 12, 4)
 
@@ -121,7 +121,7 @@ class ProductWindow(QMainWindow):
         top_layout.addWidget(back_btn)
 
         title = QLabel("商品详情生成")
-        title.setStyleSheet("color: #e0e0f0; font-size: 15px; font-weight: bold;")
+        title.setStyleSheet("color: #212733; font-size: 15px; font-weight: bold;")
         top_layout.addWidget(title)
 
         top_layout.addStretch()
@@ -712,7 +712,7 @@ class ProductWindow(QMainWindow):
         btn_row = QHBoxLayout()
         delete_btn = QPushButton("删除选中")
         delete_btn.setStyleSheet(
-            "QPushButton { color: #ff6b6b; background: transparent; border: 1px solid #ff6b6b;"
+            "QPushButton { color: #dc2626; background: transparent; border: 1px solid #dc2626;"
             "  padding: 4px 12px; border-radius: 4px; }"
             "QPushButton:hover { background: #4a2a2a; }"
         )

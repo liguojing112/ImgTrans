@@ -60,7 +60,7 @@ class TopBar(QFrame):
         # 2. 文件名
         self.file_label = QLabel("未打开图片")
         self.file_label.setStyleSheet(
-            "color: #9898b0; font-size: 12px; padding: 0 8px;"
+            "color: #626b7a; font-size: 12px; padding: 0 8px;"
         )
 
         layout.addWidget(self.back_btn)
@@ -177,7 +177,7 @@ class TopBar(QFrame):
         # 11. 缩放比例
         self.zoom_label = QLabel("100%")
         self.zoom_label.setStyleSheet(
-            "color: #9898b0; font-size: 12px; min-width: 44px;"
+            "color: #626b7a; font-size: 12px; min-width: 44px;"
         )
         self.zoom_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
@@ -351,10 +351,10 @@ def _make_tool_button(
     btn.setIconSize(btn.iconSize())
     btn.setStyleSheet(
         "QToolButton { border: none; border-radius: 4px; padding: 4px; }"
-        "QToolButton:hover { background: #363650; }"
+        "QToolButton:hover { background: #eef0f4; }"
         "QToolButton:checked { background: qlineargradient(x1:0, y1:0, x2:0, y2:1,"
         "  stop:0 #4a8af4, stop:1 #3973db); border: 1px solid #5a9af4; }"
-        "QToolButton:disabled { color: #686878; }"
+        "QToolButton:disabled { color: #98a0ad; }"
     )
     return btn
 
@@ -362,6 +362,6 @@ def _make_tool_button(
 def _separator() -> QFrame:
     sep = QFrame()
     sep.setFrameShape(QFrame.Shape.VLine)
-    sep.setStyleSheet("color: #3d3d5c;")
+    sep.setStyleSheet("color: #d5d9e0;")
     sep.setFixedWidth(1)
     return sep

@@ -48,13 +48,13 @@ class PreviewPanel(QFrame):
         layout.setSpacing(12)
 
         title = QLabel("预览 / 导出")
-        title.setStyleSheet("color: #e0e0f0; font-size: 16px; font-weight: 650;")
+        title.setStyleSheet("color: #212733; font-size: 16px; font-weight: 650;")
         layout.addWidget(title)
 
         # 预览区域（占满剩余空间）
         preview_group = QGroupBox("当前预览")
         preview_group.setStyleSheet(
-            "QGroupBox { color: #9898b0; font-size: 12px; border: 1px solid #3d3d5c;"
+            "QGroupBox { color: #626b7a; font-size: 12px; border: 1px solid #d5d9e0;"
             "  border-radius: 6px; margin-top: 8px; padding-top: 12px; }"
         )
         preview_layout = QVBoxLayout(preview_group)
@@ -62,8 +62,8 @@ class PreviewPanel(QFrame):
         self._preview_label = InteractivePreview()
         self._preview_label.setMinimumHeight(220)
         self._preview_label.setStyleSheet(
-            "QLabel { background: #1a1a2e; border: 1px dashed #3d3d5c;"
-            "  border-radius: 6px; color: #686878; font-size: 12px; }"
+            "QLabel { background: #e6e8ec; border: 1px dashed #d5d9e0;"
+            "  border-radius: 6px; color: #98a0ad; font-size: 12px; }"
         )
         self._preview_label.setWordWrap(True)
         self._preview_label.crop_box_changed.connect(self.crop_box_selected.emit)
@@ -74,7 +74,7 @@ class PreviewPanel(QFrame):
         preview_layout.addWidget(self._preview_label, stretch=1)
 
         self._preview_info = QLabel("")
-        self._preview_info.setStyleSheet("color: #686878; font-size: 11px;")
+        self._preview_info.setStyleSheet("color: #98a0ad; font-size: 11px;")
         preview_layout.addWidget(self._preview_info)
         layout.addWidget(preview_group, stretch=1)
 
@@ -87,14 +87,14 @@ class PreviewPanel(QFrame):
         self._target_dir = QLineEdit()
         self._target_dir.setPlaceholderText("选择导出文件夹")
         self._target_dir.setStyleSheet(
-            "QLineEdit { background: #2a2a3e; color: #e0e0f0; border: 1px solid #3d3d5c;"
+            "QLineEdit { background: #ffffff; color: #212733; border: 1px solid #d5d9e0;"
             "  padding: 4px 8px; border-radius: 4px; font-size: 12px; }"
         )
         browse_btn = QPushButton("浏览...")
         browse_btn.setFixedSize(60, 24)
         browse_btn.setStyleSheet(
-            "QPushButton { background: #2a2a3e; color: #9898b0; border: 1px solid #3d3d5c;"
-            "  font-size: 11px; border-radius: 4px; } QPushButton:hover { color: #e0e0f0; }"
+            "QPushButton { background: #ffffff; color: #626b7a; border: 1px solid #d5d9e0;"
+            "  font-size: 11px; border-radius: 4px; } QPushButton:hover { color: #212733; }"
         )
         browse_btn.clicked.connect(self._on_browse_target)
         target_row = QHBoxLayout()
@@ -121,8 +121,8 @@ class PreviewPanel(QFrame):
             "  padding: 10px 20px; font-size: 13px; font-weight: 600; }"
             "QPushButton:hover { background: qlineargradient(x1:0, y1:0, x2:0, y2:1,"
             "  stop:0 #5a9af4, stop:1 #4a8af4); border-color: #6aaaf4; }"
-            "QPushButton:disabled { background: #2a2a3e; color: #686878;"
-            "  border-color: #3d3d5c; }"
+            "QPushButton:disabled { background: #ffffff; color: #98a0ad;"
+            "  border-color: #d5d9e0; }"
         )
         export_btn.clicked.connect(self._on_export)
         layout.addWidget(export_btn)
@@ -148,7 +148,7 @@ class PreviewPanel(QFrame):
         spin.setFixedWidth(width)
         spin.setButtonSymbols(QAbstractSpinBox.NoButtons)
         spin.setStyleSheet(
-            "QSpinBox { background: #2a2a3e; color: #e0e0f0; border: 1px solid #3d3d5c;"
+            "QSpinBox { background: #ffffff; color: #212733; border: 1px solid #d5d9e0;"
             "  padding: 4px 6px; border-radius: 4px; font-size: 12px; }"
         )
         hbox.addWidget(spin)
@@ -158,8 +158,8 @@ class PreviewPanel(QFrame):
         btn_smaller.setToolTip("减小")
         btn_smaller.setFixedSize(22, 16)
         btn_smaller.setStyleSheet(
-            "QToolButton { background: #2a2a44; color: #e0e0f0;"
-            "  border: 1px solid #3d3d5c; border-radius: 4px; font-size: 11px; }"
+            "QToolButton { background: #2a2a44; color: #212733;"
+            "  border: 1px solid #d5d9e0; border-radius: 4px; font-size: 11px; }"
             "QToolButton:hover { background: #34345a; }"
             "QToolButton:pressed { background: #3a3a5e; }"
         )
@@ -171,8 +171,8 @@ class PreviewPanel(QFrame):
         btn_larger.setToolTip("增大")
         btn_larger.setFixedSize(22, 16)
         btn_larger.setStyleSheet(
-            "QToolButton { background: #2a2a44; color: #e0e0f0;"
-            "  border: 1px solid #3d3d5c; border-radius: 4px; font-size: 11px; }"
+            "QToolButton { background: #2a2a44; color: #212733;"
+            "  border: 1px solid #d5d9e0; border-radius: 4px; font-size: 11px; }"
             "QToolButton:hover { background: #34345a; }"
             "QToolButton:pressed { background: #3a3a5e; }"
         )

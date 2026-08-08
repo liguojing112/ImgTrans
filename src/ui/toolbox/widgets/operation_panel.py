@@ -46,7 +46,7 @@ class OperationPanel(QFrame):
         layout.setSpacing(12)
 
         title = QLabel("操作设置")
-        title.setStyleSheet("color: #e0e0f0; font-size: 16px; font-weight: 650;")
+        title.setStyleSheet("color: #212733; font-size: 16px; font-weight: 650;")
         layout.addWidget(title)
 
         scroll = QScrollArea()
@@ -60,7 +60,7 @@ class OperationPanel(QFrame):
         # ── 裁剪 ─
         crop_group = QGroupBox("裁剪")
         crop_group.setStyleSheet(
-            "QGroupBox { color: #9898b0; font-size: 12px; border: 1px solid #3d3d5c;"
+            "QGroupBox { color: #626b7a; font-size: 12px; border: 1px solid #d5d9e0;"
             "  border-radius: 6px; margin-top: 8px; padding-top: 12px; }"
         )
         crop_outer = QVBoxLayout(crop_group)
@@ -173,8 +173,8 @@ class OperationPanel(QFrame):
         self._wm_list = QListWidget()
         self._wm_list.setMaximumHeight(90)
         self._wm_list.setStyleSheet(
-            "QListWidget { background: #1a1a2e; border: 1px solid #3d3d5c;"
-            "  border-radius: 4px; color: #e0e0f0; font-size: 12px; }"
+            "QListWidget { background: #e6e8ec; border: 1px solid #d5d9e0;"
+            "  border-radius: 4px; color: #212733; font-size: 12px; }"
         )
         self._wm_list.currentRowChanged.connect(self._on_wm_selected)
         wm_outer.addWidget(self._wm_list)
@@ -218,7 +218,7 @@ class OperationPanel(QFrame):
         self._wm_color_btn.clicked.connect(self._on_pick_color)
         self._wm_color_value = "#00FF00"
         self._wm_color_label = QLabel("■ #00FF00")
-        self._wm_color_label.setStyleSheet("color: #e0e0f0; font-size: 12px;")
+        self._wm_color_label.setStyleSheet("color: #212733; font-size: 12px;")
         color_row = QHBoxLayout()
         color_row.addWidget(self._wm_color_btn)
         color_row.addWidget(self._wm_color_label)
@@ -232,7 +232,7 @@ class OperationPanel(QFrame):
         wm_edit.addRow("透明度:", self._wm_opacity_w)
 
         self._wm_tiled = QCheckBox("平铺水印")
-        self._wm_tiled.setStyleSheet("color: #e0e0f0; font-size: 12px;")
+        self._wm_tiled.setStyleSheet("color: #212733; font-size: 12px;")
         self._wm_tiled.toggled.connect(self._on_wm_field_changed)
         wm_edit.addRow("", self._wm_tiled)
 
@@ -249,10 +249,10 @@ class OperationPanel(QFrame):
         wm_edit.addRow("位置:", self._wm_position)
 
         self._wm_flip_h = QCheckBox("水平翻转")
-        self._wm_flip_h.setStyleSheet("color: #e0e0f0; font-size: 12px;")
+        self._wm_flip_h.setStyleSheet("color: #212733; font-size: 12px;")
         self._wm_flip_h.toggled.connect(self._on_wm_field_changed)
         self._wm_flip_v = QCheckBox("垂直翻转")
-        self._wm_flip_v.setStyleSheet("color: #e0e0f0; font-size: 12px;")
+        self._wm_flip_v.setStyleSheet("color: #212733; font-size: 12px;")
         self._wm_flip_v.toggled.connect(self._on_wm_field_changed)
         flip_row = QHBoxLayout()
         flip_row.addWidget(self._wm_flip_h)
@@ -306,7 +306,7 @@ class OperationPanel(QFrame):
     @staticmethod
     def _combo_style() -> str:
         return (
-            "QComboBox { background: #2a2a3e; color: #e0e0f0; border: 1px solid #3d3d5c;"
+            "QComboBox { background: #ffffff; color: #212733; border: 1px solid #d5d9e0;"
             "  padding: 4px 8px; border-radius: 4px; font-size: 12px; }"
             "QComboBox:hover { border-color: #3973db; }"
         )
@@ -314,7 +314,7 @@ class OperationPanel(QFrame):
     @staticmethod
     def _line_style() -> str:
         return (
-            "QLineEdit { background: #2a2a3e; color: #e0e0f0; border: 1px solid #3d3d5c;"
+            "QLineEdit { background: #ffffff; color: #212733; border: 1px solid #d5d9e0;"
             "  padding: 4px 8px; border-radius: 4px; font-size: 12px; }"
         )
 
@@ -345,7 +345,7 @@ class OperationPanel(QFrame):
     @staticmethod
     def _spin_no_buttons_style() -> str:
         return (
-            "QSpinBox { background: #2a2a3e; color: #e0e0f0; border: 1px solid #3d3d5c;"
+            "QSpinBox { background: #ffffff; color: #212733; border: 1px solid #d5d9e0;"
             "  padding: 4px 6px; border-radius: 4px; font-size: 12px; }"
         )
 
@@ -373,8 +373,8 @@ class OperationPanel(QFrame):
         btn_smaller.setToolTip("减小")
         btn_smaller.setFixedSize(22, 16)
         btn_smaller.setStyleSheet(
-            "QToolButton { background: #2a2a44; color: #e0e0f0;"
-            "  border: 1px solid #3d3d5c; border-radius: 4px; font-size: 11px; }"
+            "QToolButton { background: #2a2a44; color: #212733;"
+            "  border: 1px solid #d5d9e0; border-radius: 4px; font-size: 11px; }"
             "QToolButton:hover { background: #34345a; }"
             "QToolButton:pressed { background: #3a3a5e; }"
         )
@@ -386,8 +386,8 @@ class OperationPanel(QFrame):
         btn_larger.setToolTip("增大")
         btn_larger.setFixedSize(22, 16)
         btn_larger.setStyleSheet(
-            "QToolButton { background: #2a2a44; color: #e0e0f0;"
-            "  border: 1px solid #3d3d5c; border-radius: 4px; font-size: 11px; }"
+            "QToolButton { background: #2a2a44; color: #212733;"
+            "  border: 1px solid #d5d9e0; border-radius: 4px; font-size: 11px; }"
             "QToolButton:hover { background: #34345a; }"
             "QToolButton:pressed { background: #3a3a5e; }"
         )

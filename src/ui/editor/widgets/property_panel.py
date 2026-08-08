@@ -987,7 +987,7 @@ class PropertyPanel(QFrame):
             btn.setText("#{:02X}{:02X}{:02X}".format(*rgb))
             fg = "#ffffff" if sum(rgb) < 360 else "#172033"
             btn.setStyleSheet(
-                f"background: rgb{rgb}; color: {fg}; border: 1px solid #3d3d5c; border-radius: 6px; padding: 5px;"
+                f"background: rgb{rgb}; color: {fg}; border: 1px solid #d5d9e0; border-radius: 6px; padding: 5px;"
             )
 
     def _set_fields_enabled(self, enabled: bool) -> None:

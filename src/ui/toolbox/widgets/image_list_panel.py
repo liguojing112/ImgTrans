@@ -50,9 +50,9 @@ class ImageListPanel(QFrame):
         add_folder_btn = QPushButton("+ 添加文件夹")
         add_folder_btn.clicked.connect(self._on_add_folder_clicked)
         add_folder_btn.setStyleSheet(
-            "QPushButton { background: #2a2a3e; color: #9898b0; font-size: 12px;"
-            "  padding: 6px 12px; border: 1px solid #3d3d5c; border-radius: 4px; }"
-            "QPushButton:hover { background: #363650; color: #e0e0f0; }"
+            "QPushButton { background: #ffffff; color: #626b7a; font-size: 12px;"
+            "  padding: 6px 12px; border: 1px solid #d5d9e0; border-radius: 4px; }"
+            "QPushButton:hover { background: #eef0f4; color: #212733; }"
         )
         btn_row.addWidget(add_btn)
         btn_row.addWidget(add_folder_btn)
@@ -64,9 +64,9 @@ class ImageListPanel(QFrame):
         select_all_btn = QPushButton("全选")
         select_all_btn.clicked.connect(lambda: self._model.select_all())
         select_all_btn.setStyleSheet(
-            "QPushButton { background: transparent; color: #9898b0; font-size: 11px;"
-            "  border: 1px solid #3d3d5c; padding: 3px 10px; border-radius: 4px; }"
-            "QPushButton:hover { background: #363650; color: #e0e0f0; }"
+            "QPushButton { background: transparent; color: #626b7a; font-size: 11px;"
+            "  border: 1px solid #d5d9e0; padding: 3px 10px; border-radius: 4px; }"
+            "QPushButton:hover { background: #eef0f4; color: #212733; }"
         )
         clear_btn = QPushButton("清空")
         clear_btn.clicked.connect(lambda: self._model.clear_all())
@@ -84,14 +84,14 @@ class ImageListPanel(QFrame):
         self._list = QListWidget()
         self._list.setAcceptDrops(True)
         self._list.setStyleSheet(
-            "QListWidget { background: #1a1a2e; border: 1px solid #3d3d5c;"
-            "  border-radius: 6px; color: #e0e0f0; }"
+            "QListWidget { background: #e6e8ec; border: 1px solid #d5d9e0;"
+            "  border-radius: 6px; color: #212733; }"
         )
         layout.addWidget(self._list, stretch=1)
 
         # 统计信息
         self._stats_label = QLabel("0 张图片")
-        self._stats_label.setStyleSheet("color: #686878; font-size: 11px;")
+        self._stats_label.setStyleSheet("color: #98a0ad; font-size: 11px;")
         layout.addWidget(self._stats_label)
 
         self._model.images_changed.connect(self._refresh)
@@ -176,19 +176,19 @@ class ImageListPanel(QFrame):
                 thumb.setText("✗")
             thumb.setFixedSize(self._thumb_size, self._thumb_size)
             thumb.setStyleSheet(
-                "QLabel { background: #2a2a3e; border: 1px solid #3d3d5c; border-radius: 4px; }"
+                "QLabel { background: #ffffff; border: 1px solid #d5d9e0; border-radius: 4px; }"
             )
             row_layout.addWidget(thumb)
 
             name_label = QLabel(img.path.name)
-            name_label.setStyleSheet("color: #e0e0f0; font-size: 11px;")
+            name_label.setStyleSheet("color: #212733; font-size: 11px;")
             name_label.setWordWrap(False)
             row_layout.addWidget(name_label, stretch=1)
 
             del_btn = QPushButton("×")
             del_btn.setFixedSize(20, 20)
             del_btn.setStyleSheet(
-                "QPushButton { border: none; color: #ff6b6b; font-size: 14px; }"
+                "QPushButton { border: none; color: #dc2626; font-size: 14px; }"
                 "QPushButton:hover { color: #ff3b3b; }"
             )
             del_btn.clicked.connect(

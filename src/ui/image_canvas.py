@@ -548,13 +548,13 @@ class ImageCanvas(QLabel):
                     for index in range(65)
                 ]
             )
-            pen = QPen(QColor("#20a464" if selected else "#63a1ff"), 2)
+            pen = QPen(QColor("#15803d" if selected else "#63a1ff"), 2)
             pen.setCosmetic(True)
             painter.setPen(pen)
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.drawPolyline(points)
             if selected:
-                guide = QPen(QColor("#20a464"), 1, Qt.PenStyle.DashLine)
+                guide = QPen(QColor("#15803d"), 1, Qt.PenStyle.DashLine)
                 guide.setCosmetic(True)
                 painter.setPen(guide)
                 center = self.document_to_view(path.center)
@@ -571,13 +571,13 @@ class ImageCanvas(QLabel):
         end = self.document_to_view(path.end)
         curve = QPainterPath(start)
         curve.quadTo(control, end)
-        pen = QPen(QColor("#20a464" if selected else "#63a1ff"), 2)
+        pen = QPen(QColor("#15803d" if selected else "#63a1ff"), 2)
         pen.setCosmetic(True)
         painter.setPen(pen)
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.drawPath(curve)
         if selected:
-            guide = QPen(QColor("#20a464"), 1, Qt.PenStyle.DashLine)
+            guide = QPen(QColor("#15803d"), 1, Qt.PenStyle.DashLine)
             guide.setCosmetic(True)
             painter.setPen(guide)
             painter.drawPolyline(QPolygonF((start, control, end)))
@@ -588,7 +588,7 @@ class ImageCanvas(QLabel):
     def _paint_manual_selection(self, painter: QPainter) -> None:
         if self._manual_preview_box is None:
             return
-        pen = QPen(QColor("#20a464"), 2, Qt.PenStyle.DashLine)
+        pen = QPen(QColor("#15803d"), 2, Qt.PenStyle.DashLine)
         pen.setCosmetic(True)
         painter.setPen(pen)
         painter.setBrush(QColor(32, 164, 100, 35))

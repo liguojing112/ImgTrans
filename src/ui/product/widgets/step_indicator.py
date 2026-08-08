@@ -69,19 +69,19 @@ class StepIndicator(QFrame):
                 btn.setChecked(False)
                 btn.setStyleSheet(
                     "QPushButton#stepButton {"
-                    "  background: #2a2a3e; color: #9898b0; font-size: 13px;"
-                    "  border: 1px solid #3d3d5c; padding: 8px 16px;"
+                    "  background: #ffffff; color: #626b7a; font-size: 13px;"
+                    "  border: 1px solid #d5d9e0; padding: 8px 16px;"
                     "  border-radius: 4px;"
                     "}"
                     "QPushButton#stepButton:hover {"
-                    "  border-color: #3973db; color: #e0e0f0;"
+                    "  border-color: #3973db; color: #212733;"
                     "}"
                 )
             else:
                 btn.setChecked(False)
                 btn.setStyleSheet(
                     "QPushButton#stepButton {"
-                    "  background: #1e1e2e; color: #686878; font-size: 13px;"
+                    "  background: #f4f5f7; color: #98a0ad; font-size: 13px;"
                     "  border: 1px solid #2e2e48; padding: 8px 16px;"
                     "  border-radius: 4px;"
                     "}"

@@ -167,9 +167,9 @@ class TextLayerItem(QGraphicsItem):
         if self._status == "review_required":
             base_color = QColor("#e5b83c")  # 琥珀色 — 待复核
         elif self._status in ("overflow", "failed"):
-            base_color = QColor("#e55353")  # 红色 — 溢出/失败
+            base_color = QColor("#dc2626")  # 红色 — 溢出/失败
         elif self._status in ("skipped_language", "skipped_protected"):
-            base_color = QColor("#9898b0")  # 灰色 — 跳过
+            base_color = QColor("#626b7a")  # 灰色 — 跳过
         else:
             base_color = QColor("#3973db")  # 蓝色 — 正常翻译
 
@@ -194,7 +194,7 @@ class TextLayerItem(QGraphicsItem):
             painter.drawRect(corner)
 
         # 旋转手柄及连线
-        painter.setBrush(QBrush(QColor("#e0e0f0")))
+        painter.setBrush(QBrush(QColor("#212733")))
         painter.drawEllipse(rotate_handle)
         painter.setPen(QPen(QColor("#3973db"), 1.0, Qt.PenStyle.DotLine))
         painter.drawLine(QPointF(0, -box.height / 2), QPointF(0, -box.height / 2 - _ROTATE_HANDLE_OFFSET))
