@@ -130,7 +130,7 @@ def test_account_permissions_use_grouped_checkbox_picker() -> None:
             await _login(client)
             page = await client.get("/admin/users")
             assert page.status_code == 200
-            assert 'href="/admin/static/admin.css?v=3"' in page.text
+            assert 'href="/admin/static/admin.css?v=4"' in page.text
             assert 'class="card user-create-card"' in page.text
             assert 'class="permission-picker"' in page.text
             assert 'class="permission-grid"' in page.text
@@ -475,6 +475,47 @@ def test_audit_page_formats_utc_events_as_beijing_time() -> None:
             assert "时间（北京时间）" in page.text
             assert "2026-08-08 11:04:05" in page.text
             assert "2026-08-08 03:04:05" not in page.text
+
+    try:
+        _run(scenario)
+    finally:
+        app.state.database.close()
+
+
+def test_admin_plan_accepts_selected_promotion_dates_and_time_range() -> None:
+    app = _app()
+
+    async def scenario():
+        transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+            csrf = await _login(client)
+            response = await client.post(
+                "/admin/activation/plans",
+                data={
+                    "csrf_token": csrf,
+                    "name": "限时套餐",
+                    "amount_minor": "19.90",
+                    "sale_amount_minor": "9.90",
+                    "currency": "CNY",
+                    "duration_hours": "30",
+                    "sale_dates": "2026-08-10,2026-08-15,2026-08-10",
+                    "sale_start_time": "18:00",
+                    "sale_end_time": "20:00",
+                    "enabled": "true",
+                },
+                follow_redirects=False,
+            )
+            assert response.status_code == 303
+            plan = app.state.manage_activation_plans.list_all()[0]
+            assert tuple(value.isoformat() for value in plan.values.sale_dates) == (
+                "2026-08-10",
+                "2026-08-15",
+            )
+            assert plan.values.sale_start_time.isoformat(timespec="minutes") == "18:00"
+            assert plan.values.sale_end_time.isoformat(timespec="minutes") == "20:00"
+            page = await client.get("/admin/activation")
+            assert 'data-promotion-schedule' in page.text
+            assert "2026-08-10,2026-08-15" in page.text
 
     try:
         _run(scenario)

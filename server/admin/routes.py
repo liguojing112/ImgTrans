@@ -836,6 +836,8 @@ _PLAN_ERROR_MESSAGES = {
     "Combo plan requires both duration and quota": "组合包必须同时填写时长和次数",
     "Activation plan amount cannot be negative": "原价不能为负数",
     "Activation plan currency is invalid": "货币代码无效（需 3 位大写字母）",
+    "Activation plan sale schedule is incomplete": "请选择促销日期并完整填写每日开始、结束时间",
+    "Activation plan sale time range is invalid": "促销结束时间必须晚于开始时间",
 }
 
 
@@ -1002,7 +1004,7 @@ def _yuan_to_minor(form: dict[str, str], name: str) -> int:
 
 
 def _plan_values(form: dict[str, str]) -> ActivationPlanValues:
-    from datetime import datetime, timezone
+    from datetime import date, datetime, time, timezone
 
     plan_type = form.get("plan_type", "duration")
     sale_amount_raw = form.get("sale_amount_minor", "").strip()
@@ -1015,6 +1017,22 @@ def _plan_values(form: dict[str, str]) -> ActivationPlanValues:
                 sale_ends_at = sale_ends_at.replace(tzinfo=timezone.utc)
         except ValueError as error:
             raise HTTPException(status_code=422, detail="促销截止时间格式无效") from error
+    sale_dates = []
+    for raw_date in form.get("sale_dates", "").split(","):
+        raw_date = raw_date.strip()
+        if not raw_date:
+            continue
+        try:
+            sale_dates.append(date.fromisoformat(raw_date))
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail="促销日期格式无效") from error
+    sale_start_raw = form.get("sale_start_time", "").strip()
+    sale_end_raw = form.get("sale_end_time", "").strip()
+    try:
+        sale_start_time = time.fromisoformat(sale_start_raw) if sale_start_raw else None
+        sale_end_time = time.fromisoformat(sale_end_raw) if sale_end_raw else None
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail="促销时间段格式无效") from error
     return ActivationPlanValues(
         name=_required(form, "name"),
         amount_minor=_yuan_to_minor(form, "amount_minor"),
@@ -1027,6 +1045,9 @@ def _plan_values(form: dict[str, str]) -> ActivationPlanValues:
             _yuan_to_minor(form, "sale_amount_minor") if sale_amount_raw else None
         ),
         sale_ends_at=sale_ends_at,
+        sale_dates=tuple(sale_dates),
+        sale_start_time=sale_start_time,
+        sale_end_time=sale_end_time,
         benefits=form.get("benefits", ""),
     )
 

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime, time
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Request, Response, status
@@ -30,6 +30,9 @@ class ActivationPlanPayload(StrictContract):
     quota: int = Field(default=0, ge=0, le=1_000_000)
     sale_amount_minor: int | None = Field(default=None, ge=0, le=1_000_000_000_000)
     sale_ends_at: datetime | None = None
+    sale_dates: tuple[date, ...] = ()
+    sale_start_time: time | None = None
+    sale_end_time: time | None = None
     benefits: str = Field(default="", max_length=500)
 
     def to_domain(self) -> ActivationPlanValues:
@@ -306,6 +309,9 @@ def _plan_response(plan: ActivationPlan) -> ActivationPlanResponse:
             "quota": plan.values.quota,
             "sale_amount_minor": plan.values.sale_amount_minor,
             "sale_ends_at": plan.values.sale_ends_at,
+            "sale_dates": plan.values.sale_dates,
+            "sale_start_time": plan.values.sale_start_time,
+            "sale_end_time": plan.values.sale_end_time,
             "benefits": plan.values.benefits,
         },
     )

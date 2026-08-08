@@ -46,6 +46,19 @@ td form { display: inline; }
 .page-button.current { border-color: #2563eb; background: #2563eb; color: #fff; font-weight: 600; }
 .page-button.disabled { background: #f8fafc; color: #98a2b3; cursor: default; }
 .page-ellipsis { color: #667085; padding: 0 .15rem; }
+.promotion-schedule { display: grid; gap: .65rem; padding: .7rem; border: 1px solid #dbeafe; border-radius: .55rem; background: #f8fbff; }
+.promotion-times { display: grid; grid-template-columns: repeat(2, minmax(130px, 1fr)); gap: .65rem; }
+.promotion-date-entry { display: flex; align-items: center; flex-wrap: wrap; gap: .45rem; }
+.promotion-date-entry input { min-width: 155px; }
+.secondary-button { background: #e7eef8; border-color: #d1dbe8; color: #344054; }
+.promotion-date-chips { display: flex; flex-wrap: wrap; gap: .4rem; min-height: 1.8rem; }
+.promotion-date-chip { padding: .3rem .55rem; border-color: #bfdbfe; border-radius: 999px; background: #dbeafe; color: #1d4ed8; font-size: .85rem; }
+.promotion-date-chip:hover { background: #bfdbfe; }
+.promotion-schedule.compact { min-width: 300px; padding: .45rem; }
+.promotion-schedule.compact .promotion-times { grid-template-columns: repeat(2, minmax(100px, 1fr)); }
+.promotion-schedule.compact input, .promotion-schedule.compact button { padding: .35rem; }
+.compact-label { grid-template-columns: auto 88px; align-items: center; margin-bottom: .25rem; font-size: .85rem; }
+.plan-table td { vertical-align: middle; }
 @media (max-width: 640px) { .pagination { align-items: flex-start; flex-direction: column; } }
 .tabs { display: flex; gap: .25rem; margin-bottom: .75rem; border-bottom: 1px solid #dfe4ea; }
 .tabs a { padding: .5rem .9rem; text-decoration: none; color: #444; border: 1px solid transparent; border-bottom: none; border-radius: .35rem .35rem 0 0; }

@@ -47,8 +47,12 @@ def list_payable_plans(request: Request) -> list[dict]:
 
     now = datetime.now(timezone.utc)
     plans = request.app.state.manage_activation_plans.list_all()
-    return [
-        {
+    result = []
+    for item in plans:
+        if not item.values.enabled:
+            continue
+        active_end = item.values.active_sale_ends_at(now)
+        result.append({
             "plan_id": item.plan_id,
             "name": item.values.name,
             "amount_minor": item.values.amount_minor,
@@ -57,14 +61,15 @@ def list_payable_plans(request: Request) -> list[dict]:
             "plan_type": item.values.plan_type,
             "quota": item.values.quota,
             "sale_amount_minor": item.values.sale_amount_minor,
-            "sale_ends_at": item.values.sale_ends_at,
+            "sale_ends_at": active_end,
+            "sale_dates": item.values.sale_dates,
+            "sale_start_time": item.values.sale_start_time,
+            "sale_end_time": item.values.sale_end_time,
             "benefits": item.values.benefits,
-            "is_on_sale": item.values.is_on_sale(now),
+            "is_on_sale": active_end is not None,
             "wechat_pay_configured": _wechat_pay_configured(request),
-        }
-        for item in plans
-        if item.values.enabled
-    ]
+        })
+    return result
 
 
 def _wechat_pay_configured(request: Request) -> bool:

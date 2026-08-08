@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
+import json
 from threading import Lock
 from uuid import uuid4
 
@@ -42,6 +43,9 @@ class ActivationPlanRecord(Base):
     quota: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     sale_amount_minor: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     sale_ends_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    sale_dates_json: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+    sale_start_time: Mapped[str | None] = mapped_column(String(5), nullable=True)
+    sale_end_time: Mapped[str | None] = mapped_column(String(5), nullable=True)
     benefits: Mapped[str | None] = mapped_column(String(500), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
@@ -110,6 +114,9 @@ class SqlAlchemyActivationRepository:
                 quota=values.quota,
                 sale_amount_minor=values.sale_amount_minor,
                 sale_ends_at=values.sale_ends_at,
+                sale_dates_json=_serialize_sale_dates(values.sale_dates),
+                sale_start_time=_serialize_sale_time(values.sale_start_time),
+                sale_end_time=_serialize_sale_time(values.sale_end_time),
                 benefits=values.benefits or None,
                 created_at=now,
                 updated_at=now,
@@ -134,6 +141,9 @@ class SqlAlchemyActivationRepository:
             record.quota = values.quota
             record.sale_amount_minor = values.sale_amount_minor
             record.sale_ends_at = values.sale_ends_at
+            record.sale_dates_json = _serialize_sale_dates(values.sale_dates)
+            record.sale_start_time = _serialize_sale_time(values.sale_start_time)
+            record.sale_end_time = _serialize_sale_time(values.sale_end_time)
             record.benefits = values.benefits or None
             record.updated_at = _utc_now()
             session.flush()
@@ -574,11 +584,41 @@ def _plan_to_domain(record: ActivationPlanRecord) -> ActivationPlan:
             quota=record.quota,
             sale_amount_minor=record.sale_amount_minor,
             sale_ends_at=_as_utc(record.sale_ends_at),
+            sale_dates=_deserialize_sale_dates(record.sale_dates_json),
+            sale_start_time=_deserialize_sale_time(record.sale_start_time),
+            sale_end_time=_deserialize_sale_time(record.sale_end_time),
             benefits=record.benefits or "",
         ),
         created_at=_as_utc(record.created_at) or record.created_at,
         updated_at=_as_utc(record.updated_at) or record.updated_at,
     )
+
+
+def _serialize_sale_dates(values: tuple[date, ...]) -> str | None:
+    return json.dumps([value.isoformat() for value in values]) if values else None
+
+
+def _deserialize_sale_dates(value: str | None) -> tuple[date, ...]:
+    if not value:
+        return ()
+    try:
+        raw = json.loads(value)
+        return tuple(date.fromisoformat(item) for item in raw if isinstance(item, str))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return ()
+
+
+def _serialize_sale_time(value: time | None) -> str | None:
+    return value.strftime("%H:%M") if value is not None else None
+
+
+def _deserialize_sale_time(value: str | None) -> time | None:
+    if not value:
+        return None
+    try:
+        return time.fromisoformat(value)
+    except ValueError:
+        return None
 
 
 def _code_to_domain(

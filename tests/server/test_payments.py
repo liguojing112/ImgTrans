@@ -389,6 +389,35 @@ def test_plans_api_includes_promotion() -> None:
     _run(scenario)
 
 
+def test_selected_date_promotion_uses_beijing_time_window() -> None:
+    from datetime import date, datetime, time, timezone
+
+    values = ActivationPlanValues(
+        name="指定日期促销",
+        amount_minor=3000,
+        currency="CNY",
+        duration_hours=30,
+        sale_amount_minor=1500,
+        sale_dates=(date(2026, 8, 10), date(2026, 8, 15), date(2026, 8, 10)),
+        sale_start_time=time(18, 0),
+        sale_end_time=time(20, 0),
+    )
+
+    before = datetime(2026, 8, 10, 9, 59, 59, tzinfo=timezone.utc)
+    active = datetime(2026, 8, 10, 10, 0, 0, tzinfo=timezone.utc)
+    ended = datetime(2026, 8, 10, 12, 0, 0, tzinfo=timezone.utc)
+    wrong_date = datetime(2026, 8, 11, 10, 30, 0, tzinfo=timezone.utc)
+
+    assert values.sale_dates == (date(2026, 8, 10), date(2026, 8, 15))
+    assert values.is_on_sale(before) is False
+    assert values.is_on_sale(active) is True
+    assert values.active_sale_ends_at(active) == datetime(
+        2026, 8, 10, 12, 0, 0, tzinfo=timezone.utc
+    )
+    assert values.is_on_sale(ended) is False
+    assert values.is_on_sale(wrong_date) is False
+
+
 class _FakePayClient:
     """模拟 wechatpayv3 SDK：pay() 返回 (code, message) 元组。"""
 

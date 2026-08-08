@@ -203,7 +203,7 @@ class PurchaseDialog(QDialog):
             except ValueError:
                 return
             self._update_countdown()
-            self._countdown_timer.start(1000)
+            self._countdown_timer.start(100)
 
     def _update_countdown(self) -> None:
         ends = getattr(self, "_sale_ends", None)
@@ -217,12 +217,9 @@ class PurchaseDialog(QDialog):
                 f"{base}<br/><span style='color:#999;'>促销已结束</span>"
             )
             return
-        total = int(remaining.total_seconds())
-        hours, remainder = divmod(total, 3600)
-        minutes, seconds = divmod(remainder, 60)
         self._plan_info_label.setText(
             f"{base}<br/><span style='color:#ff4400;font-weight:bold;'>"
-            f"优惠剩余 {hours:02d}:{minutes:02d}:{seconds:02d}</span>"
+            f"优惠剩余 {_format_countdown(remaining.total_seconds())}</span>"
         )
 
     def _auto_purchase(self) -> None:
@@ -245,7 +242,6 @@ class PurchaseDialog(QDialog):
                 self._operation_failed(error) if seq == self._ordering_seq else None
             ),
         )
-
     def _order_created(self, result: object) -> None:
         if not isinstance(result, PaymentOrderInfo):
             self._operation_failed(RuntimeError("下单返回无效结果"))
@@ -323,3 +319,11 @@ class PurchaseDialog(QDialog):
 
     def _set_busy(self, busy: bool) -> None:
         self._plan_combo.setEnabled(not busy)
+
+
+def _format_countdown(total_seconds: float) -> str:
+    total_tenths = max(0, int(total_seconds * 10))
+    total, tenths = divmod(total_tenths, 10)
+    hours, remainder = divmod(total, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d}.{tenths}"

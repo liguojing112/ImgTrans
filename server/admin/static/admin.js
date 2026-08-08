@@ -37,6 +37,46 @@ document.addEventListener('DOMContentLoaded', function () {
       }
     });
   });
+  document.querySelectorAll('[data-promotion-schedule]').forEach(function (root) {
+    var hidden = root.querySelector('[data-promotion-dates]');
+    var picker = root.querySelector('[data-promotion-date]');
+    var chips = root.querySelector('[data-promotion-date-chips]');
+    if (!hidden || !picker || !chips) return;
+    var dates = (hidden.value || '').split(',').map(function (value) {
+      return value.trim();
+    }).filter(Boolean);
+
+    function render() {
+      dates = Array.from(new Set(dates)).sort();
+      hidden.value = dates.join(',');
+      chips.replaceChildren();
+      dates.forEach(function (value) {
+        var chip = document.createElement('button');
+        chip.type = 'button';
+        chip.className = 'promotion-date-chip';
+        chip.textContent = value + '  ×';
+        chip.title = '移除此促销日期';
+        chip.addEventListener('click', function () {
+          dates = dates.filter(function (item) { return item !== value; });
+          render();
+        });
+        chips.appendChild(chip);
+      });
+    }
+
+    root.querySelector('[data-add-promotion-date]').addEventListener('click', function () {
+      if (picker.value) {
+        dates.push(picker.value);
+        picker.value = '';
+        render();
+      }
+    });
+    root.querySelector('[data-clear-promotion-dates]').addEventListener('click', function () {
+      dates = [];
+      render();
+    });
+    render();
+  });
 });
 
 // 滚动位置记忆：点击表单/链接提交后页面刷新回顶部，这里恢复原位置

@@ -12,6 +12,7 @@ from src.application.bootstrap import StartupSnapshot
 from src.domain.product import ProductInfo
 from src.ui.activation_dialog import ActivationDialog
 from src.ui.main_window import MainWindow
+from src.ui.purchase_dialog import _format_countdown
 
 
 class _ImmediateRunner:
@@ -34,6 +35,11 @@ def _session() -> ActivationSession:
         now + timedelta(days=10),
         "itd_dialog_device_token_123456",
     )
+
+
+def test_purchase_countdown_displays_one_tenth_of_a_second() -> None:
+    assert _format_countdown(7199.09) == "01:59:59.0"
+    assert _format_countdown(0.09) == "00:00:00.0"
 
 
 def test_activation_dialog_runs_operation_through_task_runner_and_hides_token() -> None:

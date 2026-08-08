@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime, time
 import re
+from zoneinfo import ZoneInfo
 
 
 class ActivationError(ValueError):
@@ -34,6 +35,9 @@ class ActivationPlanValues:
     quota: int = 0
     sale_amount_minor: int | None = None
     sale_ends_at: datetime | None = None
+    sale_dates: tuple[date, ...] = ()
+    sale_start_time: time | None = None
+    sale_end_time: time | None = None
     benefits: str = ""
 
     def __post_init__(self) -> None:
@@ -65,12 +69,44 @@ class ActivationPlanValues:
                 raise ActivationError("Activation plan sale price is invalid")
         if self.sale_ends_at is not None and self.sale_ends_at.tzinfo is None:
             raise ActivationError("Activation plan sale deadline must include timezone")
+        normalized_dates = tuple(sorted(set(self.sale_dates)))
+        object.__setattr__(self, "sale_dates", normalized_dates)
+        if normalized_dates and (
+            self.sale_start_time is None or self.sale_end_time is None
+        ):
+            raise ActivationError("Activation plan sale schedule is incomplete")
+        if (self.sale_start_time is None) != (self.sale_end_time is None):
+            raise ActivationError("Activation plan sale schedule is incomplete")
+        if (
+            self.sale_start_time is not None
+            and self.sale_end_time is not None
+            and self.sale_start_time >= self.sale_end_time
+        ):
+            raise ActivationError("Activation plan sale time range is invalid")
 
     def is_on_sale(self, now: datetime) -> bool:
+        return self.active_sale_ends_at(now) is not None
+
+    def active_sale_ends_at(self, now: datetime) -> datetime | None:
+        if now.tzinfo is None:
+            raise ActivationError("Sale evaluation time must include timezone")
+        if self.sale_amount_minor is None:
+            return None
+        if self.sale_dates:
+            local_now = now.astimezone(ZoneInfo("Asia/Shanghai"))
+            if local_now.date() not in self.sale_dates:
+                return None
+            assert self.sale_start_time is not None
+            assert self.sale_end_time is not None
+            if not self.sale_start_time <= local_now.time().replace(tzinfo=None) < self.sale_end_time:
+                return None
+            return datetime.combine(
+                local_now.date(), self.sale_end_time, ZoneInfo("Asia/Shanghai")
+            ).astimezone(now.tzinfo)
         return (
-            self.sale_amount_minor is not None
-            and self.sale_ends_at is not None
-            and now < self.sale_ends_at
+            self.sale_ends_at
+            if self.sale_ends_at is not None and now < self.sale_ends_at
+            else None
         )
 
 
