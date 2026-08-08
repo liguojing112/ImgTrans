@@ -1235,6 +1235,7 @@ class EditorMainWindow(QMainWindow):
         win.back_requested.connect(self._on_product_back)
         win.closed.connect(self._on_product_closed)
         self._product_window = win
+        logger.info("nav_enter_product window set id=%s", id(win))
         self.hide()
         win.show()
 
@@ -1247,6 +1248,7 @@ class EditorMainWindow(QMainWindow):
 
         logger = logging.getLogger("imgtrans")
         window = self._product_window
+        logger.info("nav_product_closed window_none=%s id=%s", window is None, id(window) if window else "-")
         self._product_window = None
         if window is not None:
             logger.info("nav_product_closed closing window")
