@@ -334,6 +334,36 @@ def test_order_listing_persists_type_and_filters_historical_order_data() -> None
         database.close()
 
 
+def test_refund_marks_only_the_selected_order_when_codes_are_shared() -> None:
+    database = Database("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(database.engine)
+    repository = SqlAlchemyPaymentRepository(database)
+    now = datetime.now(timezone.utc)
+    try:
+        for order_id in ("first-order", "second-order"):
+            repository.create(
+                PaymentOrder(
+                    order_id=order_id,
+                    plan_id=1,
+                    amount_minor=100,
+                    currency="CNY",
+                    status=PaymentStatus.PAID,
+                    code_id="shared-code",
+                    activation_code="IT-SHARED",
+                    created_at=now,
+                )
+            )
+
+        assert repository.mark_refunded("second-order", "shared-code") is True
+        assert repository.get("first-order").status is PaymentStatus.PAID
+        assert repository.get("second-order").status is PaymentStatus.REFUNDED
+        refunded, total = repository.list_page(status="refunded")
+        assert total == 1
+        assert refunded[0].order_id == "second-order"
+    finally:
+        database.close()
+
+
 def test_plans_api_includes_promotion() -> None:
     from datetime import datetime, timedelta, timezone
 

@@ -22,6 +22,7 @@ class PaymentConflict(PaymentError):
 class PaymentStatus(str, Enum):
     CREATED = "created"
     PAID = "paid"
+    REFUNDED = "refunded"
     CANCELLED = "cancelled"
 
 

@@ -36,6 +36,7 @@ from server.application.admin_users import ManageAdminUsers
 from server.application.payment import (
     CreatePaymentOrder,
     GetPaymentOrder,
+    RefundPaymentOrder,
     HandlePaymentCallback,
     ListPaymentOrders,
 )
@@ -227,6 +228,7 @@ def create_app(
         renew_code=app.state.manage_activation_codes.renew_by_code_id,
     )
     app.state.get_payment_order = GetPaymentOrder(payment_repository)
+    app.state.refund_payment_order = RefundPaymentOrder(payment_repository)
     app.state.list_payment_orders = ListPaymentOrders(payment_repository)
     if translation_provider is None:
         translation_provider = (

@@ -30,6 +30,7 @@ class PaymentRepository(Protocol):
     def create(self, order: PaymentOrder) -> PaymentOrder: ...
     def get(self, order_id: str) -> PaymentOrder | None: ...
     def mark_paid_if_created(self, order_id: str, now: datetime) -> bool: ...
+    def mark_refunded(self, order_id: str, code_id: str) -> bool: ...
     def set_activation_code(
         self, order_id: str, code_id: str, activation_code: str, now: datetime
     ) -> None: ...
@@ -172,6 +173,14 @@ class GetPaymentOrder:
         if order is None:
             raise PaymentNotFound("订单不存在")
         return order
+
+
+class RefundPaymentOrder:
+    def __init__(self, order_repository: PaymentRepository) -> None:
+        self._orders = order_repository
+
+    def execute(self, order_id: str, code_id: str) -> bool:
+        return self._orders.mark_refunded(order_id, code_id)
 
 
 class ListPaymentOrders:

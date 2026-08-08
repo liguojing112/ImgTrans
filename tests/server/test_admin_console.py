@@ -144,7 +144,7 @@ def test_account_permissions_use_grouped_checkbox_picker() -> None:
         app.state.database.close()
 
 
-def test_payment_orders_show_snapshots_and_filter_refunded_activation_codes() -> None:
+def test_payment_orders_show_snapshots_and_filter_refunded_orders() -> None:
     app = _app()
     repository = SqlAlchemyPaymentRepository(app.state.database)
     plan = app.state.manage_activation_plans.create(
@@ -158,9 +158,10 @@ def test_payment_orders_show_snapshots_and_filter_refunded_activation_codes() ->
         )
     )
     issued = app.state.manage_activation_codes.issue(plan.plan_id, 1)[0]
-    repository.create(
-        PaymentOrder(
-            order_id="refunded-payment-order",
+    for order_id in ("paid-payment-order", "refunded-payment-order"):
+        repository.create(
+            PaymentOrder(
+                order_id=order_id,
             plan_id=plan.plan_id,
             amount_minor=5000,
             currency="CNY",
@@ -169,16 +170,27 @@ def test_payment_orders_show_snapshots_and_filter_refunded_activation_codes() ->
             activation_code=issued.plaintext,
             created_at=datetime.now(timezone.utc),
             plan_type="combo",
+            )
         )
-    )
-    app.state.manage_activation_codes.disable(issued.activation.code_id)
 
     async def scenario():
         transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
         async with httpx.AsyncClient(
             transport=transport, base_url="http://testserver"
         ) as client:
-            await _login(client)
+            csrf_token = await _login(client)
+            disabled = await client.post(
+                f"/admin/activation/codes/{issued.activation.code_id}/disable",
+                data={
+                    "csrf_token": csrf_token,
+                    "order_id": "refunded-payment-order",
+                    "next": "/admin/payments",
+                },
+                follow_redirects=False,
+            )
+            assert disabled.status_code == 303
+            assert repository.get("paid-payment-order").status is PaymentStatus.PAID
+            assert repository.get("refunded-payment-order").status is PaymentStatus.REFUNDED
             response = await client.get(
                 f"/admin/payments?activation_code={issued.plaintext}&status=refunded&amount=5000"
             )

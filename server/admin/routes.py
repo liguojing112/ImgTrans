@@ -346,6 +346,9 @@ async def disable_activation_code(code_id: str, request: Request) -> Response:
     session, form = await _protected_form(request)
     _require_permission(request, session, "activation")
     request.app.state.manage_activation_codes.disable(code_id)
+    order_id = (form.get("order_id") or "").strip()
+    if order_id:
+        request.app.state.refund_payment_order.execute(order_id, code_id)
     request.state.audit_action = "disable_activation_code"
     target = form.get("next", "")
     return _redirect(target if target.startswith("/admin/") else "/admin/activation")
@@ -449,14 +452,6 @@ def payments_page(request: Request) -> Response:
     code_states = request.app.state.manage_activation_codes.states(
         tuple(order.code_id for order in orders if order.code_id)
     )
-    order_statuses = {
-        order.order_id: (
-            "refunded"
-            if order.status.value == "paid" and code_states.get(order.code_id)
-            else order.status.value
-        )
-        for order in orders
-    }
     amounts = listing.list_amounts() if listing is not None else ()
     filters = {
         "activation_code": activation_code or "",
@@ -484,7 +479,6 @@ def payments_page(request: Request) -> Response:
             "cancelled": "已取消",
             "refunded": "已退款",
         },
-        order_statuses=order_statuses,
         plan_types={
             "duration": "时长包",
             "quota": "次数包",

@@ -7,7 +7,6 @@ from sqlalchemy import BigInteger, DateTime, Integer, String, func, or_, select,
 from sqlalchemy.orm import Mapped, mapped_column
 
 from server.domain.payment import PaymentOrder, PaymentStatus
-from server.infrastructure.activation_repository import ActivationCodeRecord
 from server.infrastructure.database import Base, Database
 
 
@@ -67,6 +66,20 @@ class SqlAlchemyPaymentRepository:
             )
             return result.rowcount > 0
 
+    def mark_refunded(self, order_id: str, code_id: str) -> bool:
+        """Mark only the payment order selected by the administrator as refunded."""
+        with self._database.session() as session:
+            result = session.execute(
+                update(PaymentOrderRecord)
+                .where(
+                    PaymentOrderRecord.order_id == order_id,
+                    PaymentOrderRecord.code_id == code_id,
+                    PaymentOrderRecord.status == PaymentStatus.PAID.value,
+                )
+                .values(status=PaymentStatus.REFUNDED.value)
+            )
+            return result.rowcount > 0
+
     def set_activation_code(
         self, order_id: str, code_id: str, activation_code: str, now: datetime
     ) -> None:
@@ -116,18 +129,7 @@ class SqlAlchemyPaymentRepository:
                 statement = statement.where(
                     PaymentOrderRecord.amount_minor == amount_minor
                 )
-            if status == "refunded":
-                statement = (
-                    statement.join(
-                        ActivationCodeRecord,
-                        ActivationCodeRecord.code_id == PaymentOrderRecord.code_id,
-                    )
-                    .where(
-                        PaymentOrderRecord.status == PaymentStatus.PAID.value,
-                        ActivationCodeRecord.disabled.is_(True),
-                    )
-                )
-            elif status in {item.value for item in PaymentStatus}:
+            if status in {item.value for item in PaymentStatus}:
                 statement = statement.where(PaymentOrderRecord.status == status)
             total = (
                 session.scalar(select(func.count()).select_from(statement.subquery()))
