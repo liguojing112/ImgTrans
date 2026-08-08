@@ -1200,6 +1200,11 @@ class EditorMainWindow(QMainWindow):
 
     @_product_window.setter
     def _product_window(self, value: object | None) -> None:
+        import logging
+
+        logging.getLogger("imgtrans").info(
+            "nav_product_ref set -> %s", id(value) if value is not None else None
+        )
         self.__product_window = value
 
     def _enter_product(self) -> None:
