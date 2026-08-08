@@ -1203,13 +1203,17 @@ class EditorMainWindow(QMainWindow):
         self.__product_window = value
 
     def _enter_product(self) -> None:
-        """打开商品详情生成窗口（LLM 由服务端代理）；已存在则复用避免多窗口。"""
+        """打开商品详情生成窗口（LLM 由服务端代理）；已存在且可见则复用。"""
         existing = self._product_window
         if existing is not None:
-            existing.show()
-            existing.raise_()
-            self.hide()
-            return
+            if existing.isVisible():
+                existing.show()
+                existing.raise_()
+                self.hide()
+                return
+            # 已关闭但引用残留：清理后重建
+            existing.close()
+            self._product_window = None
         from src.ui.product.product_window import ProductWindow
         from src.infrastructure.server_llm_adapter import ServerLLMAdapter
 
