@@ -235,7 +235,7 @@ def test_short_cjk_text_retries_when_auto_detection_claims_target_language() -> 
                 )
             return (
                 TranslationAdapterItem(
-                    translated_text='Plug*<x id="0"/>',
+                    translated_text="Plug*⟦0⟧",
                     source_language="zh-Hans",
                 ),
             )

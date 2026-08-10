@@ -34,7 +34,7 @@ class ProtectedText:
 
     @property
     def fully_protected(self) -> bool:
-        remainder = re.sub(r'<x id="\d+"/>', "", self.masked)
+        remainder = re.sub(r"⟦\d+⟧", "", self.masked)
         return not any(character.isalnum() for character in remainder)
 
     def restore(self, translated: str) -> str:
@@ -90,7 +90,7 @@ class ProtectionEngine:
         spans = []
         cursor = 0
         for index, candidate in enumerate(selected):
-            placeholder = f'<x id="{index}"/>'
+            placeholder = f"⟦{index}⟧"
             pieces.append(text[cursor : candidate.start])
             pieces.append(placeholder)
             spans.append(

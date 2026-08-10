@@ -1,0 +1,28 @@
+{
+  "families": {
+    "noto-sans": {"filename": "NotoSans-Regular.ttf", "license": "OFL-1.1", "source": "https://github.com/notofonts/latin-greek-cyrillic"},
+    "noto-cjk-sc": {"filename": "NotoSansCJKsc-Regular.otf", "license": "OFL-1.1", "source": "https://github.com/notofonts/noto-cjk"},
+    "noto-cjk-tc": {"filename": "NotoSansCJKtc-Regular.otf", "license": "OFL-1.1", "source": "https://github.com/notofonts/noto-cjk"},
+    "noto-cjk-jp": {"filename": "NotoSansCJKjp-Regular.otf", "license": "OFL-1.1", "source": "https://github.com/notofonts/noto-cjk"},
+    "noto-cjk-kr": {"filename": "NotoSansCJKkr-Regular.otf", "license": "OFL-1.1", "source": "https://github.com/notofonts/noto-cjk"},
+    "noto-thai": {"filename": "NotoSansThai-Regular.ttf", "license": "OFL-1.1", "source": "https://github.com/notofonts/thai"},
+    "noto-arabic": {"filename": "NotoNaskhArabic-Regular.ttf", "license": "OFL-1.1", "source": "https://github.com/notofonts/arabic"},
+    "noto-devanagari": {"filename": "NotoSansDevanagari-Regular.ttf", "license": "OFL-1.1", "source": "https://github.com/notofonts/devanagari"},
+    "noto-bengali": {"filename": "NotoSansBengali-Regular.ttf", "license": "OFL-1.1", "source": "https://github.com/notofonts/bengali"}
+  },
+  "languages": {
+    "zh-Hans": "noto-cjk-sc", "zh-Hant": "noto-cjk-tc", "ru": "noto-sans", "ja": "noto-cjk-jp", "ko": "noto-cjk-kr",
+    "en": "noto-sans", "th": "noto-thai", "ar": "noto-arabic", "vi": "noto-sans", "it": "noto-sans",
+    "de": "noto-sans", "id": "noto-sans", "pt-PT": "noto-sans", "fil": "noto-sans", "pt-BR": "noto-sans",
+    "pl": "noto-sans", "ms": "noto-sans", "hi": "noto-devanagari", "es": "noto-sans", "fr": "noto-sans",
+    "bn": "noto-bengali", "ur": "noto-arabic", "tr": "noto-sans", "fa": "noto-arabic", "sw": "noto-sans"
+  },
+  "scripts": {
+    "zh-Hans": "Han", "zh-Hant": "Han", "ru": "Cyrillic", "ja": "Japanese", "ko": "Hangul",
+    "en": "Latin", "th": "Thai", "ar": "Arabic", "vi": "Latin", "it": "Latin", "de": "Latin",
+    "id": "Latin", "pt-PT": "Latin", "fil": "Latin", "pt-BR": "Latin", "pl": "Latin", "ms": "Latin",
+    "hi": "Devanagari", "es": "Latin", "fr": "Latin", "bn": "Bengali", "ur": "Arabic", "tr": "Latin",
+    "fa": "Arabic", "sw": "Latin"
+  }
+}
+

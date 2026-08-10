@@ -15,6 +15,10 @@ def test_default_rules_and_brand_terms_protect_expected_fragments() -> None:
     assert (ProtectionKind.URL, "https://example.com/p/99") in protected
     assert (ProtectionKind.NUMBER, "25%") in protected
     assert value.restore(value.masked) == value.original
+    assert all(
+        not any(character.isascii() and character.isalpha() for character in span.placeholder)
+        for span in value.spans
+    )
 
 
 def test_overlapping_rules_keep_whole_sku_and_url() -> None:
