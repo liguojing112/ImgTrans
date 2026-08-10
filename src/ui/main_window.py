@@ -1812,11 +1812,6 @@ QPushButton#startWorkflowButton, QPushButton#exportButton {
     padding: 9px 16px;
     font-weight: 600;
 }
-QPushButton#exportButton {
-    background: #ffffff;
-    color: #315da9;
-    border: 1px solid #b8c8e4;
-}
 QFrame#ocrPanel, QFrame#translationPanel, QFrame#inpaintingPanel,
 QFrame#pipelinePanel, QFrame#textEditPanel, QFrame#layerStylePanel,
 QFrame#manualRegionPanel, QFrame#batchPanel, QFrame#curvedTextPanel {
@@ -1862,15 +1857,6 @@ QListWidget#pipelineStages {
     border: 1px solid #e0e6ef;
     border-radius: 7px;
     padding: 5px;
-}
-QPushButton#cancelWorkflowButton, QPushButton#toggleOriginalButton,
-QPushButton#keepOriginalButton, QPushButton#undoEditButton,
-QPushButton#redoEditButton, QPushButton#fitCanvasButton {
-    background: #ffffff;
-    color: #415674;
-    border: 1px solid #bdc9da;
-    border-radius: 7px;
-    padding: 8px 12px;
 }
 QPushButton#applyTextEditButton {
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
@@ -1918,27 +1904,6 @@ QPushButton#defaultCurveButton, QPushButton#applyCurveButton {
     padding: 8px 12px;
     font-weight: 600;
 }
-QPushButton#removeCurveButton {
-    background: #ffffff;
-    color: #415674;
-    border: 1px solid #bdc9da;
-    border-radius: 7px;
-    padding: 8px 12px;
-}
-QPushButton#clearBatchButton, QPushButton#cancelBatchButton {
-    background: #ffffff;
-    color: #415674;
-    border: 1px solid #bdc9da;
-    border-radius: 7px;
-    padding: 8px 12px;
-}
-QPushButton#deleteTextLayerButton {
-    background: #ffffff;
-    color: #b4232c;
-    border: 1px solid #d8a6aa;
-    border-radius: 7px;
-    padding: 8px 12px;
-}
 QLabel#styleSelectedLabel {
     color: #52647e;
 }
@@ -1976,10 +1941,30 @@ QLineEdit#brandTerms, QTreeWidget#ocrResults, QTreeWidget#translationResults {
     border-radius: 6px;
     padding: 6px;
 }
+/* === 功能按钮统一：蓝色渐变 primary，禁用灰色，与提示文案区分 === */
+QPushButton {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                stop:0 #4a8af4, stop:1 #3973db);
+    color: #ffffff;
+    border: 1px solid #5a9af4;
+    border-radius: 7px;
+    padding: 8px 12px;
+    font-weight: 600;
+}
+QPushButton:hover {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                stop:0 #5a9af4, stop:1 #4a8af4);
+    border-color: #6aaaf4;
+}
+QPushButton:pressed {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                stop:0 #2a6ad4, stop:1 #1a5ac4);
+    border-color: #3a7ae4;
+}
 QPushButton:disabled {
-    background: #aebbd1;
-    color: #eef2f8;
-    border: none;
+    background: #e7ebf2;
+    color: #8d99ad;
+    border: 1px solid #ccd4e0;
 }
 QLabel#readinessLabel {
     color: #53627a;

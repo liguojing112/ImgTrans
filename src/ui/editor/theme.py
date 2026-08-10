@@ -40,9 +40,9 @@ QLabel#homeCardDisabled {
 
 # === 深色编辑器主题 ===
 EDITOR_DARK_THEME = """
-/* 根背景 */
+/* 根背景（奶白色） */
 QMainWindow[editorStyle="true"], QWidget[editorStyle="true"] {
-    background: #f4f5f7;
+    background: #faf7f1;
     color: #212733;
     font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
 }
@@ -74,8 +74,19 @@ QLabel#captionLabel {
     font-weight: 400;
 }
 QGroupBox {
+    background: #f8f9fb;
+    border: 1px solid #d5d9e0;
+    border-radius: 8px;
+    margin-top: 12px;
+    color: #212733;
     font-size: 15px;
     font-weight: 600;
+}
+QGroupBox::title {
+    subcontrol-origin: margin;
+    left: 12px;
+    padding: 0 4px;
+    color: #212733;
 }
 /* 默认字体（Body）— 控件未显式分级时统一 14px */
 QLabel[editorStyle="true"] {
@@ -86,31 +97,34 @@ QPushButton[editorStyle="true"] {
     font-size: 14px;
 }
 
-/* 首页标题 */
+/* 首页标题（艺术字：深蓝粗体 + 字距，字号保持 22px） */
 QLabel#homeTitle {
-    color: #212733;
+    color: #1f4e79;
     font-size: 22px;
-    font-weight: 700;
+    font-weight: 800;
+    letter-spacing: 2px;
 }
 QLabel#homeSubtitle {
     color: #000000;
     font-size: 12px;
 }
 
-/* 首页卡片 */
+/* 首页卡片（质感：奶白渐变 + 大圆角 + 金色描边 hover） */
 QFrame[editorStyle="true"]#homeCard {
-    background: #ffffff;
-    border: 1px solid #d5d9e0;
-    border-radius: 16px;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                stop:0 #ffffff, stop:1 #f6f1e8);
+    border: 1px solid #e6ddcc;
+    border-radius: 18px;
 }
 QFrame[editorStyle="true"]#homeCard:hover {
-    border-color: #3973db;
-    background: #eef2f8;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                stop:0 #ffffff, stop:1 #fbf3e0);
+    border: 2px solid #d9b36a;
 }
 QLabel#homeCardTitle {
     color: #212733;
     font-size: 18px;
-    font-weight: 600;
+    font-weight: 700;
 }
 QLabel#homeCardDesc {
     color: #000000;
@@ -176,11 +190,10 @@ QTabWidget#editorRightTabs QTabBar::tab {
     min-width: 58px;
 }
 QTabWidget#editorRightTabs QTabBar::tab:selected {
-    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                stop:0 #4a8af4, stop:1 #3973db);
-    color: #ffffff;
-    border: 1px solid #5a9af4;
-    border-bottom: none;
+    background: #ffffff;
+    color: #212733;
+    border: 1px solid #d5d9e0;
+    border-bottom: 2px solid #3973db;
     font-weight: 600;
 }
 QTabWidget#editorRightTabs QTabBar::tab:hover:!selected {
@@ -207,14 +220,15 @@ QLabel#propertyNoSelection {
     color: #98a0ad;
     font-size: 12px;
 }
-QDoubleSpinBox, QSpinBox, QComboBox, QPlainTextEdit {
+QDoubleSpinBox, QSpinBox, QComboBox, QPlainTextEdit, QLineEdit {
     background: #eef0f4;
     color: #212733;
     border: 1px solid #d5d9e0;
     border-radius: 6px;
     padding: 6px;
 }
-QDoubleSpinBox:focus, QSpinBox:focus, QComboBox:focus, QPlainTextEdit:focus {
+QDoubleSpinBox:focus, QSpinBox:focus, QComboBox:focus, QPlainTextEdit:focus,
+QLineEdit:focus {
     border-color: #3973db;
 }
 QComboBox::drop-down {
@@ -301,7 +315,7 @@ QPushButton#backButton:hover {
 
 /* 菜单栏 */
 QMenuBar[editorStyle="true"] {
-    background: #f4f5f7;
+    background: #faf7f1;
     color: #212733;
     border-bottom: 1px solid #d5d9e0;
     padding: 4px;
@@ -324,7 +338,7 @@ QMenu::item:selected {
 
 /* 滚动条 */
 QScrollBar:vertical {
-    background: #f4f5f7;
+    background: #faf7f1;
     width: 8px;
     border-radius: 4px;
 }
@@ -340,7 +354,7 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
     height: 0;
 }
 QScrollBar:horizontal {
-    background: #f4f5f7;
+    background: #faf7f1;
     height: 8px;
     border-radius: 4px;
 }
@@ -366,7 +380,7 @@ QSplitter::handle:horizontal {
 
 /* 状态栏 */
 QStatusBar[editorStyle="true"] {
-    background: #f4f5f7;
+    background: #faf7f1;
     color: #000000;
     border-top: 1px solid #d5d9e0;
 }
@@ -377,7 +391,8 @@ QPushButton:disabled {
 }
 
 /* 通用禁用控件 */
-QDoubleSpinBox:disabled, QSpinBox:disabled, QComboBox:disabled, QPlainTextEdit:disabled {
+QDoubleSpinBox:disabled, QSpinBox:disabled, QComboBox:disabled, QPlainTextEdit:disabled,
+QLineEdit:disabled {
     background: #eef0f4;
     color: #98a0ad;
 }
@@ -386,8 +401,59 @@ QPushButton:disabled {
 }
 
 /* 统一圆角 */
-QPushButton { border-radius: 8px; }
 QDoubleSpinBox, QSpinBox, QComboBox, QPlainTextEdit, QLineEdit { border-radius: 6px; }
+
+/* === 功能按钮统一：蓝色渐变 primary，禁用灰色，与提示文案区分 === */
+QPushButton {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                stop:0 #4a8af4, stop:1 #3973db);
+    color: #ffffff;
+    border: 1px solid #5a9af4;
+    border-radius: 8px;
+    padding: 8px 16px;
+    font-weight: 600;
+}
+QPushButton:hover {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                stop:0 #5a9af4, stop:1 #4a8af4);
+    border-color: #6aaaf4;
+}
+QPushButton:pressed {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                stop:0 #2a6ad4, stop:1 #1a5ac4);
+    border-color: #3a7ae4;
+}
+QPushButton:disabled {
+    background: #eef0f4;
+    color: #98a0ad;
+    border: 1px solid #c5cbd4;
+}
+
+/* === 浅色模式兜底：未显式分级的控件统一黑字/浅底 === */
+QLabel {
+    color: #212733;
+}
+QCheckBox, QRadioButton {
+    color: #212733;
+    background: transparent;
+}
+QToolButton {
+    color: #000000;
+    background: transparent;
+}
+QScrollArea {
+    background: #ffffff;
+}
+QScrollArea > QWidget > QWidget {
+    background: #ffffff;
+}
+QTreeWidget, QListWidget, QTableView, QTextEdit, QTextBrowser {
+    background: #ffffff;
+    color: #212733;
+}
+QTabWidget::pane {
+    background: #ffffff;
+}
 
 /* QLabel disabled 可读 */
 QLabel:disabled { color: #000000; }

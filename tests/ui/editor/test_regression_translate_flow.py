@@ -10,10 +10,11 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import numpy as np
 import pytest
+import shiboken6
 from pathlib import Path
 
 from PySide6.QtTest import QTest
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QApplication,
@@ -21,6 +22,7 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QMessageBox,
     QPushButton,
+    QMainWindow,
 )
 
 from src.application.translate_image import TranslateImage, TranslateImageResult
@@ -2534,5 +2536,185 @@ def test_crop_dialog_full_flow_applies_crop():
         assert window._model.rendered_document.asset.width == 100
         assert window._model.rendered_document.asset.height == 40
         assert "裁剪完成" in window.statusBar().currentMessage()
+        assert window._editor_page.toolbar.active_tool == "crop"
+        assert window._editor_page.scene.pointer_busy
+        assert window._editor_page.scene.crop_selection_box is None
+        assert window._editor_page.layer_tools_stack.currentWidget() is dialog
     finally:
+        window.close()
+
+
+def test_crop_selection_persists_moves_cancels_and_can_be_redrawn():
+    from PySide6.QtCore import QEvent, QPointF
+    from PySide6.QtWidgets import QGraphicsSceneMouseEvent
+
+    QApplication.instance() or QApplication(["persistent-crop-selection-test"])
+    scene = EditorScene()
+    scene.set_document(_document())
+    scene.set_area_selection_mode("crop")
+    selected: list[TextBox] = []
+    cleared: list[str] = []
+    scene.area_selected.connect(
+        lambda mode, box: selected.append(box) if mode == "crop" else None
+    )
+    scene.area_selection_cleared.connect(cleared.append)
+
+    def event(kind, point, buttons=Qt.MouseButton.LeftButton):
+        mouse_event = QGraphicsSceneMouseEvent(kind)
+        mouse_event.setScenePos(QPointF(*point))
+        mouse_event.setButton(Qt.MouseButton.LeftButton)
+        mouse_event.setButtons(buttons)
+        return mouse_event
+
+    scene.mousePressEvent(
+        event(QEvent.Type.GraphicsSceneMousePress, (20, 15))
+    )
+    scene.mouseMoveEvent(
+        event(QEvent.Type.GraphicsSceneMouseMove, (100, 55))
+    )
+    scene.mouseReleaseEvent(
+        event(
+            QEvent.Type.GraphicsSceneMouseRelease,
+            (100, 55),
+            Qt.MouseButton.NoButton,
+        )
+    )
+    first = scene.crop_selection_box
+    assert first is not None
+    assert first.width == pytest.approx(80)
+    assert first.height == pytest.approx(40)
+    assert scene.pointer_busy
+
+    scene.mousePressEvent(
+        event(QEvent.Type.GraphicsSceneMousePress, (60, 35))
+    )
+    scene.mouseMoveEvent(
+        event(QEvent.Type.GraphicsSceneMouseMove, (80, 45))
+    )
+    scene.mouseReleaseEvent(
+        event(
+            QEvent.Type.GraphicsSceneMouseRelease,
+            (80, 45),
+            Qt.MouseButton.NoButton,
+        )
+    )
+    moved = scene.crop_selection_box
+    assert moved is not None
+    assert moved.width == pytest.approx(first.width)
+    assert moved.height == pytest.approx(first.height)
+    assert moved.center_x == pytest.approx(first.center_x + 20)
+    assert moved.center_y == pytest.approx(first.center_y + 10)
+
+    scene.mousePressEvent(
+        event(QEvent.Type.GraphicsSceneMousePress, (5, 5))
+    )
+    scene.mouseReleaseEvent(
+        event(
+            QEvent.Type.GraphicsSceneMouseRelease,
+            (5, 5),
+            Qt.MouseButton.NoButton,
+        )
+    )
+    assert scene.crop_selection_box is None
+    assert cleared == ["crop"]
+    assert scene.pointer_busy
+
+    scene.mousePressEvent(
+        event(QEvent.Type.GraphicsSceneMousePress, (30, 20))
+    )
+    scene.mouseMoveEvent(
+        event(QEvent.Type.GraphicsSceneMouseMove, (90, 50))
+    )
+    scene.mouseReleaseEvent(
+        event(
+            QEvent.Type.GraphicsSceneMouseRelease,
+            (90, 50),
+            Qt.MouseButton.NoButton,
+        )
+    )
+    assert scene.crop_selection_box is not None
+    assert len(selected) == 3
+
+
+class _FakeProductWindow(QMainWindow):
+    back_requested = Signal()
+    closed = Signal()
+    instances: list["_FakeProductWindow"] = []
+
+    def __init__(self, **_kwargs) -> None:
+        super().__init__()
+        self.close_event_count = 0
+        self.instances.append(self)
+
+    def closeEvent(self, event) -> None:
+        self.close_event_count += 1
+        self.closed.emit()
+        super().closeEvent(event)
+
+
+def _patch_product_window(monkeypatch) -> None:
+    _FakeProductWindow.instances.clear()
+    monkeypatch.setattr(
+        "src.ui.product.product_window.ProductWindow",
+        _FakeProductWindow,
+    )
+    monkeypatch.setattr(
+        "src.infrastructure.server_llm_adapter.ServerLLMAdapter",
+        lambda *_args, **_kwargs: object(),
+    )
+
+
+def test_product_window_close_restores_single_main_window(monkeypatch):
+    QApplication.instance() or QApplication(["product-window-close-test"])
+    _patch_product_window(monkeypatch)
+    window = EditorMainWindow(import_image=object())
+    try:
+        window.show()
+        QApplication.processEvents()
+        window._enter_product()
+        QApplication.processEvents()
+
+        product = _FakeProductWindow.instances[-1]
+        assert window._product_window is product
+        assert product.isVisible()
+        assert not window.isVisible()
+
+        product.close()
+        QApplication.processEvents()
+
+        assert product.close_event_count == 1
+        assert window._product_window is None
+        assert window._stack.currentWidget() is window._home_page
+        assert window.isVisible()
+        assert not shiboken6.isValid(product)
+    finally:
+        product = window._product_window
+        if product is not None:
+            product.close()
+        window.close()
+
+
+def test_product_window_back_closes_child_and_restores_main(monkeypatch):
+    QApplication.instance() or QApplication(["product-window-back-test"])
+    _patch_product_window(monkeypatch)
+    window = EditorMainWindow(import_image=object())
+    try:
+        window.show()
+        QApplication.processEvents()
+        window._enter_product()
+        QApplication.processEvents()
+
+        product = _FakeProductWindow.instances[-1]
+        product.back_requested.emit()
+        QApplication.processEvents()
+
+        assert product.close_event_count == 1
+        assert window._product_window is None
+        assert window._stack.currentWidget() is window._home_page
+        assert window.isVisible()
+        assert not shiboken6.isValid(product)
+    finally:
+        product = window._product_window
+        if product is not None:
+            product.close()
         window.close()

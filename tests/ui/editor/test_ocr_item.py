@@ -10,7 +10,7 @@ from src.domain.ocr import TextRegion, order_quad
 from src.ui.editor.canvas.ocr_item import OcrRegionItem
 
 
-def test_selected_ocr_region_does_not_draw_an_opaque_id_label() -> None:
+def test_selected_ocr_region_draws_light_yellow_highlight() -> None:
     QApplication.instance() or QApplication([])
     region = TextRegion(
         "region-0021",
@@ -32,12 +32,12 @@ def test_selected_ocr_region_does_not_draw_an_opaque_id_label() -> None:
     scene.render(painter, QRectF(0, 0, 140, 100), scene.sceneRect())
     painter.end()
 
-    # The selected polygon itself is outline-only, so it cannot tint or hide
-    # a translated glyph that has already been composited into the preview.
-    assert image.pixelColor(70, 61) == QColor("white")
+    # 选中区域使用淡黄色半透明背景高亮（识别度提升），
+    # 填充较淡不会盖住已合成的译文文字。
+    color = image.pixelColor(70, 61)
+    assert color.red() > 200 and color.green() > 180 and color.blue() < 220
 
-    # The former n-0021 badge occupied this area and introduced a dark,
-    # opaque rectangle over nearby translated text.
+    # 区域外保持白色，无深色/不透明矩形覆盖
     for y in range(30, 49):
         for x in range(20, 121):
             color = image.pixelColor(x, y)

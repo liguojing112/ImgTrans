@@ -96,6 +96,7 @@ class EditorPage(QWidget):
     delete_requested = Signal(str)  # region_id
     duplicate_requested = Signal(str)  # region_id
     add_layer_requested = Signal(str)  # default text
+    layer_edit_requested = Signal(str)  # 双击画布文字请求编辑
     restore_layout_requested = Signal(str)
     source_text_changed = Signal(str, str)
     translated_text_changed = Signal(str, str)
@@ -276,6 +277,7 @@ class EditorPage(QWidget):
         self.toolbar.tool_changed.connect(self._on_toolbar_tool_changed)
         self.toolbar.feature_requested.connect(self.feature_requested.emit)
         self.scene.layer_selected.connect(self._on_scene_selection)
+        self.scene.layer_edit_requested.connect(self.layer_edit_requested.emit)
         self.scene.selection_cleared.connect(self.property_panel.set_layer)
         self.scene.layer_dropped.connect(self._on_layer_dropped)
         self.scene.watermark_dropped.connect(
@@ -288,6 +290,9 @@ class EditorPage(QWidget):
         )
         self.scene.manual_region_selected.connect(self._on_manual_selection)
         self.scene.area_selected.connect(self._on_area_selected)
+        self.scene.area_selection_cleared.connect(
+            self._on_area_selection_cleared
+        )
         self.property_panel.layer_property_changed.connect(self._on_property_changed)
         self.property_panel.ocr_property_changed.connect(
             self._on_ocr_property_changed
@@ -301,6 +306,12 @@ class EditorPage(QWidget):
         self.property_panel.source_text_changed.connect(self.source_text_changed.emit)
         self.property_panel.translated_text_changed.connect(
             self.translated_text_changed.emit
+        )
+        # 主翻译设置的目标语言变化 → 同步到属性面板的二次翻译语言
+        self.translate_controls.target_language.currentIndexChanged.connect(
+            lambda _index: self.property_panel.set_retranslate_target(
+                self.translate_controls.selected_target_language
+            )
         )
         self.property_panel.retranslate_requested.connect(self.retranslate_requested.emit)
         self.property_panel.keep_original_requested.connect(self.keep_original_requested.emit)
@@ -405,6 +416,8 @@ class EditorPage(QWidget):
         )
         self.erase_dialog.clear_requested.connect(self.scene.clear_edit_mask)
         self.erase_dialog.apply_requested.connect(self._request_ai_erase)
+        # 涂抹松手自动消除（客户期望"涂完松手 AI 自动变没"）
+        self.scene.mask_brush_finished.connect(self._request_ai_erase)
         self.erase_dialog.undo_requested.connect(self.undo_requested.emit)
         self.erase_dialog.add_text_requested.connect(self._on_add_text_requested)
         self.crop_dialog.selection_requested.connect(
@@ -432,7 +445,7 @@ class EditorPage(QWidget):
         self.scene.edit_mask_changed.connect(self._on_edit_mask_changed)
         self.erase_dialog.rejected.connect(self._close_erase_tool)
         self.erase_dialog.accepted.connect(lambda: self._show_layer_tool("layers"))
-        self.crop_dialog.rejected.connect(lambda: self._show_layer_tool("layers"))
+        self.crop_dialog.rejected.connect(self._close_crop_tool)
         self.crop_dialog.accepted.connect(lambda: self._show_layer_tool("layers"))
         self.watermark_dialog.rejected.connect(lambda: self._show_layer_tool("layers"))
 
@@ -506,6 +519,7 @@ class EditorPage(QWidget):
 
     def open_crop_dialog(self) -> None:
         self.crop_dialog.clear_selection()
+        self.scene.clear_crop_selection()
         self._show_layer_tool("crop")
         self._on_crop_selection_requested()
 
@@ -519,6 +533,12 @@ class EditorPage(QWidget):
         self.scene.set_selection_aspect_ratio(
             self.crop_dialog.selected_aspect_ratio()
         )
+
+    def _close_crop_tool(self) -> None:
+        self.scene.set_area_selection_mode(None)
+        self.crop_dialog.clear_selection()
+        self.toolbar.set_active_tool("select")
+        self._show_layer_tool("layers")
 
     def open_watermark_dialog(self) -> None:
         self._show_layer_tool("watermark")
@@ -781,8 +801,13 @@ class EditorPage(QWidget):
             self.scene.add_rect_to_edit_mask(box)
             self._show_layer_tool("ai_erase")
         elif mode == "crop":
+            self.scene.set_crop_selection(box)
             self.crop_dialog.set_selection(box)
             self._show_layer_tool("crop")
+
+    def _on_area_selection_cleared(self, mode: str) -> None:
+        if mode == "crop":
+            self.crop_dialog.clear_selection()
 
     def _on_add_text_requested(self) -> None:
         self.scene.set_area_selection_mode(None)
@@ -802,7 +827,8 @@ class EditorPage(QWidget):
     def _on_scene_selection(self, region_id: str) -> None:
         if hasattr(self, "_model") and self._model is not None:
             self._model.selected_layer_id = region_id
-            self.right_tabs.setCurrentIndex(2)
+        # 画布选中 → 右侧 OCR 列表同步选中对应行（不跳转标签页）
+        self.ocr_result_panel.select_region(region_id)
 
     def _on_layer_dropped(self, region_id: str, box: TextBox) -> None:
         """拖动画布图层后发射 edit_requested。"""
@@ -844,14 +870,13 @@ class EditorPage(QWidget):
                 self._find_translation_unit(region_id),
                 self._ocr_property_overrides.get(region_id),
             )
-        # In OCR-only mode every row is directly editable, so open the
-        # property page immediately.  Once a translation result exists keep
-        # the OCR result tab as the inspection view; its explicit edit action
-        # still switches to properties.
+        # OCR-only 模式直接打开属性页编辑；翻译完成后点选行不跳转标签页，
+        # 由「重新翻译选中区域」按钮等显式操作才跳转到文字属性。
         has_translation = bool(
             getattr(getattr(self, "_model", None), "translation_result", None)
         )
-        self.right_tabs.setCurrentIndex(1 if has_translation else 2)
+        if not has_translation:
+            self.right_tabs.setCurrentIndex(2)
 
     def _on_layer_state_region_selected(self, region_id: str) -> None:
         if not hasattr(self, "_model") or self._model is None:

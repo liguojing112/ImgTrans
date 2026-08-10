@@ -91,7 +91,7 @@ class PreviewPanel(QFrame):
             "  padding: 4px 8px; border-radius: 4px; }"
         )
         browse_btn = QPushButton("浏览...")
-        browse_btn.setFixedSize(60, 24)
+        browse_btn.setFixedSize(70, 30)
         browse_btn.setStyleSheet(
             "QPushButton { background: #ffffff; color: #000000; border: 1px solid #d5d9e0;"
             " border-radius: 4px; } QPushButton:hover { color: #212733; }"
@@ -205,9 +205,21 @@ class PreviewPanel(QFrame):
         self._preview_label.set_items(items)
         self._preview_label.update()
 
+    def set_watermark_image(self, path: str | None) -> None:
+        """设置图片水印（预览真实渲染）。"""
+        self._preview_label.set_watermark_image(path)
+
+    def set_transform_preview(self, rotate_deg: int, flip: str | None) -> None:
+        """旋转/翻转效果预览。"""
+        self._preview_label.set_transform_preview(rotate_deg, flip)
+
     def set_crop_mode(self, active: bool) -> None:
         """进入/退出裁剪模式。"""
         self._preview_label.set_crop_mode(active)
+
+    def clear_crop_preview(self) -> None:
+        """恢复原图预览（取消或应用成功后）。"""
+        self._preview_label.clear_crop_preview()
 
     def current_preview_id(self) -> str | None:
         """当前预览的图片 id（裁剪只作用于该图）。"""

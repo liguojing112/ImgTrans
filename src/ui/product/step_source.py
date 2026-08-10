@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QDragEnterEvent, QDropEvent
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -29,6 +30,7 @@ class StepSource(QFrame):
     def __init__(self) -> None:
         super().__init__()
         self.setProperty("editorStyle", True)
+        self.setAcceptDrops(True)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 16, 24, 16)
@@ -204,3 +206,18 @@ class StepSource(QFrame):
             return
         self.set_parse_idle()
         self.parse_requested.emit(url)
+
+    # —— 页面级拖拽导入 ——
+
+    def dragEnterEvent(self, event: QDragEnterEvent) -> None:
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+
+    def dropEvent(self, event: QDropEvent) -> None:
+        supported = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
+        for url in event.mimeData().urls():
+            if not url.isLocalFile():
+                continue
+            path = Path(url.toLocalFile())
+            if path.is_file() and path.suffix.lower() in supported:
+                self._uploader.add_image(path)

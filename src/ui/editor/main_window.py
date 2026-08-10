@@ -151,6 +151,7 @@ class EditorMainWindow(QMainWindow):
         if self._refresh_image_limits is not None:
             QTimer.singleShot(0, self._apply_image_limits_refresh)
         self._activation_dialog = None
+        self._product_window_instance: object | None = None
         self._quick_save_path: Path | None = None
         self._source_undo: list[ImageDocument] = []
         self._source_redo: list[ImageDocument] = []
@@ -196,6 +197,11 @@ class EditorMainWindow(QMainWindow):
 
     def _build_menus(self) -> None:
         menu = self.menuBar()
+
+        # 首页：菜单栏按钮形式，点击即跳转（无下拉）
+        home_action = QAction("首页", self)
+        home_action.triggered.connect(self._go_home)
+        menu.addAction(home_action)
 
         file_menu = menu.addMenu("文件")
         import_action = QAction("导入图片…", self)
@@ -256,6 +262,11 @@ class EditorMainWindow(QMainWindow):
         )
         view_menu.addAction(zoom_out_action)
 
+        help_menu = menu.addMenu("帮助")
+        help_action = QAction("使用说明…", self)
+        help_action.triggered.connect(self._show_help_dialog)
+        help_menu.addAction(help_action)
+
         account_menu = menu.addMenu("账户")
         self.activation_action = QAction("激活…", self)
         self.activation_action.setEnabled(
@@ -271,6 +282,11 @@ class EditorMainWindow(QMainWindow):
         quota_action = QAction("查看额度…", self)
         quota_action.triggered.connect(self._show_quota_dialog)
         account_menu.addAction(quota_action)
+
+    def _show_help_dialog(self) -> None:
+        from src.ui.help_dialog import HelpDialog
+
+        HelpDialog(self).show()
 
     def _show_quota_dialog(self) -> None:
         session = self._activation_status() if self._activation_status else None
@@ -314,11 +330,23 @@ class EditorMainWindow(QMainWindow):
             self,
             purchase_available=self._payment_client is not None,
             unbind=self._quota_client.unbind if self._quota_client is not None else None,
+            purchase_client=self._payment_client,
+            has_active_duration=self._has_active_duration(),
         )
         dialog.purchase_requested.connect(self._open_purchase_dialog)
         dialog.finished.connect(lambda: self._release_activation_dialog(dialog))
         self._activation_dialog = dialog
         dialog.show()
+
+    def _has_active_duration(self) -> bool:
+        """当前是否持有活跃的时长额度（购买次数包的前提）。"""
+        session = self._activation_status() if self._activation_status else None
+        return bool(getattr(session, "active", False)) if session is not None else False
+
+    def _current_code(self) -> str | None:
+        """当前激活码（已激活时返回，供购买续购叠加）。"""
+        session = self._activation_status() if self._activation_status else None
+        return getattr(session, "code", None) if session is not None else None
 
     def _open_renew_dialog(self) -> None:
         session = self._activation_status() if self._activation_status else None
@@ -335,6 +363,7 @@ class EditorMainWindow(QMainWindow):
             self._task_runner,
             self,
             renew_code=code,
+            has_active_duration=self._has_active_duration(),
         )
         purchase.renew_completed.connect(lambda: self._refresh_after_renew(code))
         purchase.show()
@@ -353,7 +382,16 @@ class EditorMainWindow(QMainWindow):
             return
         from src.ui.purchase_dialog import PurchaseDialog
 
-        purchase = PurchaseDialog(self._payment_client, self._task_runner, self)
+        code = self._current_code()
+        purchase = PurchaseDialog(
+            self._payment_client,
+            self._task_runner,
+            self,
+            renew_code=code,
+            has_active_duration=self._has_active_duration(),
+        )
+        if code is not None:
+            purchase.renew_completed.connect(lambda: self._refresh_after_renew(code))
 
         def _on_completed(code: str) -> None:
             dialog = self._activation_dialog
@@ -369,12 +407,17 @@ class EditorMainWindow(QMainWindow):
             return
         from src.ui.purchase_dialog import PurchaseDialog
 
+        code = self._current_code()
         purchase = PurchaseDialog(
             self._payment_client,
             self._task_runner,
             self,
             preselect_plan_id=plan.plan_id,
+            renew_code=code,
+            has_active_duration=self._has_active_duration(),
         )
+        if code is not None:
+            purchase.renew_completed.connect(lambda: self._refresh_after_renew(code))
 
         def _on_completed(code: str) -> None:
             dialog = self._activation_dialog
@@ -512,6 +555,9 @@ class EditorMainWindow(QMainWindow):
         self._editor_page.delete_requested.connect(self._on_delete_layer)
         self._editor_page.duplicate_requested.connect(self._on_duplicate_layer)
         self._editor_page.add_layer_requested.connect(self._on_add_layer)
+        self._editor_page.layer_edit_requested.connect(
+            self._on_layer_edit_requested
+        )
         self._editor_page.restore_layout_requested.connect(
             self._on_restore_auto_layout
         )
@@ -1087,7 +1133,7 @@ class EditorMainWindow(QMainWindow):
         self._source_undo.clear()
         self._source_redo.clear()
         self._undo_stack.clear()
-        self._editor_page.scene.clear_regions()
+        self._editor_page.scene.clear_document()
         self._editor_page.ocr_result_panel.clear_result()
         self._editor_page.set_text_layout(self._model.text_layout)
         self._editor_page.clear_layer_selection()
@@ -1196,7 +1242,7 @@ class EditorMainWindow(QMainWindow):
 
     @property
     def _product_window(self) -> object | None:
-        return getattr(self, "__product_window", None)
+        return self._product_window_instance
 
     @_product_window.setter
     def _product_window(self, value: object | None) -> None:
@@ -1205,7 +1251,7 @@ class EditorMainWindow(QMainWindow):
         logging.getLogger("imgtrans").info(
             "nav_product_ref set -> %s", id(value) if value is not None else None
         )
-        self.__product_window = value
+        self._product_window_instance = value
 
     def _enter_product(self) -> None:
         """打开商品详情生成窗口（LLM 由服务端代理）；已存在且可见则复用。"""
@@ -1214,16 +1260,12 @@ class EditorMainWindow(QMainWindow):
         logger = logging.getLogger("imgtrans")
         existing = self._product_window
         if existing is not None:
-            if existing.isVisible():
-                logger.info("nav_enter_product reuse visible")
-                existing.show()
-                existing.raise_()
-                self.hide()
-                return
-            logger.info("nav_enter_product rebuild stale window")
-            # 已关闭但引用残留：清理后重建
-            existing.close()
-            self._product_window = None
+            logger.info("nav_enter_product reuse existing")
+            self.hide()
+            existing.show()
+            existing.raise_()
+            existing.activateWindow()
+            return
         logger.info("nav_enter_product create new self=%s", id(self))
         from src.ui.product.product_window import ProductWindow
         from src.infrastructure.server_llm_adapter import ServerLLMAdapter
@@ -1236,35 +1278,54 @@ class EditorMainWindow(QMainWindow):
             llm_adapter=llm_adapter,
             quota_client=self._quota_client,
             access_token=self._access_token,
+            account_actions={
+                "activate": self.show_activation_dialog,
+                "renew": self._open_renew_dialog,
+                "quota": self._show_quota_dialog,
+            },
+            request_quit=self.close,
         )
         win.back_requested.connect(self._on_product_back)
         win.closed.connect(self._on_product_closed)
+        win.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
         self._product_window = win
         logger.info("nav_enter_product window set id=%s", id(win))
         self.hide()
         win.show()
+        win.raise_()
+        win.activateWindow()
 
     def _on_product_back(self) -> None:
-        self._on_product_closed()
+        window = self._product_window
+        if window is None:
+            self._restore_home_after_product()
+            return
+        window.close()
 
     def _on_product_closed(self) -> None:
         """商品详情窗口关闭（含点 X）时回到首页并确保商品窗口销毁。"""
         import logging
 
-        logger = logging.getLogger("imgtrans")
-        logger.info("nav_product_closed self=%s window=%s", id(self), self._product_window)
         window = self._product_window
-        logger.info("nav_product_closed window_none=%s id=%s", window is None, id(window) if window else "-")
+        sender = self.sender()
+        logger = logging.getLogger("imgtrans")
+        logger.info(
+            "nav_product_closed self=%s window=%s sender=%s",
+            id(self),
+            id(window) if window is not None else None,
+            id(sender) if sender is not None else None,
+        )
+        if sender is not None and sender is not window:
+            logger.info("nav_product_closed ignored stale sender")
+            return
         self._product_window = None
-        if window is not None:
-            logger.info("nav_product_closed closing window")
-            window.close()
-            window.deleteLater()
-        else:
-            logger.info("nav_product_closed no window ref")
+        self._restore_home_after_product()
+
+    def _restore_home_after_product(self) -> None:
         self._stack.setCurrentWidget(self._home_page)
         self.show()
         self.raise_()
+        self.activateWindow()
 
     # —— 图片工具箱 ——
 
@@ -1838,6 +1899,8 @@ class EditorMainWindow(QMainWindow):
         self._editor_page.set_layers_visible(show_layers)
         self._model.layers_visible = show_layers
         self._editor_page.property_panel.setEnabled(enable_properties)
+        # 新增文字图层不随面板禁用：导入图片后即可新增文字
+        self._editor_page.property_panel.add_btn.setEnabled(True)
         self._editor_page.top_bar.set_preview_mode(mode)
 
     # —— 显示/隐藏文字图层 ——
@@ -1850,7 +1913,7 @@ class EditorMainWindow(QMainWindow):
 
     def _on_editor_tool_changed(self, tool_id: str) -> None:
         if self._model.translation_result is None:
-            if tool_id not in {"select", "ai_erase"}:
+            if tool_id not in {"select", "ai_erase", "manual_translate"}:
                 self.statusBar().showMessage("请先导入图片并完成 OCR 或翻译")
                 return
         if tool_id == "select":
@@ -1872,14 +1935,22 @@ class EditorMainWindow(QMainWindow):
             self._apply_preview_mode("layers")
             self._editor_page.open_erase_dialog()
         elif tool_id == "manual_translate":
-            if (
-                self._process_manual_region is None
-                or self._model.composition_editor is None
-            ):
-                self.statusBar().showMessage("请先完成一次自动翻译，再框选漏翻区域")
+            if self._process_manual_region is None:
+                self.statusBar().showMessage("框选翻译当前不可用")
+                self._editor_page.toolbar.set_active_tool("select")
+                return
+            # 框选翻译是独立功能（框选→OCR→翻译→渲染），导入图片即可使用，
+            # 不必先完成整图自动翻译；未创建合成编辑器时以原图为底创建。
+            if not self._ensure_composition_editor():
+                self.statusBar().showMessage("请先导入图片，再框选漏翻区域")
                 self._editor_page.toolbar.set_active_tool("select")
                 return
             self._apply_preview_mode("layers")
+            controls = self._editor_page.translate_controls
+            self._editor_page.manual_region_panel.set_languages(
+                controls.selected_ocr_language,
+                controls.selected_target_language,
+            )
             self._editor_page.open_manual_region_dialog()
             self.statusBar().showMessage("请在图片上拖动框选漏翻文字区域")
 
@@ -1947,10 +2018,17 @@ class EditorMainWindow(QMainWindow):
             return
 
         controls = self._editor_page.translate_controls
+        panel = self._editor_page.manual_region_panel
+        ocr_language = (
+            panel.selected_ocr_language or controls.selected_ocr_language
+        )
+        target_language = (
+            panel.selected_target_language or controls.selected_target_language
+        )
         mode = TranslationMode(controls.selected_mode)
         selection = TranslationSelection(
             mode=mode,
-            target_language=controls.selected_target_language,
+            target_language=target_language,
             source_language=(
                 controls.selected_source_language
                 if mode is TranslationMode.SPECIFIC_LANGUAGE
@@ -1975,7 +2053,7 @@ class EditorMainWindow(QMainWindow):
                 working_background,
                 working_background,
                 spec,
-                controls.selected_ocr_language,
+                ocr_language,
                 selection,
                 brand_terms,
                 preserve_numbers=controls.should_preserve_numbers,
@@ -2019,6 +2097,8 @@ class EditorMainWindow(QMainWindow):
         )
 
     def _on_ai_erase_requested(self, mask: EraseMask) -> None:
+        if getattr(self, "_ai_erasing", False):
+            return  # 正在消除，忽略涂抹连续触发
         if mask.is_empty:
             self.statusBar().showMessage("请先在画布框选或涂抹要消除的区域")
             self._editor_page.open_erase_dialog()
@@ -2042,6 +2122,7 @@ class EditorMainWindow(QMainWindow):
                 editor.apply_background_repair(result.document, expanded),
             )
 
+        self._ai_erasing = True
         self.statusBar().showMessage("正在进行 AI 背景修复…")
         self._task_runner.submit(
             operation,
@@ -2050,6 +2131,7 @@ class EditorMainWindow(QMainWindow):
         )
 
     def _on_ai_erase_succeeded(self, value: object) -> None:
+        self._ai_erasing = False
         result, edit = value
         self._editor_page.apply_edit_result(edit)
         self._model.repaired_background = (
@@ -2065,6 +2147,7 @@ class EditorMainWindow(QMainWindow):
         )
 
     def _on_ai_erase_failed(self, error: Exception) -> None:
+        self._ai_erasing = False
         self._editor_page.fail_ai_erase(str(error))
         self.statusBar().showMessage(f"AI 消除失败：{error}", 8000)
 
@@ -2084,8 +2167,8 @@ class EditorMainWindow(QMainWindow):
                 self.statusBar().showMessage(f"裁剪失败：{error}")
                 return
             self._apply_pretranslation_document(cropped)
-            self._editor_page.crop_dialog.accept()
-            self._editor_page.toolbar.set_active_tool("select")
+            self._editor_page.toolbar.set_active_tool("crop")
+            self._editor_page.open_crop_dialog()
             self.statusBar().showMessage(
                 f"裁剪完成：{cropped.asset.width}×{cropped.asset.height}；"
                 "已有 OCR 结果已清除"
@@ -2131,9 +2214,9 @@ class EditorMainWindow(QMainWindow):
             self._model.source_document = edit.reference_document
             self._editor_page.set_original_document(edit.reference_document)
         self._editor_page.apply_edit_result(edit)
-        self._editor_page.crop_dialog.accept()
-        self._editor_page.toolbar.set_active_tool("select")
         self._apply_preview_mode("translated")
+        self._editor_page.toolbar.set_active_tool("crop")
+        self._editor_page.open_crop_dialog()
         self._editor_page.refit_canvas_views()
         self.statusBar().showMessage(
             f"裁剪完成：{edit.document.asset.width}×{edit.document.asset.height}"
@@ -2859,10 +2942,42 @@ class EditorMainWindow(QMainWindow):
             lambda e: self.statusBar().showMessage(f"复制失败：{e}"),
         )
 
-    def _on_add_layer(self, default_text: str) -> None:
+    def _on_layer_edit_requested(self, region_id: str) -> None:
+        """双击画布文字图层：弹出输入框直接修改文字。"""
         editor = self._model.composition_editor
         if editor is None or self._task_runner is None:
+            self.statusBar().showMessage("请先导入图片，再编辑文字")
             return
+        current = ""
+        layout = self._model.text_layout
+        if layout is not None:
+            for layer in layout.layers:
+                if layer.region_id == region_id:
+                    current = layer.text
+                    break
+        from PySide6.QtWidgets import QInputDialog
+
+        text, ok = QInputDialog.getText(
+            self, "编辑文字", "文字内容：", text=current
+        )
+        if not ok or not text.strip():
+            return
+        self._task_runner.submit(
+            lambda: editor.replace_text(region_id, text.strip()),
+            self._on_layer_created,
+            lambda error: self.statusBar().showMessage(
+                f"编辑文字失败：{error}", 8000
+            ),
+        )
+
+    def _on_add_layer(self, default_text: str) -> None:
+        if self._task_runner is None:
+            return
+        # 新增文字是独立功能：导入图片后即可使用，不必先完成自动翻译
+        if not self._ensure_composition_editor():
+            self.statusBar().showMessage("请先导入图片，再新增文字")
+            return
+        editor = self._model.composition_editor
         self.statusBar().showMessage("正在新增文字图层…")
         self._task_runner.submit(
             lambda: editor.add_layer(default_text),
@@ -3054,10 +3169,9 @@ class EditorMainWindow(QMainWindow):
 
     def _on_retranslate_region(self, region_id: str) -> None:
         if (
-            self._process_manual_region is None
+            self._manual_translation_adapter is None
             or self._task_runner is None
             or self._model.composition_editor is None
-            or self._model.source_document is None
         ):
             self.statusBar().showMessage("当前区域无法重新翻译")
             return
@@ -3065,44 +3179,36 @@ class EditorMainWindow(QMainWindow):
         if region is None:
             self.statusBar().showMessage("找不到对应 OCR 区域")
             return
-        box = self._region_box(region_id, region)
-        circular_path = self._circular_path_for_retranslation(
-            region_id,
-            region,
-            box,
-        )
-        ctrl = self._editor_page.translate_controls
-        selection = self._translation_selection()
-        spec = ManualRegionSpec(
-            ManualInputMode.SOURCE_TEXT,
-            box,
-            box,
-            box,
-            source_text=region.text,
-            circular_path=circular_path,
-        )
+        if not region.text.strip():
+            self.statusBar().showMessage("该区域没有可翻译的原文")
+            return
+        # 跳转到文字属性面板，引导用户设置目标语言后二次翻译
+        self._editor_page.right_tabs.setCurrentIndex(2)
+        # 二次翻译目标语言：属性面板内嵌下拉（默认跟随主翻译设置）
+        target = self._editor_page.property_panel.selected_retranslate_target()
         editor = self._model.composition_editor
-        source = self._model.source_document
-        background = editor.background_document
-        brand_terms = ctrl.configured_protection_terms
+        adapter = self._manual_translation_adapter
+        source_text = region.text.strip()
 
         def operation():
-            manual = self._process_manual_region.execute(
-                source,
-                background,
-                spec,
-                ctrl.selected_ocr_language,
-                selection,
-                brand_terms,
-                preserve_numbers=ctrl.should_preserve_numbers,
+            result = adapter.translate(
+                (source_text,),
+                region.language_code or None,
+                target,
             )
-            edit = editor.replace_region_from_manual(
-                region_id,
-                manual.repaired_background.document,
-                manual.layer,
-                manual.erase_mask,
-            )
-            return manual, edit
+            if not result:
+                raise RuntimeError("翻译服务未返回结果")
+            item = result[0]
+            if getattr(item, "error_code", None):
+                raise RuntimeError(
+                    getattr(item, "error_message", None) or item.error_code
+                )
+            translated = getattr(item, "translated_text", None)
+            if not isinstance(translated, str) or not translated.strip():
+                raise RuntimeError("翻译服务返回了空译文")
+            # 直接替换译文文字渲染：背景已干净，无需擦除修复，避免灰色修补痕迹
+            edit = editor.replace_text(region_id, translated.strip())
+            return translated.strip(), edit, target
 
         self.statusBar().showMessage("正在重新翻译选中区域…")
         self._task_runner.submit(
@@ -3114,16 +3220,16 @@ class EditorMainWindow(QMainWindow):
         )
 
     def _on_region_retranslated(self, region_id: str, value: object) -> None:
-        manual, edit = value
+        translated, edit, target = value
         result = self._model.translation_result
         region = self._find_ocr_region(region_id)
         if isinstance(result, TranslateImageResult) and region is not None:
             replacement = TranslationUnit(
                 region_id,
-                manual.source_text,
+                region.text,
                 region.language_code,
-                result.translation.selection.target_language,
-                manual.translated_text,
+                target,
+                translated,
                 TranslationStatus.TRANSLATED,
             )
             units = tuple(
@@ -3143,6 +3249,7 @@ class EditorMainWindow(QMainWindow):
                 result.ocr, result.translation
             )
         self._editor_page.apply_edit_result(edit)
+        self._apply_preview_mode("translated")
         self._sync_history_actions(edit.can_undo, edit.can_redo)
         self._model.text_layout = edit.layout
         self._model.selected_layer_id = region_id
@@ -3228,53 +3335,6 @@ class EditorMainWindow(QMainWindow):
         return next(
             (region for region in ocr.regions if region.region_id == region_id),
             None,
-        )
-
-    def _region_box(self, region_id: str, region: TextRegion) -> TextBox:
-        enhanced_rotated = region.enhanced_only or any(
-            observation.source.startswith("polar")
-            for observation in region.observations
-        )
-        if not enhanced_rotated:
-            try:
-                return self._model.text_layout.layer_by_id(region_id).box
-            except KeyError:
-                pass
-        p0, p1, _, p3 = region.polygon
-        rotation = degrees(atan2(p1.y - p0.y, p1.x - p0.x))
-        width = max(1, hypot(p1.x - p0.x, p1.y - p0.y))
-        height = max(1, hypot(p3.x - p0.x, p3.y - p0.y))
-        if enhanced_rotated and height > width:
-            width, height = height, width
-            rotation += 90
-        return TextBox(
-            sum(point.x for point in region.polygon) / 4,
-            sum(point.y for point in region.polygon) / 4,
-            width,
-            height,
-            rotation,
-        )
-
-    def _circular_path_for_retranslation(
-        self,
-        region_id: str,
-        region: TextRegion,
-        box: TextBox,
-    ) -> CircularTextPath | None:
-        try:
-            existing = self._model.text_layout.layer_by_id(region_id)
-        except KeyError:
-            existing = None
-        if existing is not None and isinstance(existing.path, CircularTextPath):
-            return existing.path
-        ocr_result = self._model.ocr_result
-        if not isinstance(ocr_result, OcrResult) or not ocr_result.preview_strips:
-            return None
-        center = ocr_result.preview_strips[0].center
-        return circular_text_path_for_region(
-            region,
-            box,
-            (center.x, center.y),
         )
 
     # —— 导出 ——

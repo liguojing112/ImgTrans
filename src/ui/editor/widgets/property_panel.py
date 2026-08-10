@@ -42,6 +42,7 @@ from src.domain.layout import (
     VerticalAlignment,
 )
 from src.domain.language import SUPPORTED_LANGUAGE_CODES
+from src.ui.languages import LANGUAGE_LABELS
 
 _DEBOUNCE_MS = 300
 
@@ -147,7 +148,12 @@ class PropertyPanel(QFrame):
             "zh-Hans": "简体中文", "zh-Hant": "繁体中文", "en": "英语",
             "ja": "日语", "ko": "韩语", "ru": "俄语", "ar": "阿拉伯语",
             "th": "泰语", "vi": "越南语", "de": "德语", "fr": "法语",
-            "es": "西班牙语", "it": "意大利语", "pt": "葡萄牙语",
+            "es": "西班牙语", "pt": "葡萄牙语", "pt-PT": "葡萄牙语（葡萄牙）",
+            "pt-BR": "葡萄牙语（巴西）", "it": "意大利语", "id": "印尼语",
+            "ms": "马来语", "hi": "印地语", "bn": "孟加拉语", "fil": "菲律宾语",
+            "ur": "乌尔都语", "fa": "波斯语", "sw": "斯瓦希里语", "tr": "土耳其语",
+            "pl": "波兰语", "nl": "荷兰语", "sv": "瑞典语", "da": "丹麦语",
+            "fi": "芬兰语", "no": "挪威语", "cs": "捷克语",
         }
         self.manual_source_language.addItem("自动识别", None)
         for code in SUPPORTED_LANGUAGE_CODES:
@@ -163,13 +169,14 @@ class PropertyPanel(QFrame):
         manual_language_layout.setSpacing(4)
         manual_language_layout.addWidget(self.manual_source_language)
         manual_language_layout.addWidget(self.manual_target_language)
-        self.manual_translate_btn = QPushButton("翻译")
-        self.manual_translate_btn.clicked.connect(self._on_manual_translate)
-        manual_language_widget = QWidget()
-        manual_language_form = QVBoxLayout(manual_language_widget)
+        # 手动新增文字图层的翻译行：源/目标语言 + 「新增文字翻译」按钮
+        self._manual_language_widget = QWidget()
+        manual_language_form = QVBoxLayout(self._manual_language_widget)
         manual_language_form.setContentsMargins(0, 0, 0, 0)
         manual_language_form.setSpacing(4)
         manual_language_form.addWidget(manual_language_row)
+        self.manual_translate_btn = QPushButton("新增文字翻译")
+        self.manual_translate_btn.clicked.connect(self._on_manual_translate)
         manual_language_form.addWidget(self.manual_translate_btn)
 
         self.status_label = QLabel("")
@@ -331,7 +338,7 @@ class PropertyPanel(QFrame):
         layout.addLayout(form)
         form.addRow(_lbl("编号"), self.region_id_label)
         form.addRow(_lbl("原文"), source_text_widget)
-        form.addRow(_lbl("翻译"), manual_language_widget)
+        form.addRow(_lbl("翻译"), self._manual_language_widget)
         form.addRow(_lbl("译文"), translated_text_widget)
         form.addRow(_lbl("状态"), self.status_label)
         form.addRow(_lbl("置信度"), self.confidence_label)
@@ -416,10 +423,26 @@ class PropertyPanel(QFrame):
         self.restore_layout_btn.setObjectName("applyPropertyButton")
         self.restore_layout_btn.clicked.connect(self._on_restore_layout)
 
-        self.retranslate_btn = QPushButton("重新翻译")
+        # 二次翻译（普通区域）：目标语言 + 「二次翻译」按钮
+        self.retranslate_target = QComboBox()
+        self.retranslate_target.setObjectName("retranslateTargetLanguage")
+        for code in SUPPORTED_LANGUAGE_CODES:
+            self.retranslate_target.addItem(
+                f"{LANGUAGE_LABELS.get(code, code)} ({code})", code
+            )
+        self.retranslate_target.setCurrentIndex(
+            max(0, self.retranslate_target.findData("en"))
+        )
+        self.retranslate_btn = QPushButton("二次翻译")
         self.retranslate_btn.setEnabled(False)
-        self.retranslate_btn.setToolTip("使用当前 OCR 原文重新翻译该区域")
-        self.retranslate_btn.clicked.connect(lambda: self.retranslate_requested.emit(self._region_id or ""))
+        self.retranslate_btn.clicked.connect(
+            lambda: self.retranslate_requested.emit(self._region_id or "")
+        )
+        self._retranslate_widget = QWidget()
+        retranslate_inner = QHBoxLayout(self._retranslate_widget)
+        retranslate_inner.setContentsMargins(0, 0, 0, 0)
+        retranslate_inner.addWidget(self.retranslate_target, stretch=1)
+        retranslate_inner.addWidget(self.retranslate_btn)
 
         self.keep_original_btn = QPushButton("保留原文")
         self.keep_original_btn.setEnabled(False)
@@ -435,7 +458,7 @@ class PropertyPanel(QFrame):
         layout.addWidget(self.duplicate_btn)
         layout.addWidget(self.add_btn)
         layout.addWidget(self.restore_layout_btn)
-        layout.addWidget(self.retranslate_btn)
+        layout.addWidget(self._retranslate_widget)
         layout.addWidget(self.keep_original_btn)
         layout.addWidget(self.confirm_review_btn)
         layout.addStretch()
@@ -450,6 +473,16 @@ class PropertyPanel(QFrame):
         self._update_path_control_visibility("straight")
 
     # —— 操作槽 ——
+
+    def selected_retranslate_target(self) -> str:
+        """属性面板中二次翻译的目标语言。"""
+        return str(self.retranslate_target.currentData())
+
+    def set_retranslate_target(self, code: str) -> None:
+        """同步主翻译设置的目标语言到面板下拉。"""
+        index = self.retranslate_target.findData(code)
+        if index >= 0:
+            self.retranslate_target.setCurrentIndex(index)
 
     def _on_delete(self) -> None:
         if self._region_id is not None:
@@ -480,6 +513,12 @@ class PropertyPanel(QFrame):
     def _on_manual_translate(self) -> None:
         if self._region_id is None:
             return
+        if not self._region_id.startswith("manual-"):
+            # 普通 OCR 区域：二次翻译，与「重新翻译」一致
+            # （用区域原文 + 「目标语言」下拉所选语言）
+            self.retranslate_requested.emit(self._region_id)
+            return
+        # 手动新增文字图层：手动输入原文，用手动行语言
         text = self.source_text_edit.toPlainText().strip()
         target = self.manual_target_language.currentData()
         if not text or not isinstance(target, str):
@@ -616,6 +655,9 @@ class PropertyPanel(QFrame):
             self.overflow_label.setText("是" if layer.overflow else "否")
 
             is_manual = layer.region_id.startswith("manual-") and ocr_region is None
+            # 手动新增文字图层：显示「新增文字翻译」行；普通区域：显示「二次翻译」行
+            self._manual_language_widget.setVisible(is_manual)
+            self._retranslate_widget.setVisible(not is_manual)
             if ocr_region is not None:
                 cr = ocr_region
                 self.source_text_edit.setPlainText(cr.text)
@@ -640,13 +682,11 @@ class PropertyPanel(QFrame):
                 self.status_label.setText(status_map.get(str(tu.status.value), str(tu.status.value)))
                 self.review_label.setText("是" if str(tu.status.value) == "review_required" else "否")
                 status = str(tu.status.value)
-                self.retranslate_btn.setEnabled(status != "skipped_protected")
                 self.keep_original_btn.setEnabled(status in {"translated", "review_required", "failed"})
                 self.confirm_review_btn.setEnabled(status == "review_required")
             else:
                 self.status_label.setText("—")
                 self.review_label.setText("—")
-                self.retranslate_btn.setEnabled(ocr_region is not None)
                 self.keep_original_btn.setEnabled(False)
                 self.confirm_review_btn.setEnabled(False)
             self.restore_layout_btn.setEnabled(
@@ -669,6 +709,16 @@ class PropertyPanel(QFrame):
                 else:
                     self.translated_text_edit.clear()
                     self.apply_translated_text_btn.setEnabled(False)
+            # 「二次翻译」按钮（普通区域）：有可翻译原文即可用，保护区域除外
+            protected = (
+                translation_unit is not None
+                and str(translation_unit.status.value) == "skipped_protected"
+            )
+            self.retranslate_btn.setEnabled(
+                bool(self.source_text_edit.toPlainText().strip())
+                and not protected
+            )
+            # 「新增文字翻译」按钮（手动新增文字图层）
             self.manual_translate_btn.setEnabled(is_manual)
 
             box = layer.box
@@ -800,10 +850,13 @@ class PropertyPanel(QFrame):
         }
         self.status_label.setText(labels.get(status, status))
         self.review_label.setText("是" if status == "review_required" else "否")
-        self.retranslate_btn.setEnabled(status != "skipped_protected")
         self.keep_original_btn.setEnabled(status in {"translated", "review_required", "failed"})
         self.confirm_review_btn.setEnabled(status == "review_required")
-        self.manual_translate_btn.setEnabled(False)
+        # 「二次翻译」按钮：有可翻译原文即可用（OCR-only 普通区域）
+        self.retranslate_btn.setEnabled(
+            bool(self.source_text_edit.toPlainText().strip())
+            and status != "skipped_protected"
+        )
 
         # OCR-only 阶段没有 TextLayer，但属性编辑仍应可用。初始几何取 OCR
         # polygon 的包围盒，后续改动通过 ocr_property_changed 暂存。
@@ -866,7 +919,7 @@ class PropertyPanel(QFrame):
             widget.setEnabled(enabled)
         for widget in (
             self.delete_btn, self.duplicate_btn, self.add_btn,
-            self.restore_layout_btn, self.retranslate_btn,
+            self.restore_layout_btn,
             self.keep_original_btn, self.confirm_review_btn,
         ):
             widget.setEnabled(False)
@@ -1008,8 +1061,8 @@ class PropertyPanel(QFrame):
             self.source_text_edit, self.apply_source_text_btn,
             self.translated_text_edit, self.apply_translated_text_btn,
             self.manual_source_language, self.manual_target_language,
-            self.manual_translate_btn,
-            self.retranslate_btn, self.keep_original_btn, self.confirm_review_btn,
+            self.manual_translate_btn, self.retranslate_btn,
+            self.keep_original_btn, self.confirm_review_btn,
         ):
             w.setEnabled(enabled)
 

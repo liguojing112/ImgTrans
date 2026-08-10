@@ -35,49 +35,86 @@ class AnalyzeProduct:
         image_paths: list[Path],
         manual_info: ProductManualInfo,
     ) -> ProductAnalysisResult:
-        # 1) 对每张图运行 OCR
+        # 1) 对每张图运行 OCR（保留每张图单独的文本）
         ocr_texts: list[str] = []
+        per_image_ocr: list[str] = []
         for path in image_paths:
             try:
                 doc = self._load_image(path)
                 result = self._ocr.recognize(doc, "en")
-                for region in result.regions:
-                    if region.text and region.text.strip():
-                        ocr_texts.append(region.text.strip())
+                image_texts = [
+                    region.text.strip()
+                    for region in result.regions
+                    if region.text and region.text.strip()
+                ]
+                per_image_ocr.append("\n".join(image_texts))
+                ocr_texts.extend(image_texts)
             except Exception as e:
                 import traceback
                 print(f"[AnalyzeProduct] OCR error for {path}: {e}")
                 traceback.print_exc()
+                per_image_ocr.append("")
 
         ocr_combined = "\n".join(ocr_texts)
 
         # 2) 构建 Vision prompt
         prompt = self._build_vision_prompt(manual_info, ocr_combined)
 
-        # 3) 调用 LLM Vision（分析前 3 张图，合并结果）
+        # 3) 调用 LLM Vision（分析前 3 张图，并行调用后合并结果；
+        #    同时保留每张图的单独结果，供 UI 逐图展示）
         vision_result: dict = {}
         max_images = min(3, len(image_paths))
-        raw = ""
-        for i in range(max_images):
-            try:
-                raw = self._llm.chat_with_image(
-                    image_paths[i],
-                    prompt,
-                    max_tokens=4096,
-                )
-                partial = self._parse_vision_response(raw)
-                if i == 0:
+        per_image_raw: list[dict | None] = [None] * max_images
+
+        def _analyze_one(index: int) -> tuple[int, dict]:
+            # 并行调用可能触发服务端限流，失败重试（带递增间隔）
+            import time as _time
+
+            last_error: Exception | None = None
+            for attempt in range(3):
+                try:
+                    raw = self._llm.chat_with_image(
+                        image_paths[index],
+                        prompt,
+                        max_tokens=4096,
+                    )
+                    print(
+                        f"[AnalyzeProduct] Vision image {index + 1} raw "
+                        f"({len(raw)} chars)"
+                    )
+                    return index, self._parse_vision_response(raw)
+                except Exception as error:
+                    last_error = error
+                    _time.sleep(1.0 * (attempt + 1))
+            print(
+                f"[AnalyzeProduct] Vision image {index + 1} failed "
+                f"after retries: {last_error}"
+            )
+            raise last_error if last_error is not None else RuntimeError(
+                "Vision analysis failed"
+            )
+
+        from concurrent.futures import ThreadPoolExecutor
+
+        with ThreadPoolExecutor(max_workers=max(1, max_images)) as pool:
+            futures = [
+                pool.submit(_analyze_one, i) for i in range(max_images)
+            ]
+            for future in futures:
+                try:
+                    index, partial = future.result()
+                except Exception as e:
+                    print(f"[AnalyzeProduct] Vision image failed: {e}")
+                    continue
+                per_image_raw[index] = partial
+                if index == 0:
                     vision_result = partial
                 else:
                     # 合并：非空值覆盖空值
                     for key, value in partial.items():
                         if value and not vision_result.get(key):
                             vision_result[key] = value
-                print(f"[AnalyzeProduct] Vision image {i+1} raw ({len(raw)} chars)")
-            except Exception as e:
-                print(f"[AnalyzeProduct] Vision image {i+1} failed: {e}")
-            print(raw[:500] if len(raw) > 500 else raw)
-            print(f"[AnalyzeProduct] Parsed vision keys: {list(vision_result.keys())}")
+        print(f"[AnalyzeProduct] Parsed vision keys: {list(vision_result.keys())}")
 
         # 4) 组装 ImageUnderstanding
         understanding = ImageUnderstanding(
@@ -93,14 +130,52 @@ class AnalyzeProduct:
             suitable_as_detail=vision_result.get("suitable_as_detail", False),
         )
 
-        # 5) 组装 ProductFact（合并 OCR + Vision + 手动资料）
+        # 5) 组装 ProductFact（合并 OCR + Vision + 手动资料；
+        #    每张图单独的事实供逐图查看）
         fact = self._build_fact(manual_info, vision_result, ocr_combined)
+        per_image_facts: list[ProductFact | None] = []
+        for index, partial in enumerate(per_image_raw):
+            if not partial:
+                per_image_facts.append(None)
+                continue
+            per_image_facts.append(
+                self._build_fact(
+                    manual_info,
+                    partial,
+                    per_image_ocr[index] if index < len(per_image_ocr) else "",
+                )
+            )
+
+        # 每张图单独的理解（失败图为 None）
+        per_image: list[ImageUnderstanding | None] = []
+        for partial in per_image_raw:
+            if not partial:
+                per_image.append(None)
+                continue
+            per_image.append(
+                ImageUnderstanding(
+                    category=partial.get("category", ""),
+                    appearance=partial.get("appearance", ""),
+                    main_colors=partial.get("main_colors", []),
+                    packaging=partial.get("packaging", ""),
+                    visible_accessories=partial.get("visible_accessories", []),
+                    usage_scene=partial.get("usage_scene", ""),
+                    visual_style=partial.get("visual_style", ""),
+                    background=partial.get("background", ""),
+                    suitable_as_main=partial.get("suitable_as_main", False),
+                    suitable_as_detail=partial.get("suitable_as_detail", False),
+                )
+            )
 
         return ProductAnalysisResult(
             ocr_text=ocr_combined,
             image_understanding=understanding,
             product_fact=fact,
             raw_llm_response=json.dumps(vision_result, ensure_ascii=False),
+            image_understandings=per_image,
+            source_images=[str(path) for path in image_paths[:max_images]],
+            per_image_ocr_texts=per_image_ocr[:max_images],
+            per_image_facts=per_image_facts,
         )
 
     def _build_vision_prompt(

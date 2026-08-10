@@ -1,17 +1,20 @@
 from __future__ import annotations
 
+import io
 from collections.abc import Callable
 from typing import Any, Protocol
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QDialog,
-    QDialogButtonBox,
-    QFormLayout,
+    QHBoxLayout,
     QLabel,
     QLineEdit,
     QPushButton,
+    QSplitter,
     QVBoxLayout,
+    QWidget,
 )
 
 from src.domain.activation import ActivationSession
@@ -40,6 +43,8 @@ class ActivationDialog(QDialog):
         parent=None,
         purchase_available: bool = False,
         unbind: Callable[[str], bool] | None = None,
+        purchase_client=None,
+        has_active_duration: bool = True,
     ) -> None:
         super().__init__(parent)
         self._activate = activate
@@ -49,56 +54,127 @@ class ActivationDialog(QDialog):
         self._has_session = False
         self._purchase_available = purchase_available
         self._unbind = unbind
+        self._purchase_client = purchase_client
         self.setObjectName("activationDialog")
         self.setWindowTitle("应用激活")
-        self.setMinimumWidth(470)
+        self.setMinimumSize(820, 500)
 
-        layout = QVBoxLayout(self)
-        intro = QLabel("输入管理后台签发的激活码。激活凭据只保存在系统安全凭据库中。")
-        intro.setWordWrap(True)
-        layout.addWidget(intro)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
 
-        form = QFormLayout()
+        # ─ 左侧：紫色背景 + 激活表单 ──
+        left_panel = QWidget()
+        left_panel.setStyleSheet(
+            "background: #8b5cf6; padding: 40px;"
+        )
+        left_layout = QVBoxLayout(left_panel)
+        left_layout.setSpacing(20)
+
+        logo = QLabel(" 优译图AI")
+        logo.setStyleSheet(
+            "color: #ffffff; font-size: 28px; font-weight: 700;"
+        )
+        logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        left_layout.addWidget(logo)
+        left_layout.addStretch()
+
         self.code_edit = QLineEdit()
         self.code_edit.setObjectName("activationCodeEdit")
-        self.code_edit.setPlaceholderText("IT-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX")
+        self.code_edit.setPlaceholderText("输入激活码开始使用")
         self.code_edit.setMaxLength(42)
+        self.code_edit.setFixedHeight(48)
+        self.code_edit.setStyleSheet(
+            "QLineEdit { background: #1a1a2e; color: #ffffff;"
+            "  border: 1px solid #333355; border-radius: 8px;"
+            "  padding: 12px 16px; font-size: 14px; }"
+            "QLineEdit:focus { border-color: #3b82f6; }"
+        )
         self.code_edit.returnPressed.connect(self.request_activation)
-        form.addRow("激活码", self.code_edit)
-        layout.addLayout(form)
+        left_layout.addWidget(self.code_edit)
+
+        self.activate_button = QPushButton("确认激活")
+        self.activate_button.setObjectName("activateDeviceButton")
+        self.activate_button.setFixedHeight(48)
+        self.activate_button.setStyleSheet(
+            "QPushButton { background: #3b82f6; color: #ffffff;"
+            "  border: none; border-radius: 8px;"
+            "  font-size: 16px; font-weight: 600; }"
+            "QPushButton:hover { background: #2563eb; }"
+            "QPushButton:pressed { background: #1d4ed8; }"
+            "QPushButton:disabled { background: #6b7280; }"
+        )
+        self.activate_button.clicked.connect(self.request_activation)
+        left_layout.addWidget(self.activate_button)
 
         self.status_label = QLabel()
         self.status_label.setObjectName("activationStatusLabel")
         self.status_label.setWordWrap(True)
-        layout.addWidget(self.status_label)
+        self.status_label.setStyleSheet("color: #ffffff; font-size: 13px;")
+        self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        left_layout.addWidget(self.status_label)
 
-        self.buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
         if unbind is not None:
-            self.unbind_button = QPushButton("解绑换机")
+            self.unbind_button = QPushButton("👉 我已付款，找回我的激活码")
             self.unbind_button.setObjectName("unbindDeviceButton")
+            self.unbind_button.setStyleSheet(
+                "QPushButton { background: transparent; color: #fbbf24;"
+                "  border: none; font-size: 13px; }"
+                "QPushButton:hover { color: #f59e0b; }"
+            )
             self.unbind_button.setToolTip("输入激活码解绑本机，换机后可重新激活该码")
             self.unbind_button.clicked.connect(self.request_unbind)
-            self.buttons.addButton(
-                self.unbind_button, QDialogButtonBox.ButtonRole.ActionRole
-            )
+            left_layout.addWidget(self.unbind_button, alignment=Qt.AlignmentFlag.AlignCenter)
+
         if purchase_available:
             self.purchase_button = QPushButton("扫码购买")
             self.purchase_button.setObjectName("purchaseActivationButton")
+            self.purchase_button.setStyleSheet(
+                "QPushButton { background: transparent; color: #ffffff;"
+                "  border: 1px solid #ffffff; border-radius: 6px;"
+                "  padding: 8px 24px; font-size: 13px; }"
+                "QPushButton:hover { background: rgba(255,255,255,0.15); }"
+            )
             self.purchase_button.setToolTip("微信扫码支付自动获得激活码")
             self.purchase_button.clicked.connect(self.purchase_requested.emit)
-            self.buttons.addButton(
-                self.purchase_button, QDialogButtonBox.ButtonRole.ActionRole
+            left_layout.addWidget(self.purchase_button, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        if clear_activation is not None:
+            self.clear_button = QPushButton("清除本机激活")
+            self.clear_button.setObjectName("clearActivationButton")
+            self.clear_button.setStyleSheet(
+                "QPushButton { background: transparent; color: #f87171;"
+                "  border: none; font-size: 12px; }"
+                "QPushButton:hover { color: #ef4444; }"
             )
-        self.activate_button = QPushButton("激活")
-        self.activate_button.setObjectName("activateDeviceButton")
-        self.clear_button = QPushButton("清除本机激活")
-        self.clear_button.setObjectName("clearActivationButton")
-        self.buttons.addButton(self.clear_button, QDialogButtonBox.ButtonRole.ResetRole)
-        self.buttons.addButton(self.activate_button, QDialogButtonBox.ButtonRole.AcceptRole)
-        self.buttons.rejected.connect(self.reject)
-        self.activate_button.clicked.connect(self.request_activation)
-        self.clear_button.clicked.connect(self.request_clear)
-        layout.addWidget(self.buttons)
+            self.clear_button.clicked.connect(self.request_clear)
+            left_layout.addWidget(self.clear_button, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        left_layout.addStretch()
+        layout.addWidget(left_panel, stretch=1)
+
+        # ── 右侧：真实购买面板（选套餐 → 下单 → 二维码 → 轮询） ──
+        if self._purchase_client is not None:
+            from src.ui.purchase_dialog import PurchasePanel
+
+            right_panel = QWidget()
+            right_panel.setStyleSheet(
+                "background: #f8f9fb; border-left: 1px solid #e2e6ee;"
+            )
+            right_layout = QVBoxLayout(right_panel)
+            right_layout.setContentsMargins(24, 24, 24, 24)
+            self._purchase_panel = PurchasePanel(
+                self._purchase_client,
+                task_runner,
+                self,
+                has_active_duration=has_active_duration,
+            )
+            self._purchase_panel.purchase_completed.connect(
+                self._on_embedded_purchase
+            )
+            right_layout.addWidget(self._purchase_panel)
+            layout.addWidget(right_panel, stretch=1)
+
         self._set_busy(True)
         self.status_label.setText("正在读取本机激活状态…")
         self._task_runner.submit(
@@ -106,6 +182,11 @@ class ActivationDialog(QDialog):
             self._status_loaded,
             self._operation_failed,
         )
+
+    def _on_embedded_purchase(self, code: str) -> None:
+        """右侧购买面板支付成功 → 自动填入激活码并激活。"""
+        self.code_edit.setText(code)
+        self.request_activation()
 
     def _status_loaded(self, result: object) -> None:
         if result is not None and not isinstance(result, ActivationSession):
@@ -193,6 +274,7 @@ class ActivationDialog(QDialog):
     def _set_busy(self, busy: bool) -> None:
         self.code_edit.setEnabled(not busy)
         self.activate_button.setEnabled(not busy)
-        self.clear_button.setEnabled(not busy and self._has_session)
+        if hasattr(self, "clear_button"):
+            self.clear_button.setEnabled(not busy and self._has_session)
         if hasattr(self, "unbind_button"):
             self.unbind_button.setEnabled(not busy)

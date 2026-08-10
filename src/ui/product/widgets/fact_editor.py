@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QPushButton,
     QScrollArea,
+    QStyle,
     QVBoxLayout,
     QWidget,
 )
@@ -21,8 +22,6 @@ class FactEditor(QFrame):
     """商品事实可编辑表格。"""
 
     fact_changed = Signal(str, str)  # field_name, new_value
-    fact_confirmed = Signal(str)     # field_name
-    fact_uncertain = Signal(str)     # field_name
 
     _FIELD_LABELS: dict[str, str] = {
         "name": "商品名称",
@@ -67,8 +66,6 @@ class FactEditor(QFrame):
         for field_name, label in self._FIELD_LABELS.items():
             row = _FactRow(label, field_name)
             row.value_changed.connect(self._on_value_changed)
-            row.confirmed.connect(self._on_confirmed)
-            row.uncertain.connect(self._on_uncertain)
             self._rows[field_name] = row
             self._container_layout.insertWidget(
                 self._container_layout.count() - 1, row
@@ -81,27 +78,17 @@ class FactEditor(QFrame):
         for field_name, row in self._rows.items():
             value = fact.field_value(field_name)
             source = fact.source.get(field_name, "")
-            confirmed = fact.confirmed.get(field_name, False)
-            uncertain = fact.uncertain.get(field_name, False)
             source_label = self._SOURCE_DISPLAY.get(source, source)
-            row.set_value(value, source_label, confirmed, uncertain)
+            row.set_value(value, source_label, False, False)
 
     def _on_value_changed(self, field_name: str, value: str) -> None:
         self.fact_changed.emit(field_name, value)
-
-    def _on_confirmed(self, field_name: str) -> None:
-        self.fact_confirmed.emit(field_name)
-
-    def _on_uncertain(self, field_name: str) -> None:
-        self.fact_uncertain.emit(field_name)
 
 
 class _FactRow(QFrame):
     """单行事实字段。"""
 
     value_changed = Signal(str, str)
-    confirmed = Signal(str)
-    uncertain = Signal(str)
 
     def __init__(self, label: str, field_name: str) -> None:
         super().__init__()
@@ -132,44 +119,9 @@ class _FactRow(QFrame):
         self._source_label.setStyleSheet("color: #98a0ad;")
         layout.addWidget(self._source_label)
 
-        # 确认按钮
-        self._confirm_btn = QPushButton("✓")
-        self._confirm_btn.setFixedSize(28, 28)
-        self._confirm_btn.setToolTip("确认此信息")
-        self._confirm_btn.setStyleSheet(
-            "QPushButton { border: 1px solid #d5d9e0; border-radius: 4px;"
-            "  color: #16a34a; }"
-            "QPushButton:hover { background: #2a4a2a; }"
-        )
-        self._confirm_btn.clicked.connect(
-            lambda: self.confirmed.emit(self._field_name)
-        )
-        layout.addWidget(self._confirm_btn)
-
-        # 不确定按钮
-        self._uncertain_btn = QPushButton("⚠")
-        self._uncertain_btn.setFixedSize(28, 28)
-        self._uncertain_btn.setToolTip("标记为不确定")
-        self._uncertain_btn.setStyleSheet(
-            "QPushButton { border: 1px solid #d5d9e0; border-radius: 4px;"
-            "  color: #d97706; }"
-            "QPushButton:hover { background: #4a3a2a; }"
-        )
-        self._uncertain_btn.clicked.connect(
-            lambda: self.uncertain.emit(self._field_name)
-        )
-        layout.addWidget(self._uncertain_btn)
-
     def set_value(
         self, value: str, source: str, confirmed: bool, uncertain: bool
     ) -> None:
+        del confirmed, uncertain
         self._value_edit.setText(value)
         self._source_label.setText(source)
-        if confirmed:
-            self._value_edit.setStyleSheet("border: 1px solid #16a34a;")
-            self._uncertain_btn.setVisible(False)
-        elif uncertain:
-            self._value_edit.setStyleSheet("border: 1px solid #d97706;")
-            self._confirm_btn.setVisible(True)
-        else:
-            self._value_edit.setStyleSheet("")

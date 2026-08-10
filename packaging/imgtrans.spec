@@ -47,11 +47,24 @@ if bundled_models_dir.is_dir():
                         (str(file), f"bundled_models/{model_dir.name}")
                     )
 
+# Playwright chromium（1688/淘宝等需浏览器渲染的链接解析）
+playwright_datas = []
+if sys.platform == "win32":
+    playwright_root = (
+        Path(os.environ.get("LOCALAPPDATA", "")) / "ms-playwright"
+    )
+    for name in ("chromium-1208", "chromium_headless_shell-1208"):
+        browser_dir = playwright_root / name
+        if browser_dir.is_dir():
+            playwright_datas.append((str(browser_dir), f"ms-playwright/{name}"))
+    # playwright driver（node.exe + 脚本）必须随包分发
+    playwright_datas.extend(collect_data_files("playwright"))
+
 analysis = Analysis(
     [str(root / "src" / "__main__.py")],
     pathex=[str(root)],
     binaries=[*rapidocr_binaries, *onnx_binaries],
-    datas=[*rapidocr_datas, *bundled_datas, (str(root / "packaging" / "assets" / "imgtrans.png"), "assets")],
+    datas=[*rapidocr_datas, *bundled_datas, *playwright_datas, (str(root / "packaging" / "assets" / "imgtrans.png"), "assets")],
     hiddenimports=[
         *rapidocr_hidden,
         "onnxruntime",
@@ -62,6 +75,11 @@ analysis = Analysis(
         "PIL.ImageQt",
         "qrcode",
         "png",
+        # 商品链接解析：Playwright（1688 等需浏览器渲染/人工验证）
+        "playwright",
+        "playwright.sync_api",
+        "playwright.async_api",
+        "playwright._impl._driver",
     ],
     hookspath=[],
     hooksconfig={},

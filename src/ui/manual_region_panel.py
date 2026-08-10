@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QFrame,
     QGridLayout,
+    QHBoxLayout,
     QLabel,
     QPlainTextEdit,
     QPushButton,
@@ -17,6 +18,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from src.domain.language import SUPPORTED_LANGUAGE_CODES
 from src.domain.layout import (
     CircularTextPath,
     PathPoint,
@@ -25,6 +27,7 @@ from src.domain.layout import (
 )
 from src.domain.manual_region import ManualInputMode, ManualRegionSpec
 from src.ui.common import wrap_spin
+from src.ui.languages import LANGUAGE_LABELS
 
 
 class ManualRegionPanel(QFrame):
@@ -54,6 +57,38 @@ class ManualRegionPanel(QFrame):
         self.mode_combo.addItem("直接输入最终译文", ManualInputMode.TRANSLATED_TEXT.value)
         self.mode_combo.currentIndexChanged.connect(self._mode_changed)
         layout.addWidget(self.mode_combo)
+
+        ocr_row = QHBoxLayout()
+        ocr_label = QLabel("原图文字语言 (OCR)")
+        ocr_label.setObjectName("propertyFieldLabel")
+        self.ocr_language = QComboBox()
+        self.ocr_language.setObjectName("manualOcrLanguage")
+        for code in SUPPORTED_LANGUAGE_CODES:
+            self.ocr_language.addItem(
+                f"{LANGUAGE_LABELS.get(code, code)} ({code})", code
+            )
+        self.ocr_language.setCurrentIndex(
+            max(0, self.ocr_language.findData("zh-Hans"))
+        )
+        ocr_row.addWidget(ocr_label)
+        ocr_row.addWidget(self.ocr_language, stretch=1)
+        layout.addLayout(ocr_row)
+
+        target_row = QHBoxLayout()
+        target_label = QLabel("目标语言")
+        target_label.setObjectName("propertyFieldLabel")
+        self.target_language = QComboBox()
+        self.target_language.setObjectName("manualTargetLanguage")
+        for code in SUPPORTED_LANGUAGE_CODES:
+            self.target_language.addItem(
+                f"{LANGUAGE_LABELS.get(code, code)} ({code})", code
+            )
+        self.target_language.setCurrentIndex(
+            max(0, self.target_language.findData("en"))
+        )
+        target_row.addWidget(target_label)
+        target_row.addWidget(self.target_language, stretch=1)
+        layout.addLayout(target_row)
 
         self.select_button = QPushButton("在画布框选区域")
         self.select_button.setObjectName("selectManualRegionButton")
@@ -122,6 +157,7 @@ class ManualRegionPanel(QFrame):
 
         self.process_button = QPushButton("处理手动区域")
         self.process_button.setObjectName("processManualRegionButton")
+        self.process_button.setProperty("primary", True)
         self.process_button.setEnabled(False)
         self.process_button.clicked.connect(self.process_requested.emit)
         self.status_label = QLabel("导入图片后可以框选漏翻区域")
@@ -136,6 +172,23 @@ class ManualRegionPanel(QFrame):
     @property
     def has_selection(self) -> bool:
         return self._selection_box is not None
+
+    @property
+    def selected_ocr_language(self) -> str:
+        return str(self.ocr_language.currentData())
+
+    @property
+    def selected_target_language(self) -> str:
+        return str(self.target_language.currentData())
+
+    def set_languages(self, ocr_language: str, target_language: str) -> None:
+        """打开对话框时同步主翻译设置的语言。"""
+        index = self.ocr_language.findData(ocr_language)
+        if index >= 0:
+            self.ocr_language.setCurrentIndex(index)
+        index = self.target_language.findData(target_language)
+        if index >= 0:
+            self.target_language.setCurrentIndex(index)
 
     @property
     def spec(self) -> ManualRegionSpec:

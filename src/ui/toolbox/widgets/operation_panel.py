@@ -35,6 +35,7 @@ class OperationPanel(QFrame):
 
     apply_requested = Signal(object)  # OperationParams
     watermarks_changed = Signal()  # 水印列表变化（新增/删除/编辑）
+    transform_changed = Signal(int, object)  # rotate_deg, flip
     crop_mode_changed = Signal(bool)  # 进入/退出裁剪模式
 
     def __init__(self) -> None:
@@ -66,7 +67,7 @@ class OperationPanel(QFrame):
         crop_outer = QVBoxLayout(crop_group)
         crop_outer.setSpacing(4)
 
-        # 模式按钮行：进入/取消裁剪模式 + 清空
+        # 模式按钮行：进入/取消裁剪模式
         crop_btn_row = QHBoxLayout()
         crop_btn_row.setSpacing(6)
         self._crop_mode_btn = QPushButton("✂ 裁剪")
@@ -76,15 +77,8 @@ class OperationPanel(QFrame):
         self._crop_cancel_btn.setStyleSheet(self._btn_style())
         self._crop_cancel_btn.setVisible(False)
         self._crop_cancel_btn.clicked.connect(self._on_crop_cancel_clicked)
-        # 锁定按钮：切换锁定状态，锁定时 W/H 归 0（不裁剪）
-        self._crop_lock_btn = QPushButton("锁定")
-        self._crop_lock_btn.setCheckable(True)
-        self._crop_lock_btn.setStyleSheet(self._btn_style())
-        self._crop_lock_btn.setToolTip("锁定裁剪（W/H 归 0，不裁剪）；再点恢复默认")
-        self._crop_lock_btn.toggled.connect(self._on_crop_lock_toggled)
         crop_btn_row.addWidget(self._crop_mode_btn)
         crop_btn_row.addWidget(self._crop_cancel_btn)
-        crop_btn_row.addWidget(self._crop_lock_btn)
         crop_btn_row.addStretch()
         crop_outer.addLayout(crop_btn_row)
 
@@ -105,8 +99,8 @@ class OperationPanel(QFrame):
         crop_row2 = QHBoxLayout()
         crop_row2.setSpacing(6)
 
-        self._crop_w_w, self._crop_w = self._make_spin(0, 99999, 100, 50)
-        self._crop_h_w, self._crop_h = self._make_spin(0, 99999, 100, 50)
+        self._crop_w_w, self._crop_w = self._make_spin(0, 99999, 0, 50)
+        self._crop_h_w, self._crop_h = self._make_spin(0, 99999, 0, 50)
         crop_row2.addWidget(QLabel("W:"))
         crop_row2.addWidget(self._crop_w_w)
         crop_row2.addWidget(QLabel("H:"))
@@ -124,12 +118,14 @@ class OperationPanel(QFrame):
         self._rotate_combo = QComboBox()
         self._rotate_combo.addItems(["0°", "90°", "180°", "270°"])
         self._rotate_combo.setStyleSheet(self._combo_style())
+        self._rotate_combo.currentIndexChanged.connect(self._emit_transform)
         rot_layout.addWidget(QLabel("旋转:"))
         rot_layout.addWidget(self._rotate_combo)
 
         self._flip_combo = QComboBox()
         self._flip_combo.addItems(["不翻转", "水平翻转", "垂直翻转"])
         self._flip_combo.setStyleSheet(self._combo_style())
+        self._flip_combo.currentIndexChanged.connect(self._emit_transform)
         rot_layout.addWidget(QLabel("翻转:"))
         rot_layout.addWidget(self._flip_combo)
         rot_layout.addStretch()
@@ -210,6 +206,11 @@ class OperationPanel(QFrame):
         self._wm_font_size_w, self._wm_font_size = self._make_spin(8, 360, 80, 70)
         self._wm_font_size.valueChanged.connect(self._on_wm_field_changed)
         wm_edit.addRow("字号:", self._wm_font_size_w)
+
+        self._wm_rotation_w, self._wm_rotation = self._make_spin(-180, 180, 0, 70)
+        self._wm_rotation.setSuffix("°")
+        self._wm_rotation.valueChanged.connect(self._on_wm_field_changed)
+        wm_edit.addRow("旋转:", self._wm_rotation_w)
 
         # 颜色自选按钮
         self._wm_color_btn = QPushButton("选择颜色")
@@ -411,26 +412,12 @@ class OperationPanel(QFrame):
         self._set_crop_mode_active(False)
         self.crop_mode_changed.emit(False)
 
-    def _on_crop_lock_toggled(self, locked: bool) -> None:
-        """锁定切换：锁定时 W/H 归 0（不裁剪），解锁恢复默认。"""
-        if locked:
-            self._crop_x.setValue(0)
-            self._crop_y.setValue(0)
-            self._crop_w.setValue(0)
-            self._crop_h.setValue(0)
-            self._crop_lock_btn.setText("已锁定")
-        else:
-            self._crop_w.setValue(100)
-            self._crop_h.setValue(100)
-            self._crop_lock_btn.setText("锁定")
-
     def _clear_crop(self) -> None:
-        """恢复裁剪默认值：X/Y=0，W/H=100。"""
-        self._crop_lock_btn.setChecked(False)
+        """清除裁剪参数（一次裁剪只生效一次）。"""
         self._crop_x.setValue(0)
         self._crop_y.setValue(0)
-        self._crop_w.setValue(100)
-        self._crop_h.setValue(100)
+        self._crop_w.setValue(0)
+        self._crop_h.setValue(0)
 
     def enable_crop(self, x: int, y: int, w: int, h: int) -> None:
         """同步选区坐标到输入框（拖拽/双击都会调用）。"""
@@ -449,6 +436,7 @@ class OperationPanel(QFrame):
         if path:
             self._wm_image_path = Path(path)
             self._wm_image_btn.setText(f"已选: {Path(path).name[:15]}...")
+            self.watermarks_changed.emit()
 
     def _build_params(self) -> OperationParams:
         # 裁剪（有坐标值时生效）
@@ -489,6 +477,17 @@ class OperationPanel(QFrame):
         )
 
     # —— 水印管理 ——
+
+    @property
+    def watermark_image_path(self) -> Path | None:
+        return self._wm_image_path
+
+    def _emit_transform(self, *args) -> None:
+        rotate_deg = [0, 90, 180, 270][self._rotate_combo.currentIndex()]
+        flip = {0: None, 1: "horizontal", 2: "vertical"}[
+            self._flip_combo.currentIndex()
+        ]
+        self.transform_changed.emit(rotate_deg, flip)
 
     def watermarks(self) -> list[WatermarkItem]:
         return list(self._watermarks)
@@ -547,6 +546,7 @@ class OperationPanel(QFrame):
         self._wm_color_value = wm.color
         self._update_color_label()
         self._wm_opacity_spin.setValue(int(wm.opacity * 100))
+        self._wm_rotation.setValue(int(wm.rotation))
         self._wm_tiled.setChecked(wm.tiled)
         pos_index = self._wm_position.findData(wm.position)
         if pos_index >= 0:
@@ -566,6 +566,7 @@ class OperationPanel(QFrame):
         wm.font_size = self._wm_font_size.value()
         wm.color = self._wm_color_value
         wm.opacity = self._wm_opacity_spin.value() / 100.0
+        wm.rotation = self._wm_rotation.value()
         wm.tiled = self._wm_tiled.isChecked()
         wm.position = self._wm_position.currentData() or "bottom_right"
         wm.flip_h = self._wm_flip_h.isChecked()

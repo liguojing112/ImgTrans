@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QSize, Qt, Signal
+from PySide6.QtGui import QIcon, QPixmap
 from PySide6.QtWidgets import (
     QFrame,
     QGroupBox,
     QHBoxLayout,
     QLabel,
+    QListWidget,
+    QListWidgetItem,
     QPlainTextEdit,
     QPushButton,
     QScrollArea,
@@ -28,8 +31,6 @@ class StepAnalysis(QFrame):
 
     analyze_requested = Signal()
     fact_changed = Signal(str, str)  # field_name, value
-    fact_confirmed = Signal(str)
-    fact_uncertain = Signal(str)
     next_requested = Signal()
     prev_requested = Signal()
 
@@ -91,6 +92,16 @@ class StepAnalysis(QFrame):
 
         self._vision_group = QGroupBox("图片内容理解")
         vision_layout = QVBoxLayout(self._vision_group)
+
+        # 图片列表（商品来源同款长条样式，多张图逐图查看）
+        self._image_list = QListWidget()
+        self._image_list.setObjectName("analysisImageList")
+        self._image_list.setIconSize(QSize(48, 48))
+        self._image_list.setMaximumHeight(140)
+        self._image_list.currentRowChanged.connect(self._show_image)
+        vision_layout.addWidget(self._image_list)
+        self._image_understandings: list[ImageUnderstanding | None] = []
+
         self._vision_content = QLabel("分析后将显示图片内容理解结果...")
         self._vision_content.setWordWrap(True)
         self._vision_content.setStyleSheet("color: #000000;")
@@ -109,8 +120,6 @@ class StepAnalysis(QFrame):
         from src.ui.product.widgets.fact_editor import FactEditor
         self._fact_editor = FactEditor()
         self._fact_editor.fact_changed.connect(self.fact_changed.emit)
-        self._fact_editor.fact_confirmed.connect(self.fact_confirmed.emit)
-        self._fact_editor.fact_uncertain.connect(self.fact_uncertain.emit)
         right_layout.addWidget(self._fact_editor, stretch=1)
         splitter.addWidget(right)
 
@@ -151,27 +160,86 @@ class StepAnalysis(QFrame):
     def set_result(self, result: ProductAnalysisResult) -> None:
         self._ocr_text.setPlainText(result.ocr_text or "(未识别到文字)")
 
-        # 图片理解
-        u = result.image_understanding
-        if u and (u.category or u.appearance or u.main_colors or u.packaging or u.usage_scene):
-            lines = []
-            if u.category:
-                lines.append(f"类别: {u.category}")
-            if u.appearance:
-                lines.append(f"外观: {u.appearance}")
-            if u.main_colors:
-                lines.append(f"主要颜色: {'、'.join(u.main_colors)}")
-            if u.packaging:
-                lines.append(f"包装: {u.packaging}")
-            if u.visible_accessories:
-                lines.append(f"可见配件: {'、'.join(u.visible_accessories)}")
-            if u.usage_scene:
-                lines.append(f"使用场景: {u.usage_scene}")
-            if u.visual_style:
-                lines.append(f"视觉风格: {u.visual_style}")
-            if u.background:
-                lines.append(f"背景: {u.background}")
-            self._vision_content.setText("\n".join(lines))
+        # 图片列表：多张图时逐图查看（长条列表）
+        self._image_list.clear()
+        self._image_understandings = list(result.image_understandings)
+        sources = result.source_images
+        self._merged_text = self._format_understanding(result.image_understanding)
+        self._per_image_ocr: list[str] = list(result.per_image_ocr_texts or ())
+        self._per_image_facts: list = list(result.per_image_facts or ())
+        self._merged_fact = result.product_fact
+        for index, path in enumerate(sources[:3]):
+            item = QListWidgetItem(f"图 {index + 1}")
+            pixmap = QPixmap(path)
+            if not pixmap.isNull():
+                item.setIcon(
+                    QIcon(
+                        pixmap.scaled(
+                            44, 44,
+                            Qt.AspectRatioMode.KeepAspectRatio,
+                            Qt.TransformationMode.SmoothTransformation,
+                        )
+                    )
+                )
+            item.setToolTip(path)
+            self._image_list.addItem(item)
+        if self._image_list.count():
+            self._image_list.setCurrentRow(0)
+            if (
+                self._image_understandings
+                and self._image_understandings[0]
+            ):
+                self._show_image(0)
+            else:
+                self._vision_content.setText(
+                    self._merged_text or "暂无图片理解结果"
+                )
+                self._vision_content.setStyleSheet("color: #000000;")
+        else:
+            self._show_merged()
+
+        # 事实编辑（默认显示合并事实，切换图片时显示对应图事实）
+        self._fact = result.product_fact
+        self._fact_editor.set_fact(result.product_fact)
+
+    # —— 图片列表（多图逐图查看） ——
+
+    def _show_image(self, index: int) -> None:
+        """选中某张图 → 显示该图的独立理解结果与 OCR 文本。"""
+        if index < 0:
+            return
+        # OCR 文本：有分图 OCR 时显示对应图，否则保持合并文本
+        if self._per_image_ocr and index < len(self._per_image_ocr):
+            ocr = self._per_image_ocr[index]
+            self._ocr_text.setPlainText(ocr or "(该图未识别到文字)")
+        understanding = (
+            self._image_understandings[index]
+            if index < len(self._image_understandings)
+            else None
+        )
+        text = self._format_understanding(understanding)
+        if text:
+            self._vision_content.setText(text)
+            self._vision_content.setStyleSheet("color: #000000;")
+        else:
+            self._vision_content.setText(
+                f"图 {index + 1} 没有可用的理解结果（该图分析可能失败）"
+            )
+            self._vision_content.setStyleSheet("color: #d97706;")
+        # 商品事实信息：切换到对应图片的事实
+        if self._per_image_facts:
+            per_fact = (
+                self._per_image_facts[index]
+                if index < len(self._per_image_facts)
+                else None
+            )
+            if per_fact is not None:
+                self._fact = per_fact
+                self._fact_editor.set_fact(per_fact)
+
+    def _show_merged(self) -> None:
+        if self._merged_text:
+            self._vision_content.setText(self._merged_text)
             self._vision_content.setStyleSheet("color: #000000;")
         else:
             self._vision_content.setText(
@@ -181,10 +249,33 @@ class StepAnalysis(QFrame):
             )
             self._vision_content.setStyleSheet("color: #d97706;")
 
-        # 事实编辑
-        if result.product_fact:
-            self._fact = result.product_fact
-            self._fact_editor.set_fact(result.product_fact)
+    @staticmethod
+    def _format_understanding(u: ImageUnderstanding | None) -> str:
+        if u is None:
+            return ""
+        if not (
+            u.category or u.appearance or u.main_colors
+            or u.packaging or u.usage_scene
+        ):
+            return ""
+        lines = []
+        if u.category:
+            lines.append(f"类别: {u.category}")
+        if u.appearance:
+            lines.append(f"外观: {u.appearance}")
+        if u.main_colors:
+            lines.append(f"主要颜色: {'、'.join(u.main_colors)}")
+        if u.packaging:
+            lines.append(f"包装: {u.packaging}")
+        if u.visible_accessories:
+            lines.append(f"可见配件: {'、'.join(u.visible_accessories)}")
+        if u.usage_scene:
+            lines.append(f"使用场景: {u.usage_scene}")
+        if u.visual_style:
+            lines.append(f"视觉风格: {u.visual_style}")
+        if u.background:
+            lines.append(f"背景: {u.background}")
+        return "\n".join(lines)
 
     def set_error(self, message: str) -> None:
         self._ocr_text.setPlainText("")

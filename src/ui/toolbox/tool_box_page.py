@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QDragEnterEvent, QDropEvent
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -28,6 +29,7 @@ class ToolBoxPage(QFrame):
 
     def __init__(self) -> None:
         super().__init__()
+        self.setAcceptDrops(True)
         self.setProperty("editorStyle", True)
         self.setObjectName("toolBoxPage")
         self.setMinimumSize(1024, 640)
@@ -48,14 +50,6 @@ class ToolBoxPage(QFrame):
         top_bar.setStyleSheet("background: #ffffff;")
         top_layout = QHBoxLayout(top_bar)
         top_layout.setContentsMargins(12, 4, 12, 4)
-
-        back_btn = QLabel("← 返回首页")
-        back_btn.setStyleSheet(
-            "QLabel { color: #212733; padding: 4px 12px; }"
-            "QLabel:hover { color: #3973db; }"
-        )
-        back_btn.mousePressEvent = lambda _: self.back_requested.emit()
-        top_layout.addWidget(back_btn)
 
         title = QLabel("图片工具箱")
         title.setObjectName("pageTitle")
@@ -93,19 +87,32 @@ class ToolBoxPage(QFrame):
         self._preview_panel.watermark_selected.connect(self._on_watermark_selected)
         self._preview_panel.watermark_moved.connect(self._on_watermark_moved)
         self._preview_panel.watermark_scaled.connect(self._on_watermark_scaled)
-        # 裁剪模式切换 → 预览
+        # 裁剪模式切换 → 预览（取消时清除裁剪预览恢复原图）
         self._operation_panel.crop_mode_changed.connect(
-            self._preview_panel.set_crop_mode)
+            self._on_crop_mode_changed)
         # 预览取消裁剪（Esc/取消按钮）→ 操作面板按钮状态恢复
         self._preview_panel.crop_mode_exited.connect(
             lambda: self._operation_panel._set_crop_mode_active(False))
         # 水印变化 → 刷新预览水印框
         self._operation_panel.watermarks_changed.connect(self._sync_watermarks_preview)
+        # 旋转/翻转变化 → 预览变换效果
+        self._operation_panel.transform_changed.connect(
+            self._preview_panel.set_transform_preview
+        )
 
     def _sync_watermarks_preview(self) -> None:
         self._preview_panel.set_watermarks(self._operation_panel.watermarks())
+        image_path = self._operation_panel.watermark_image_path
+        self._preview_panel.set_watermark_image(
+            str(image_path) if image_path is not None else None
+        )
 
     # —— 依赖注入 ——
+
+    def _on_crop_mode_changed(self, active: bool) -> None:
+        self._preview_panel.set_crop_mode(active)
+        if not active:
+            self._preview_panel.clear_crop_preview()
 
     def _on_crop_box_selected(self, x: int, y: int, w: int, h: int) -> None:
         """拖拽裁剪选区 → 启用裁剪并同步到操作面板。"""
@@ -191,6 +198,10 @@ class ToolBoxPage(QFrame):
 
         def _on_success(results):
             success_count = sum(1 for _, r in results if isinstance(r, Path))
+            if success_count:
+                # 一次裁剪只生效一次：应用成功后清除裁剪参数，避免后续操作误裁
+                self._operation_panel._clear_crop()
+                self._preview_panel.clear_crop_preview()
             fail_count = len(results) - success_count
             if success_count:
                 # 缓存处理结果用于预览
@@ -221,6 +232,24 @@ class ToolBoxPage(QFrame):
         self._task_runner.submit(_run, on_success=_on_success, on_error=_on_error)
 
     # —— 导出 ——
+
+    # —— 页面级拖拽导入 ——
+
+    def dragEnterEvent(self, event: QDragEnterEvent) -> None:
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+
+    def dropEvent(self, event: QDropEvent) -> None:
+        supported = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
+        paths = []
+        for url in event.mimeData().urls():
+            if not url.isLocalFile():
+                continue
+            path = Path(url.toLocalFile())
+            if path.is_file() and path.suffix.lower() in supported:
+                paths.append(path)
+        if paths:
+            self._model.add_images(paths)
 
     def _on_export(self, target_dir: Path) -> None:
         images = [img for img in self._model.images if img.selected]
@@ -257,3 +286,12 @@ class ToolBoxPage(QFrame):
         self._status_label.setText(f"已导出 {exported}/{len(images)} 张图片到 {target_dir}")
         self._status_label.setStyleSheet("color: #16a34a;")
         self.export_completed.emit(str(target_dir))
+
+        failed = len(images) - exported
+        message = f"已成功导出 {exported} 张图片"
+        if failed:
+            message += f"，失败 {failed} 张"
+        message += f"\n\n保存位置：{target_dir}"
+        from PySide6.QtWidgets import QMessageBox
+
+        QMessageBox.information(self, "导出完成", message)

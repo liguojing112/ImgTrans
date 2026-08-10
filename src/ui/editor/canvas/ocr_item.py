@@ -87,9 +87,9 @@ class OcrRegionItem(QGraphicsItem):
         poly = self._polygon()
         selected = self.isSelected()
 
-        # 选中项只使用轮廓。半透明填充会盖住已经合成到背景中的小字译文。
+        # 选中项用半透明黄色背景高亮，增加识别度；填充较淡不影响译文可读
         if selected:
-            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.setBrush(QBrush(QColor(250, 204, 21, 70)))
         elif self.is_low_confidence:
             alpha = 30
             painter.setBrush(QBrush(QColor(229, 154, 45, alpha)))

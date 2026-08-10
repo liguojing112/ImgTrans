@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QVBoxLayout,
+    QWidget,
 )
 
 from src.infrastructure.payment_client import (
@@ -33,8 +34,8 @@ class TaskRunner(Protocol):
     ) -> None: ...
 
 
-class PurchaseDialog(QDialog):
-    """扫码购买激活码 — 选套餐 → 下单 → 二维码 → 轮询支付结果。"""
+class PurchasePanel(QWidget):
+    """扫码购买面板 — 选套餐 → 下单 → 二维码 → 轮询（可嵌入窗口）。"""
 
     purchase_completed = Signal(str)  # activation_code
     renew_completed = Signal()  # 续购成功（已叠加到当前激活码）
@@ -48,6 +49,7 @@ class PurchaseDialog(QDialog):
         parent=None,
         preselect_plan_id: int | None = None,
         renew_code: str | None = None,
+        has_active_duration: bool = True,
     ) -> None:
         super().__init__(parent)
         self._client = payment_client
@@ -55,21 +57,23 @@ class PurchaseDialog(QDialog):
         self._preselect_plan_id = preselect_plan_id
         self._renew_code = renew_code
         self._is_renewal = renew_code is not None
+        self._has_active_duration = has_active_duration
         self._plans: list[PayablePlan] = []
         self._selected_plan: PayablePlan | None = None
         self._order: PaymentOrderInfo | None = None
         self._polling = False
         self.setObjectName("purchaseDialog")
-        self.setWindowTitle("续购套餐" if self._is_renewal else "扫码购买")
-        self.setMinimumSize(380, 520)
 
         layout = QVBoxLayout(self)
 
-        intro = QLabel(
+        intro_text = (
             "选择套餐后用微信扫码支付，时长/次数将叠加到当前激活码。"
             if self._is_renewal
             else "选择套餐后用微信扫码支付，支付成功后自动生成激活码。"
         )
+        if not self._has_active_duration:
+            intro_text += "\n提示：商品详情次数包需先购买翻译时长包后才能购买。"
+        intro = QLabel(intro_text)
         intro.setWordWrap(True)
         layout.addWidget(intro)
 
@@ -79,6 +83,11 @@ class PurchaseDialog(QDialog):
 
         self._plan_info_label = QLabel()
         self._plan_info_label.setWordWrap(True)
+        # 二维码上方的套餐信息：居中、加大加粗
+        self._plan_info_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._plan_info_label.setStyleSheet(
+            "font-size: 20px; font-weight: 700; color: #212733;"
+        )
         layout.addWidget(self._plan_info_label)
 
         self._qrcode_label = QLabel("二维码将在此显示")
@@ -90,13 +99,6 @@ class PurchaseDialog(QDialog):
         self._status_label.setWordWrap(True)
         self._status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self._status_label)
-
-        buttons = QHBoxLayout()
-        close_button = QPushButton("关闭")
-        close_button.clicked.connect(self.reject)
-        buttons.addStretch()
-        buttons.addWidget(close_button)
-        layout.addLayout(buttons)
 
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._poll_once)
@@ -163,6 +165,39 @@ class PurchaseDialog(QDialog):
         self._selected_plan = next(
             (p for p in self._plans if p.plan_id == plan_id), None
         )
+        if (
+            self._selected_plan is not None
+            and self._selected_plan.plan_type == "quota"
+            and not self._has_active_duration
+        ):
+            self._guide_to_duration_plan()
+            return
+        self._update_plan_info()
+        self._auto_purchase()
+
+    def _guide_to_duration_plan(self) -> None:
+        """无活跃时长时选中次数包：提示并切回时长包，避免下单被服务端拒绝。"""
+        self._plan_combo.blockSignals(True)
+        for i in range(self._plan_combo.count()):
+            data = self._plan_combo.itemData(i)
+            if data is not None and any(
+                p.plan_id == data and p.plan_type != "quota" for p in self._plans
+            ):
+                self._plan_combo.setCurrentIndex(i)
+                break
+        self._plan_combo.blockSignals(False)
+        self._selected_plan = next(
+            (p for p in self._plans if p.plan_id == self._plan_combo.currentData()),
+            None,
+        )
+        QMessageBox.information(
+            self,
+            "提示",
+            "商品详情次数包需搭配翻译时长使用，请先购买翻译时长包后再购买次数包",
+        )
+        self._status_label.setText(
+            "请先购买「翻译时长包」获得时长额度，再购买次数包"
+        )
         self._update_plan_info()
         self._auto_purchase()
 
@@ -176,7 +211,7 @@ class PurchaseDialog(QDialog):
         # 价格区（仿电商：大红促销价 + 划线原价）
         if plan.is_on_sale and plan.sale_amount_minor is not None:
             parts.append(
-                f'<span style="font-weight:bold;color:#ff4400;">'
+                f'<span style="font-weight:bold;font-size:34px;color:#ff4400;">'
                 f'¥{plan.sale_amount_minor / 100:.2f}</span>'
                 f'&nbsp;&nbsp;'
                 f'<span style="color:#999;text-decoration:line-through;">'
@@ -184,7 +219,7 @@ class PurchaseDialog(QDialog):
             )
         else:
             parts.append(
-                f'<span style="font-weight:bold;color:#ff4400;">'
+                f'<span style="font-weight:bold;font-size:34px;color:#ff4400;">'
                 f'¥{plan.amount_minor / 100:.2f}</span>'
             )
         # 权益描述
@@ -327,3 +362,44 @@ def _format_countdown(total_seconds: float) -> str:
     hours, remainder = divmod(total, 3600)
     minutes, seconds = divmod(remainder, 60)
     return f"{hours:02d}:{minutes:02d}:{seconds:02d}.{tenths}"
+
+
+class PurchaseDialog(QDialog):
+    """扫码购买激活码对话框（独立窗口用法，兼容原有调用）。"""
+
+    purchase_completed = Signal(str)  # activation_code
+    renew_completed = Signal()  # 续购成功（已叠加到当前激活码）
+
+    def __init__(
+        self,
+        payment_client: PaymentClient,
+        task_runner: TaskRunner,
+        parent=None,
+        preselect_plan_id: int | None = None,
+        renew_code: str | None = None,
+        has_active_duration: bool = True,
+    ) -> None:
+        super().__init__(parent)
+        self.setObjectName("purchaseDialog")
+        self.setWindowTitle("续购套餐" if renew_code is not None else "扫码购买")
+        self.setMinimumSize(380, 540)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        self._panel = PurchasePanel(
+            payment_client,
+            task_runner,
+            self,
+            preselect_plan_id=preselect_plan_id,
+            renew_code=renew_code,
+            has_active_duration=has_active_duration,
+        )
+        self._panel.purchase_completed.connect(self.purchase_completed.emit)
+        self._panel.renew_completed.connect(self.renew_completed.emit)
+        layout.addWidget(self._panel)
+        buttons = QHBoxLayout()
+        close_button = QPushButton("关闭")
+        close_button.clicked.connect(self.reject)
+        buttons.addStretch()
+        buttons.addWidget(close_button)
+        layout.addLayout(buttons)

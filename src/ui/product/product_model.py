@@ -33,6 +33,8 @@ class ProductModel(QObject):
         self._manual_info = ProductManualInfo()
         self._analysis_result: ProductAnalysisResult | None = None
         self._copywriting_result: CopywritingResult | None = None
+        # 多图独立文案：图片序号 → 该图的文案结果
+        self._copywriting_results: dict[int, CopywritingResult] = {}
         self._is_dirty = False
 
     # —— current_step ——
@@ -103,6 +105,18 @@ class ProductModel(QObject):
     @copywriting_result.setter
     def copywriting_result(self, value: CopywritingResult | None) -> None:
         self._copywriting_result = value
+
+    # —— copywriting_results（每图独立文案） ——
+
+    @property
+    def copywriting_results(self) -> dict[int, CopywritingResult]:
+        return self._copywriting_results
+
+    @copywriting_results.setter
+    def copywriting_results(self, value: dict[int, CopywritingResult]) -> None:
+        self._copywriting_results = value
+        if value:
+            self._copywriting_result = value.get(0) or next(iter(value.values()))
 
     # —— is_dirty ——
 

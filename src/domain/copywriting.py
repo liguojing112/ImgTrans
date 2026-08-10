@@ -97,3 +97,22 @@ class CopywritingSettings:
     banned_words: list[str] = field(default_factory=list)
     custom_keywords: list[str] = field(default_factory=list)
     custom_requirements: str = ""
+
+    def to_dict(self) -> dict:
+        """序列化为可持久化的 dict（供用户习惯设置保存）。"""
+        return {
+            "target_language": self.target_language,
+            "target_country": self.target_country,
+            "platform": self.platform,
+            "style": self.style,
+            "tone": self.tone,
+            "title_count": self.title_count,
+            "tag_count": self.tag_count,
+            "keyword_count": self.keyword_count,
+            "title_max_chars": self.title_max_chars,
+            "keep_brand": self.keep_brand,
+            "keep_model": self.keep_model,
+            "banned_words": list(self.banned_words),
+            "custom_keywords": list(self.custom_keywords),
+            "custom_requirements": self.custom_requirements,
+        }

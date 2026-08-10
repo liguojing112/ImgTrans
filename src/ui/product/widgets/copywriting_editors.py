@@ -50,8 +50,18 @@ class TagEditor(QFrame):
         btn_row = QHBoxLayout()
         btn_row.addStretch()
         copy_all = QPushButton("复制全部")
+        copy_all.setStyleSheet(
+            "QPushButton { background: #eef0f4; color: #212733; border: 1px solid #d5d9e0; border-radius: 4px; padding: 3px 8px; }"
+            "QPushButton:hover { background: #e0e4ec; }"
+        )
+
         copy_all.clicked.connect(self._copy_all)
         regen = QPushButton("重新生成")
+        regen.setStyleSheet(
+            "QPushButton { background: #eef0f4; color: #212733; border: 1px solid #d5d9e0; border-radius: 4px; padding: 3px 8px; }"
+            "QPushButton:hover { background: #e0e4ec; }"
+        )
+
         regen.clicked.connect(self.regenerate_requested.emit)
         btn_row.addWidget(copy_all)
         btn_row.addWidget(regen)
@@ -97,9 +107,19 @@ class TagEditor(QFrame):
         row.addWidget(edit, stretch=1)
 
         copy_btn = QPushButton("复制")
+        copy_btn.setStyleSheet(
+            "QPushButton { background: #eef0f4; color: #212733; border: 1px solid #d5d9e0; border-radius: 4px; padding: 3px 8px; }"
+            "QPushButton:hover { background: #e0e4ec; }"
+        )
+
         copy_btn.setFixedSize(48, 24)
         copy_btn.clicked.connect(lambda: self.item_copied.emit(tag.id))
         del_btn = QPushButton("×")
+        del_btn.setStyleSheet(
+            "QPushButton { background: #eef0f4; color: #212733; border: 1px solid #d5d9e0; border-radius: 4px; padding: 3px 8px; }"
+            "QPushButton:hover { background: #e0e4ec; }"
+        )
+
         del_btn.setFixedSize(24, 24)
         del_btn.clicked.connect(lambda: self._remove_tag(tag.id))
         row.addWidget(copy_btn)
@@ -151,8 +171,18 @@ class KeywordEditor(QFrame):
         btn_row = QHBoxLayout()
         btn_row.addStretch()
         copy_all = QPushButton("复制全部")
+        copy_all.setStyleSheet(
+            "QPushButton { background: #eef0f4; color: #212733; border: 1px solid #d5d9e0; border-radius: 4px; padding: 3px 8px; }"
+            "QPushButton:hover { background: #e0e4ec; }"
+        )
+
         copy_all.clicked.connect(self._copy_all)
         regen = QPushButton("重新生成")
+        regen.setStyleSheet(
+            "QPushButton { background: #eef0f4; color: #212733; border: 1px solid #d5d9e0; border-radius: 4px; padding: 3px 8px; }"
+            "QPushButton:hover { background: #e0e4ec; }"
+        )
+
         regen.clicked.connect(self.regenerate_requested.emit)
         btn_row.addWidget(copy_all)
         btn_row.addWidget(regen)
@@ -205,6 +235,11 @@ class KeywordEditor(QFrame):
         row.addWidget(meaning_edit)
 
         del_btn = QPushButton("×")
+        del_btn.setStyleSheet(
+            "QPushButton { background: #eef0f4; color: #212733; border: 1px solid #d5d9e0; border-radius: 4px; padding: 3px 8px; }"
+            "QPushButton:hover { background: #e0e4ec; }"
+        )
+
         del_btn.setFixedSize(24, 24)
         del_btn.clicked.connect(lambda: self._remove(kw.id))
         row.addWidget(del_btn)
@@ -251,8 +286,18 @@ class TitleEditor(QFrame):
         btn_row = QHBoxLayout()
         btn_row.addStretch()
         copy_all = QPushButton("复制全部")
+        copy_all.setStyleSheet(
+            "QPushButton { background: #eef0f4; color: #212733; border: 1px solid #d5d9e0; border-radius: 4px; padding: 3px 8px; }"
+            "QPushButton:hover { background: #e0e4ec; }"
+        )
+
         copy_all.clicked.connect(self._copy_all)
         regen = QPushButton("重新生成")
+        regen.setStyleSheet(
+            "QPushButton { background: #eef0f4; color: #212733; border: 1px solid #d5d9e0; border-radius: 4px; padding: 3px 8px; }"
+            "QPushButton:hover { background: #e0e4ec; }"
+        )
+
         regen.clicked.connect(self.regenerate_requested.emit)
         btn_row.addWidget(copy_all)
         btn_row.addWidget(regen)
@@ -311,9 +356,19 @@ class TitleEditor(QFrame):
         row.addWidget(count)
 
         copy_btn = QPushButton("复制")
+        copy_btn.setStyleSheet(
+            "QPushButton { background: #eef0f4; color: #212733; border: 1px solid #d5d9e0; border-radius: 4px; padding: 3px 8px; }"
+            "QPushButton:hover { background: #e0e4ec; }"
+        )
+
         copy_btn.setFixedSize(48, 24)
         copy_btn.clicked.connect(lambda: self._copy_one(title))
         del_btn = QPushButton("×")
+        del_btn.setStyleSheet(
+            "QPushButton { background: #eef0f4; color: #212733; border: 1px solid #d5d9e0; border-radius: 4px; padding: 3px 8px; }"
+            "QPushButton:hover { background: #e0e4ec; }"
+        )
+
         del_btn.setFixedSize(24, 24)
         del_btn.clicked.connect(lambda: self._remove(title.id))
         row.addWidget(copy_btn)
@@ -365,10 +420,25 @@ class SellingPointEditor(QFrame):
         btn_row = QHBoxLayout()
         btn_row.addStretch()
         move_up = QPushButton("↑")
+        move_up.setStyleSheet(
+            "QPushButton { background: #eef0f4; color: #212733; border: 1px solid #d5d9e0; border-radius: 4px; padding: 3px 8px; }"
+            "QPushButton:hover { background: #e0e4ec; }"
+        )
+
         move_up.clicked.connect(self._move_up)
         move_down = QPushButton("↓")
+        move_down.setStyleSheet(
+            "QPushButton { background: #eef0f4; color: #212733; border: 1px solid #d5d9e0; border-radius: 4px; padding: 3px 8px; }"
+            "QPushButton:hover { background: #e0e4ec; }"
+        )
+
         move_down.clicked.connect(self._move_down)
         regen = QPushButton("重新生成")
+        regen.setStyleSheet(
+            "QPushButton { background: #eef0f4; color: #212733; border: 1px solid #d5d9e0; border-radius: 4px; padding: 3px 8px; }"
+            "QPushButton:hover { background: #e0e4ec; }"
+        )
+
         regen.clicked.connect(self.regenerate_requested.emit)
         btn_row.addWidget(move_up)
         btn_row.addWidget(move_down)
@@ -423,6 +493,11 @@ class SellingPointEditor(QFrame):
         row.addWidget(lock_btn)
 
         del_btn = QPushButton("×")
+        del_btn.setStyleSheet(
+            "QPushButton { background: #eef0f4; color: #212733; border: 1px solid #d5d9e0; border-radius: 4px; padding: 3px 8px; }"
+            "QPushButton:hover { background: #e0e4ec; }"
+        )
+
         del_btn.setFixedSize(24, 24)
         del_btn.clicked.connect(lambda: self._remove(sp.id))
         row.addWidget(del_btn)

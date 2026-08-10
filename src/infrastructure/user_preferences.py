@@ -14,7 +14,12 @@ from src.domain.terminology import (
 
 _MAX_PREFERENCES_BYTES = 64 * 1024
 _CURRENT_SCHEMA_VERSION = 1
-_KNOWN_FIELDS = {"brand_terms", "model_terms", "terminology_entries"}
+_KNOWN_FIELDS = {
+    "brand_terms",
+    "model_terms",
+    "terminology_entries",
+    "copywriting_settings",
+}
 
 
 class UserPreferencesError(RuntimeError):
@@ -203,4 +208,40 @@ class JsonTerminologyPreferences:
             }
             for entry in normalized
         ]
+        self._file.save(payload)
+
+
+class JsonCopywritingPreferences:
+    """商品详情生成的习惯设置（目标语言/平台/风格/语气等）。"""
+
+    _ALLOWED = {
+        "target_language",
+        "target_country",
+        "platform",
+        "style",
+        "tone",
+        "tag_count",
+        "keyword_count",
+        "title_count",
+        "title_max_chars",
+        "keep_brand",
+        "keep_model",
+        "banned_words",
+        "custom_keywords",
+        "custom_requirements",
+    }
+
+    def __init__(self, path: Path) -> None:
+        self._file = _JsonPreferencesFile(path)
+
+    def load(self) -> dict:
+        values = self._file.load().get("copywriting_settings", {})
+        if not isinstance(values, dict):
+            return {}
+        return {k: v for k, v in values.items() if k in self._ALLOWED}
+
+    def save(self, settings: dict) -> None:
+        filtered = {k: v for k, v in settings.items() if k in self._ALLOWED}
+        payload = self._file.load()
+        payload["copywriting_settings"] = filtered
         self._file.save(payload)

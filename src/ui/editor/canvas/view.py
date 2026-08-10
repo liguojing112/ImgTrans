@@ -5,6 +5,7 @@ from __future__ import annotations
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QWheelEvent, QMouseEvent, QPainter
 from PySide6.QtWidgets import (
+    QApplication,
     QGraphicsView,
     QGraphicsScene,
 )
@@ -39,6 +40,8 @@ class EditorView(QGraphicsView):
         self._zoom = 1.0
         self._panning = False
         self._pan_start = None
+        self._left_pan_candidate: object | None = None
+        self._left_pan_active = False
         self._min_zoom = 0.1
         self._max_zoom = 20.0
         self._readonly = readonly
@@ -78,7 +81,7 @@ class EditorView(QGraphicsView):
         self.zoom_changed.emit(self._zoom)
         self._emit_sync()
 
-    # —— 平移（中键拖动） ——
+    # —— 平移（左键空白拖动 / 中键拖动） ——
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
         if event.button() == Qt.MouseButton.MiddleButton:
@@ -89,6 +92,18 @@ class EditorView(QGraphicsView):
             self._prev_v = self.verticalScrollBar().value()
             event.accept()
             return
+        if event.button() == Qt.MouseButton.LeftButton:
+            # 空白处（未命中文字图层/水印）才作为平移候选；
+            # 命中图层则保留编辑拖拽（移动/旋转/缩放文字）。
+            scene = self.scene()
+            if scene is not None and not getattr(scene, "pointer_busy", False):
+                hit = getattr(scene, "interactive_item_at", None)
+                if hit is None or hit(self.mapToScene(event.pos())) is None:
+                    self._left_pan_candidate = event.pos()
+                else:
+                    self._left_pan_candidate = None
+            else:
+                self._left_pan_candidate = None
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
@@ -104,6 +119,29 @@ class EditorView(QGraphicsView):
             event.accept()
             self._emit_sync()
             return
+        if (
+            self._left_pan_candidate is not None
+            and event.buttons() & Qt.MouseButton.LeftButton
+        ):
+            if not self._left_pan_active:
+                if (
+                    event.pos() - self._left_pan_candidate
+                ).manhattanLength() >= QApplication.startDragDistance():
+                    self._left_pan_active = True
+                    self._left_pan_candidate = event.pos()
+                    self.setCursor(Qt.CursorShape.ClosedHandCursor)
+            if self._left_pan_active:
+                delta = event.pos() - self._left_pan_candidate
+                self._left_pan_candidate = event.pos()
+                self.horizontalScrollBar().setValue(
+                    self.horizontalScrollBar().value() - delta.x()
+                )
+                self.verticalScrollBar().setValue(
+                    self.verticalScrollBar().value() - delta.y()
+                )
+                event.accept()
+                self._emit_sync()
+                return
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
@@ -113,6 +151,13 @@ class EditorView(QGraphicsView):
             self.setCursor(Qt.CursorShape.ArrowCursor)
             event.accept()
             return
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._left_pan_candidate = None
+            if self._left_pan_active:
+                self._left_pan_active = False
+                self.setCursor(Qt.CursorShape.ArrowCursor)
+                event.accept()
+                return
         super().mouseReleaseEvent(event)
 
     # —— 适应窗口 ——

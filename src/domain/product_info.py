@@ -101,6 +101,15 @@ class ProductAnalysisResult:
     image_understanding: ImageUnderstanding | None = None
     product_fact: ProductFact | None = None
     raw_llm_response: str = ""  # LLM 原始返回（调试用）
+    # 多图分析：每张图单独的理解结果（与 source_images 顺序一致，失败为 None）
+    image_understandings: list[ImageUnderstanding | None] = field(
+        default_factory=list
+    )
+    source_images: list[str] = field(default_factory=list)  # 图片路径
+    # 每张图单独的 OCR 文本（与 source_images 顺序一致）
+    per_image_ocr_texts: list[str] = field(default_factory=list)
+    # 每张图单独的商品事实（与 source_images 顺序一致，失败为 None）
+    per_image_facts: list[ProductFact | None] = field(default_factory=list)
 
 
 @dataclass

@@ -8,8 +8,8 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, QPoint, QRect, Signal
-from PySide6.QtGui import QKeyEvent, QMouseEvent, QPainter, QPen, QColor
+from PySide6.QtCore import Qt, QPoint, QRect, QRectF, Signal
+from PySide6.QtGui import QKeyEvent, QMouseEvent, QPainter, QPen, QColor, QPixmap
 from PySide6.QtWidgets import QLabel
 
 from src.ui.toolbox.tool_box_model import WatermarkItem
@@ -35,12 +35,18 @@ class InteractivePreview(QLabel):
         self._orig_width = 1
         self._orig_height = 1
         self._selected_id: str | None = None
+        self._watermark_image: QPixmap | None = None
         # 裁剪模式
         self._crop_mode = False
         self._crop_rect: QRect | None = None  # 选区（Label 坐标）
         self._crop_drag: str | None = None  # "draw" / "move" / "tl" "tr" "bl" "br"
         self._crop_drag_start: QPoint | None = None
         self._crop_orig_rect: QRect | None = None
+        # 裁剪完成后的选区（Label 坐标），用于裁剪效果预览
+        self._crop_preview_rect: QRect | None = None
+        # 旋转/翻转预览
+        self._transform_deg: int = 0
+        self._transform_flip: str | None = None
         # 水印拖拽
         self._wm_drag: str | None = None  # "move" / "scale"
         self._wm_drag_start: QPoint | None = None
@@ -61,6 +67,17 @@ class InteractivePreview(QLabel):
         self._selected_id = wm_id
         self.update()
 
+    def set_watermark_image(self, path: str | None) -> None:
+        """设置图片水印路径，预览时真实渲染（无路径则清除）。"""
+        if path:
+            pix = QPixmap(path)
+            if not pix.isNull():
+                self._watermark_image = pix
+                self.update()
+                return
+        self._watermark_image = None
+        self.update()
+
     # —— 裁剪模式 ——
 
     def set_crop_mode(self, active: bool) -> None:
@@ -69,6 +86,20 @@ class InteractivePreview(QLabel):
         if not active:
             self._crop_rect = None
             self._crop_drag = None
+        else:
+            # 重新框选前恢复原图预览
+            self._crop_preview_rect = None
+        self.update()
+
+    def clear_crop_preview(self) -> None:
+        """应用/取消后恢复原图预览。"""
+        self._crop_preview_rect = None
+        self.update()
+
+    def set_transform_preview(self, rotate_deg: int, flip: str | None) -> None:
+        """旋转/翻转效果预览（0°/None 恢复原图）。"""
+        self._transform_deg = rotate_deg or 0
+        self._transform_flip = flip
         self.update()
 
     def is_crop_mode(self) -> bool:
@@ -140,12 +171,18 @@ class InteractivePreview(QLabel):
             self.setCursor(Qt.CursorShape.CrossCursor)
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
-        # 裁剪拖拽结束 → 同步选区到参数（不退出模式）
+        # 裁剪拖拽结束 → 同步选区到参数；新建选区（draw）松开即完成裁剪并退出模式
         if self._crop_mode and self._crop_rect is not None and self._crop_drag:
             rect = self._crop_to_image(self._crop_rect)
             if rect:
                 self.crop_box_changed.emit(rect.x(), rect.y(),
                                            rect.width(), rect.height())
+            if self._crop_drag == "draw":
+                # 一次拖动即完成裁剪：选区有效则保存预览并自动退出裁剪模式
+                if rect is not None and rect.width() >= 2 and rect.height() >= 2:
+                    self._crop_preview_rect = QRect(self._crop_rect)
+                    self.set_crop_mode(False)
+                    self.crop_mode_exited.emit()
         self._crop_drag = None
         self._crop_drag_start = None
         self._crop_orig_rect = None
@@ -262,12 +299,98 @@ class InteractivePreview(QLabel):
     # —— 绘制 ——
 
     def paintEvent(self, event) -> None:
+        if self._transform_deg or self._transform_flip:
+            # 旋转/翻转预览：变换后的图片 + 水印跟随旋转
+            painter = QPainter(self)
+            self._paint_transformed_pixmap(painter, include_watermarks=True)
+            painter.end()
+            return
         super().paintEvent(event)
         painter = QPainter(self)
         if self._crop_mode:
             self._paint_crop(painter)
-        self._paint_watermarks(painter)
+        if self._crop_preview_rect is not None:
+            self._paint_crop_preview(painter)
+        else:
+            self._paint_watermarks(painter)
+        self._paint_image_watermark(painter)
         painter.end()
+
+    def _paint_transformed_pixmap(
+        self, painter: QPainter, include_watermarks: bool = False
+    ) -> None:
+        """旋转/翻转后的图片预览（所见即所得）。"""
+        pix = self.pixmap()
+        img_rect = self._image_draw_rect()
+        if pix is None or img_rect is None:
+            return
+        painter.save()
+        painter.translate(img_rect.center())
+        if self._transform_flip == "horizontal":
+            painter.scale(-1, 1)
+        elif self._transform_flip == "vertical":
+            painter.scale(1, -1)
+        painter.rotate(-self._transform_deg)
+        if self._transform_deg % 180 == 90:
+            half_w, half_h = img_rect.height() / 2, img_rect.width() / 2
+        else:
+            half_w, half_h = img_rect.width() / 2, img_rect.height() / 2
+        painter.drawPixmap(
+            QRectF(-half_w, -half_h, half_w * 2, half_h * 2),
+            pix,
+            QRectF(0, 0, pix.width(), pix.height()),
+        )
+        if include_watermarks:
+            # 水印在变换上下文中绘制（坐标相对图片中心），随图片一起旋转不消失
+            self._paint_watermarks(painter, origin_offset=img_rect.center())
+            self._paint_image_watermark(painter, origin_offset=img_rect.center())
+        painter.restore()
+
+    def _paint_crop_preview(self, painter: QPainter) -> None:
+        """裁剪效果预览：选区内容放大显示（所见即所得）。"""
+        pix = self.pixmap()
+        img_rect = self._image_draw_rect()
+        if pix is None or img_rect is None or self._crop_preview_rect is None:
+            return
+        label_rect = self._crop_preview_rect
+        # Label 坐标 → pixmap 坐标（图片居中显示有偏移）
+        src = QRect(
+            label_rect.x() - img_rect.x(),
+            label_rect.y() - img_rect.y(),
+            label_rect.width(),
+            label_rect.height(),
+        )
+        src = src & QRect(0, 0, pix.width(), pix.height())
+        if src.width() < 2 or src.height() < 2:
+            return
+        painter.drawPixmap(img_rect, pix, src)
+
+    def _paint_image_watermark(
+        self, painter: QPainter, origin_offset: QPoint | None = None
+    ) -> None:
+        """预览中真实渲染图片水印（右下角，随预览缩放）。"""
+        pix = self._watermark_image
+        if pix is None or pix.isNull():
+            return
+        img_rect = self._image_draw_rect()
+        if img_rect is None:
+            return
+        ratio = img_rect.width() / max(1, self._orig_width)
+        target_w = max(20, round(img_rect.width() * 0.25))
+        target_h = max(20, round(pix.height() * target_w / max(1, pix.width())))
+        scaled = pix.scaled(
+            target_w, target_h,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+        x = img_rect.right() - scaled.width() - 8
+        y = img_rect.bottom() - scaled.height() - 8
+        if origin_offset is not None:
+            x -= origin_offset.x()
+            y -= origin_offset.y()
+        painter.setOpacity(0.55)
+        painter.drawPixmap(x, y, scaled)
+        painter.setOpacity(1.0)
 
     def _paint_crop(self, painter: QPainter) -> None:
         img_rect = self._image_draw_rect()
@@ -306,19 +429,38 @@ class InteractivePreview(QLabel):
                 QColor(57, 115, 219),
             )
 
-    def _paint_watermarks(self, painter: QPainter) -> None:
+    def _paint_watermarks(
+        self, painter: QPainter, origin_offset: QPoint | None = None
+    ) -> None:
+        from PySide6.QtGui import QFont, QColor as _QColor, QFontMetricsF
+
         for wm in self._items:
             rect = self._wm_rect(wm)
             if not rect:
                 continue
+            if origin_offset is not None:
+                rect = rect.translated(
+                    -origin_offset.x(), -origin_offset.y()
+                )
+            rotation = float(getattr(wm, "rotation", 0))
+            painter.save()
+            if rotation:
+                # 水印框跟随文字旋转：框、文字、选中框在同一旋转上下文绘制
+                painter.translate(rect.center())
+                painter.rotate(-rotation)
+            draw_rect = (
+                QRect(-rect.width() // 2, -rect.height() // 2,
+                      rect.width(), rect.height())
+                if rotation
+                else rect
+            )
             selected = (wm.id == self._selected_id)
             pen = QPen(QColor(255, 255, 255), 1)
             pen.setStyle(Qt.PenStyle.DashLine)
             painter.setPen(pen)
             painter.setBrush(Qt.BrushStyle.NoBrush)
-            painter.drawRect(rect)
+            painter.drawRect(draw_rect)
             if wm.text.strip():
-                from PySide6.QtGui import QFont, QColor as _QColor, QFontMetricsF
                 img_rect2 = self._image_draw_rect()
                 view_ratio = (
                     img_rect2.width() / max(1, self._orig_width)
@@ -342,19 +484,22 @@ class InteractivePreview(QLabel):
                 wm_color = _QColor(wm.color)
                 wm_color.setAlphaF(max(0.1, min(1.0, wm.opacity)))
                 painter.setPen(wm_color)
-                painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, wm.text)
+                painter.drawText(
+                    draw_rect, Qt.AlignmentFlag.AlignCenter, wm.text
+                )
             if selected:
                 pen = QPen(QColor(57, 115, 219), 2)
                 painter.setPen(pen)
-                painter.drawRect(rect)
-                for corner in (rect.topLeft(), rect.topRight(),
-                               rect.bottomLeft(), rect.bottomRight()):
+                painter.drawRect(draw_rect)
+                for corner in (draw_rect.topLeft(), draw_rect.topRight(),
+                               draw_rect.bottomLeft(), draw_rect.bottomRight()):
                     painter.fillRect(
                         QRect(corner.x() - self._HANDLE_SIZE // 2,
                               corner.y() - self._HANDLE_SIZE // 2,
                               self._HANDLE_SIZE, self._HANDLE_SIZE),
                         QColor(57, 115, 219),
                     )
+            painter.restore()
 
     # —— 几何 ——
 
@@ -410,9 +555,25 @@ class InteractivePreview(QLabel):
     def _hit_watermark(self, pos: QPoint) -> str | None:
         for wm in reversed(self._items):
             rect = self._wm_rect(wm)
-            if rect and rect.adjusted(-4, -4, 4, 4).contains(pos):
+            if rect and self._rect_hit_test(rect, float(getattr(wm, "rotation", 0)), pos):
                 return wm.id
         return None
+
+    @staticmethod
+    def _rect_hit_test(rect: QRect, rotation: float, pos: QPoint) -> bool:
+        if not rotation:
+            return rect.adjusted(-4, -4, 4, 4).contains(pos)
+        import math
+
+        center = rect.center()
+        angle = math.radians(rotation)
+        dx = pos.x() - center.x()
+        dy = pos.y() - center.y()
+        rx = dx * math.cos(angle) - dy * math.sin(angle)
+        ry = dx * math.sin(angle) + dy * math.cos(angle)
+        return rect.adjusted(-4, -4, 4, 4).contains(
+            QPoint(int(center.x() + rx), int(center.y() + ry))
+        )
 
     def _hit_handle(self, pos: QPoint) -> bool:
         wm = self._get_item(self._selected_id)
@@ -421,10 +582,23 @@ class InteractivePreview(QLabel):
         rect = self._wm_rect(wm)
         if not rect:
             return False
+        hit_pos = pos
+        rotation = float(getattr(wm, "rotation", 0))
+        if rotation:
+            import math
+
+            center = rect.center()
+            angle = math.radians(rotation)
+            dx = pos.x() - center.x()
+            dy = pos.y() - center.y()
+            hit_pos = QPoint(
+                int(center.x() + dx * math.cos(angle) - dy * math.sin(angle)),
+                int(center.y() + dx * math.sin(angle) + dy * math.cos(angle)),
+            )
         for corner in (rect.topLeft(), rect.topRight(),
                        rect.bottomLeft(), rect.bottomRight()):
-            if (abs(pos.x() - corner.x()) <= self._HANDLE_SIZE
-                    and abs(pos.y() - corner.y()) <= self._HANDLE_SIZE):
+            if (abs(hit_pos.x() - corner.x()) <= self._HANDLE_SIZE
+                    and abs(hit_pos.y() - corner.y()) <= self._HANDLE_SIZE):
                 return True
         return False
 

@@ -51,19 +51,12 @@ class TopBar(QFrame):
         layout.setContentsMargins(8, 4, 8, 4)
         layout.setSpacing(4)
 
-        # 1. 返回首页
-        self.back_btn = _make_tool_button(
-            QStyle.StandardPixmap.SP_ArrowBack, "返回首页"
-        )
-        self.back_btn.clicked.connect(self.back_requested.emit)
-
-        # 2. 文件名
+        # 1. 文件名（返回首页已移至菜单栏「首页」按钮）
         self.file_label = QLabel("未打开图片")
         self.file_label.setStyleSheet(
             "color: #000000; padding: 0 8px;"
         )
 
-        layout.addWidget(self.back_btn)
         layout.addWidget(self.file_label)
 
         # 分隔
@@ -350,7 +343,7 @@ def _make_tool_button(
     btn.setAutoRaise(True)
     btn.setIconSize(btn.iconSize())
     btn.setStyleSheet(
-        "QToolButton { border: none; border-radius: 4px; padding: 4px; }"
+        "QToolButton { border: none; border-radius: 4px; padding: 4px; color: #000000; }"
         "QToolButton:hover { background: #eef0f4; }"
         "QToolButton:checked { background: qlineargradient(x1:0, y1:0, x2:0, y2:1,"
         "  stop:0 #4a8af4, stop:1 #3973db); border: 1px solid #5a9af4; }"

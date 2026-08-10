@@ -65,6 +65,8 @@ class ProductWindow(QMainWindow):
         llm_adapter: LLMAdapter,
         quota_client=None,
         access_token=None,
+        account_actions: dict | None = None,
+        request_quit=None,
     ) -> None:
         super().__init__()
         self.setProperty("editorStyle", True)
@@ -79,6 +81,9 @@ class ProductWindow(QMainWindow):
         self._llm = llm_adapter
         self._quota_client = quota_client
         self._access_token = access_token
+        self._account_actions = account_actions or {}
+        self._request_quit = request_quit
+        self._closing_for_quit = False
         self._project_id: str | None = None
         self._project_store: ProjectStore | None = None
 
@@ -117,20 +122,11 @@ class ProductWindow(QMainWindow):
         top_layout = QHBoxLayout(top_bar)
         top_layout.setContentsMargins(12, 4, 12, 4)
 
-        back_btn = QPushButton("← 返回首页")
-        back_btn.clicked.connect(self.back_requested.emit)
-        top_layout.addWidget(back_btn)
-
         title = QLabel("商品详情生成")
         title.setObjectName("pageTitle")
         top_layout.addWidget(title)
 
         top_layout.addStretch()
-
-        save_btn = QPushButton("💾 保存")
-        save_btn.setToolTip("保存当前项目")
-        save_btn.clicked.connect(self._on_save_project)
-        top_layout.addWidget(save_btn)
 
         layout.addWidget(top_bar)
 
@@ -155,6 +151,11 @@ class ProductWindow(QMainWindow):
     def _build_menus(self) -> None:
         menu = self.menuBar()
         menu.setNativeMenuBar(False)
+
+        # 首页：菜单栏按钮形式，点击即跳转（无下拉）
+        home_action = QAction("首页", self)
+        home_action.triggered.connect(self.back_requested.emit)
+        menu.addAction(home_action)
 
         file_menu = menu.addMenu("文件")
         save_action = QAction("保存项目", self)
@@ -183,6 +184,55 @@ class ProductWindow(QMainWindow):
         delete_action.triggered.connect(self._on_delete_project)
         file_menu.addAction(delete_action)
 
+        file_menu.addSeparator()
+
+        back_action = QAction("返回首页", self)
+        back_action.triggered.connect(self.back_requested.emit)
+        file_menu.addAction(back_action)
+
+        quit_action = QAction("退出", self)
+        quit_action.setShortcut("Ctrl+Q")
+        quit_action.triggered.connect(self._on_quit)
+        file_menu.addAction(quit_action)
+
+        help_menu = menu.addMenu("帮助")
+        help_action = QAction("使用说明…", self)
+        help_action.triggered.connect(self._show_help_dialog)
+        help_menu.addAction(help_action)
+
+        account_actions = self._account_actions
+        if account_actions:
+            account_menu = menu.addMenu("账户")
+            activate_action = QAction("激活…", self)
+            activate_action.triggered.connect(
+                account_actions.get("activate") or (lambda: None)
+            )
+            account_menu.addAction(activate_action)
+
+            renew_action = QAction("续购时长/次数…", self)
+            renew_action.triggered.connect(
+                account_actions.get("renew") or (lambda: None)
+            )
+            account_menu.addAction(renew_action)
+
+            quota_action = QAction("查看额度…", self)
+            quota_action.triggered.connect(
+                account_actions.get("quota") or (lambda: None)
+            )
+            account_menu.addAction(quota_action)
+
+    def _show_help_dialog(self) -> None:
+        from src.ui.help_dialog import HelpDialog
+
+        HelpDialog(self).show()
+
+    def _on_quit(self) -> None:
+        """退出应用：先关商品窗口（不触发首页恢复），再关主窗口。"""
+        self._closing_for_quit = True
+        self.close()
+        if self._request_quit is not None:
+            self._request_quit()
+
     def _connect_signals(self) -> None:
         self._step_indicator.step_clicked.connect(self._on_step_clicked)
         self._step_source.next_requested.connect(self._go_to_analysis)
@@ -192,8 +242,6 @@ class ProductWindow(QMainWindow):
         self._step_analysis.next_requested.connect(self._go_to_copywriting)
         self._step_analysis.prev_requested.connect(self._go_to_source)
         self._step_analysis.fact_changed.connect(self._on_fact_changed)
-        self._step_analysis.fact_confirmed.connect(self._on_fact_confirmed)
-        self._step_analysis.fact_uncertain.connect(self._on_fact_uncertain)
         self._step_copywriting.generate_all_requested.connect(self._on_generate)
         self._step_copywriting.generate_tags_requested.connect(
             lambda: self._on_regenerate_item("tags"))
@@ -248,6 +296,11 @@ class ProductWindow(QMainWindow):
         if self._model.analysis_result is None:
             QMessageBox.warning(self, "提示", "请先完成 AI 分析。")
             return
+        # 进入文案页时同步商品图片列表（分析成功时已设置，这里兜底）
+        self._step_copywriting.set_source_images(
+            [str(img.path) for img in self._model.images],
+            image_info=self._image_info_list(),
+        )
         self._step_indicator.set_completed(1)
         self._go_to_step(2)
         self._on_generate()
@@ -388,9 +441,21 @@ class ProductWindow(QMainWindow):
 
         def _on_success(result):
             elapsed = time.time() - self._task_start_time
-            self._model.analysis_result = result
-            self._step_analysis.set_result(result)
-            self._step_analysis.set_analyzing(False)
+            try:
+                self._model.analysis_result = result
+                self._step_analysis.set_result(result)
+                self._step_copywriting.set_source_images(
+                    [str(img.path) for img in image_paths],
+                    image_info=self._image_info_list(),
+                )
+            except Exception as error:
+                print(f"[ProductWindow] 分析结果处理异常: {error}")
+                import traceback
+
+                traceback.print_exc()
+            finally:
+                # 无论结果处理是否出错，都恢复分析按钮状态
+                self._step_analysis.set_analyzing(False)
             has_vision = bool(result.image_understanding and (
                 result.image_understanding.category or result.image_understanding.appearance
             ))
@@ -464,21 +529,53 @@ class ProductWindow(QMainWindow):
         self._task_start_time = time.time()
         self._generating = True
         self._step_copywriting.set_generating(True)
-        self.statusBar().showMessage("正在生成文案...")
         self._model.copywriting_started.emit()
+
+        # 每张图片独立生成一套文案（用该图的事实；无单图事实用合并事实）
+        analysis = self._model.analysis_result
+        per_facts = list(analysis.per_image_facts) if analysis else []
+        if not per_facts:
+            per_facts = [fact]
+        image_count = len(per_facts)
+        self.statusBar().showMessage(
+            f"正在为 {image_count} 张图片并行生成文案..."
+        )
 
         def _run():
             self._ensure_quota()
-            return self._generate_copywriting.execute(fact, info, settings)
+            from concurrent.futures import ThreadPoolExecutor
 
-        def _on_success(result):
+            def _generate_one(index: int):
+                current = (
+                    per_facts[index] if per_facts[index] is not None else fact
+                )
+                return index, self._generate_copywriting.execute(
+                    current, info, settings
+                )
+
+            results: dict[int, object] = {}
+            with ThreadPoolExecutor(
+                max_workers=max(1, len(per_facts))
+            ) as pool:
+                futures = [
+                    pool.submit(_generate_one, i)
+                    for i in range(len(per_facts))
+                ]
+                for future in futures:
+                    index, result = future.result()
+                    results[index] = result
+            return results
+
+        def _on_success(results):
             elapsed = time.time() - self._task_start_time
             self._generating = False
-            self._model.copywriting_result = result
-            self._step_copywriting.set_result(result)
+            self._model.copywriting_results = results
+            self._step_copywriting.set_results(results)
             self._step_copywriting.set_generating(False)
-            self.statusBar().showMessage(f"文案生成完成，耗时 {elapsed:.1f}s")
-            self._model.copywriting_finished.emit(result)
+            self.statusBar().showMessage(
+                f"文案生成完成（{len(results)} 张图），耗时 {elapsed:.1f}s"
+            )
+            self._model.copywriting_finished.emit(results.get(0))
 
         def _on_error(error: Exception):
             msg = self._classify_error(str(error))
@@ -528,34 +625,34 @@ class ProductWindow(QMainWindow):
         self._task_runner.submit(_run, on_success=_on_success, on_error=_on_error)
 
     def _merge_partial_result(self, partial: object) -> None:
-        if self._model.copywriting_result is None:
+        # 单条重新生成只更新当前图片对应的那套文案
+        index = self._step_copywriting.current_result_index
+        cr = self._model.copywriting_results.get(index)
+        if cr is None:
             return
-        cr = self._model.copywriting_result
         if hasattr(partial, "tags") and partial.tags:
             cr.tags = partial.tags
-            self._step_copywriting._tag_editor.set_tags(cr.tags)
         if hasattr(partial, "keywords") and partial.keywords:
             cr.keywords = partial.keywords
-            self._step_copywriting._kw_editor.set_keywords(cr.keywords)
         if hasattr(partial, "titles") and partial.titles:
             cr.titles = partial.titles
-            self._step_copywriting._title_editor.set_titles(cr.titles)
         if hasattr(partial, "selling_points") and partial.selling_points:
             cr.selling_points = partial.selling_points
-            self._step_copywriting._sp_editor.set_selling_points(cr.selling_points)
         if hasattr(partial, "intro") and partial.intro:
             cr.intro = partial.intro
-            self._step_copywriting.set_result(cr)
         if hasattr(partial, "detail_modules") and partial.detail_modules:
             cr.detail_modules = partial.detail_modules
-            self._step_copywriting.set_result(cr)
+        self._model.copywriting_results[index] = cr
+        self._step_copywriting.set_result(cr)
 
     # —— 编辑器交互 ——
 
     def _on_item_change(self, item_type: str, item_id: str, value: str) -> None:
-        if self._model.copywriting_result is None:
+        # 编辑只作用于当前图片对应的那套文案
+        index = self._step_copywriting.current_result_index
+        cr = self._model.copywriting_results.get(index)
+        if cr is None:
             return
-        cr = self._model.copywriting_result
         if item_type == "tag":
             for t in cr.tags:
                 if t.id == item_id:
@@ -600,18 +697,6 @@ class ProductWindow(QMainWindow):
             f.source[field_name] = "手动修改"
             self._model.analysis_result.product_fact = f
 
-    def _on_fact_confirmed(self, field_name: str) -> None:
-        if self._model.analysis_result and self._model.analysis_result.product_fact:
-            f = self._model.analysis_result.product_fact
-            f.confirmed[field_name] = True
-            f.uncertain.pop(field_name, None)
-
-    def _on_fact_uncertain(self, field_name: str) -> None:
-        if self._model.analysis_result and self._model.analysis_result.product_fact:
-            f = self._model.analysis_result.product_fact
-            f.uncertain[field_name] = True
-            f.confirmed.pop(field_name, None)
-
     # —— 导出 ——
 
     def _on_export(self, fmt: str) -> None:
@@ -636,10 +721,96 @@ class ProductWindow(QMainWindow):
         if not path:
             return
         try:
-            target = self._export_copywriting.execute(result, Path(path), fmt)
-            self.statusBar().showMessage(f"已导出: {target}")
+            results = self._model.copywriting_results
+            image_info = self._image_info_list()
+            exported: list[Path] = []
+            if len(results) > 1:
+                # 多图独立文案：每张图导出一份文件（文件名带图序号，
+                # 且只含该图片的信息，避免每份文件重复全部图片信息）
+                target_path = Path(path)
+                for index, per_result in sorted(results.items()):
+                    name = target_path.stem + f"_图{index + 1}" + target_path.suffix
+                    per_path = target_path.with_name(name)
+                    per_image = (
+                        [image_info[index]]
+                        if index < len(image_info)
+                        else None
+                    )
+                    exported.append(
+                        self._export_copywriting.execute(
+                            per_result, per_path, fmt, image_info=per_image
+                        )
+                    )
+            else:
+                exported.append(
+                    self._export_copywriting.execute(
+                        result, Path(path), fmt, image_info=image_info
+                    )
+                )
+            if len(exported) > 1:
+                self.statusBar().showMessage(
+                    f"已导出 {len(exported)} 份文案到 {Path(path).parent}"
+                )
+            else:
+                self.statusBar().showMessage(f"已导出: {exported[0]}")
         except Exception as e:
             QMessageBox.critical(self, "导出失败", str(e))
+
+    def _image_info_list(self) -> list[dict]:
+        """组装每张商品图片的分析信息（导出/逐图查看用）。"""
+        result = self._model.analysis_result
+        if result is None:
+            return []
+        info: list[dict] = []
+        for index, path in enumerate(result.source_images):
+            understanding = (
+                result.image_understandings[index]
+                if index < len(result.image_understandings)
+                else None
+            )
+            ocr = (
+                result.per_image_ocr_texts[index]
+                if index < len(result.per_image_ocr_texts)
+                else ""
+            )
+            fact = (
+                result.per_image_facts[index]
+                if index < len(result.per_image_facts)
+                else None
+            )
+            understanding_text = ""
+            if understanding is not None:
+                understanding_text = " ".join(
+                    part
+                    for part in (
+                        understanding.category,
+                        understanding.appearance,
+                        understanding.usage_scene,
+                    )
+                    if part
+                )
+            fact_text = ""
+            if fact is not None:
+                fact_text = " ".join(
+                    part
+                    for part in (
+                        fact.name,
+                        fact.brand,
+                        fact.model,
+                        fact.specs,
+                        fact.material,
+                    )
+                    if part
+                )
+            info.append(
+                {
+                    "path": path,
+                    "ocr": ocr,
+                    "understanding": understanding_text,
+                    "fact": fact_text,
+                }
+            )
+        return info
 
     # —— 保存 / 加载 ——
 
@@ -656,7 +827,8 @@ class ProductWindow(QMainWindow):
             self._model.is_dirty = False
 
     def closeEvent(self, event) -> None:
-        self.closed.emit()
+        if not self._closing_for_quit:
+            self.closed.emit()
         super().closeEvent(event)
 
     def _on_save_project(self, silent: bool = False) -> None:
@@ -784,6 +956,11 @@ class ProductWindow(QMainWindow):
         if project.analysis_result:
             self._model.analysis_result = project.analysis_result
             self._step_analysis.set_result(project.analysis_result)
+        # 先恢复分析结果，再填充图片列表（含每图信息）
+        self._step_copywriting.set_source_images(
+            [str(img.path) for img in project.source_images],
+            image_info=self._image_info_list(),
+        )
         if project.copywriting_result:
             self._model.copywriting_result = project.copywriting_result
             self._step_copywriting.set_result(project.copywriting_result)

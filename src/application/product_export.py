@@ -12,26 +12,53 @@ from src.domain.copywriting import CopywritingResult, DetailModule
 
 
 class ExportCopywriting:
-    """导出文案 — 支持 TXT、JSON 和 CSV 格式。"""
+    """导出文案 — 支持 TXT、JSON 和 CSV 格式（含全部商品图片信息）。"""
 
     def execute(
         self,
         result: CopywritingResult,
         target: Path,
         fmt: str = "txt",
+        image_info: list | None = None,
     ) -> Path:
+        """image_info: 每张商品图片的分析信息（路径/OCR/理解/事实）。"""
         if fmt == "json":
-            return self._export_json(result, target)
+            return self._export_json(result, target, image_info)
         if fmt == "csv":
-            return self._export_csv(result, target)
-        return self._export_txt(result, target)
+            return self._export_csv(result, target, image_info)
+        return self._export_txt(result, target, image_info)
 
-    def _export_txt(self, result: CopywritingResult, target: Path) -> Path:
+    @staticmethod
+    def _format_image_info(image_info: list) -> list[str]:
+        """把每图信息格式化为行（TXT 用）。"""
+        lines: list[str] = []
+        for index, info in enumerate(image_info):
+            path = info.get("path", "")
+            name = path.rsplit("/", 1)[-1].rsplit("\\", 1)[-1] if path else ""
+            lines.append(f"  图 {index + 1}: {name or path}")
+            ocr = info.get("ocr", "")
+            if ocr:
+                lines.append(f"    OCR 文字: {ocr[:200]}")
+            understanding = info.get("understanding", "")
+            if understanding:
+                lines.append(f"    内容理解: {understanding[:300]}")
+            fact = info.get("fact", "")
+            if fact:
+                lines.append(f"    事实信息: {fact[:300]}")
+        return lines
+
+    def _export_txt(
+        self, result: CopywritingResult, target: Path, image_info: list | None = None
+    ) -> Path:
         lines = []
         lines.append("=" * 50)
         lines.append(f"商品文案导出 — {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         lines.append(f"目标语言: {result.target_language}")
         lines.append("=" * 50)
+
+        if image_info:
+            lines.append("\n【商品图片信息】")
+            lines.extend(self._format_image_info(image_info))
 
         if result.tags:
             lines.append("\n【图片标签】")
@@ -85,10 +112,13 @@ class ExportCopywriting:
         target.write_text("\n".join(lines), encoding="utf-8")
         return target
 
-    def _export_json(self, result: CopywritingResult, target: Path) -> Path:
+    def _export_json(
+        self, result: CopywritingResult, target: Path, image_info: list | None = None
+    ) -> Path:
         data = {
             "exported_at": datetime.now().isoformat(),
             "target_language": result.target_language,
+            "product_images": image_info or [],
             "tags": [{"tag": t.tag, "language": t.language} for t in result.tags],
             "keywords": [
                 {"keyword": k.keyword, "original_meaning": k.original_meaning}
@@ -123,10 +153,21 @@ class ExportCopywriting:
         )
         return target
 
-    def _export_csv(self, result: CopywritingResult, target: Path) -> Path:
+    def _export_csv(
+        self, result: CopywritingResult, target: Path, image_info: list | None = None
+    ) -> Path:
         buf = io.StringIO()
         writer = csv.writer(buf)
         writer.writerow(["类型", "分类", "内容", "备注"])
+        if image_info:
+            for index, info in enumerate(image_info):
+                path = info.get("path", "")
+                name = path.rsplit("/", 1)[-1].rsplit("\\", 1)[-1] if path else ""
+                ocr = info.get("ocr", "")
+                understanding = info.get("understanding", "")
+                fact = info.get("fact", "")
+                content = f"{ocr or ''} {understanding or ''} {fact or ''}".strip()
+                writer.writerow(["商品图片信息", f"图{index + 1}", content, name])
         for tag in result.tags:
             writer.writerow(["图片标签", "", tag.tag, tag.language])
         for kw in result.keywords:

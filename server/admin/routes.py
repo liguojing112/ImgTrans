@@ -381,6 +381,26 @@ async def enable_activation_code(code_id: str, request: Request) -> Response:
     return _redirect(target if target.startswith("/admin/") else "/admin/activation")
 
 
+@admin_router.post("/activation/codes/{code_id}/renew")
+async def renew_activation_code(code_id: str, request: Request) -> Response:
+    """给激活码追加时长/次数（后台手动叠加）。"""
+    session, form = await _protected_form(request)
+    _require_permission(request, session, "activation")
+    duration = _integer_or_zero(form, "duration_hours")
+    quota = _integer_or_zero(form, "quota")
+    if duration <= 0 and quota <= 0:
+        return _activation_response(request, session, error="时长和次数至少填写一项")
+    try:
+        request.app.state.manage_activation_codes.renew_by_code_id(
+            code_id, duration, quota
+        )
+    except ActivationError as error:
+        return _activation_response(request, session, error=_plan_error_message(error))
+    request.state.audit_action = "renew_activation_code"
+    target = form.get("next", "")
+    return _redirect(target if target.startswith("/admin/") else "/admin/activation")
+
+
 _AUDIT_LABELS = {
     "login": "登录",
     "logout": "退出",
@@ -398,6 +418,7 @@ _AUDIT_LABELS = {
     "issue_activation_codes": "手工发码",
     "disable_activation_code": "停用激活码",
     "enable_activation_code": "启用激活码",
+    "renew_activation_code": "追加激活码时长/次数",
     "create_image_limit_draft": "新建图片限制",
     "publish_image_limits": "发布图片限制",
     "rollback_image_limits": "回滚图片限制",

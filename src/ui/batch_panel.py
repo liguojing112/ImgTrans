@@ -57,16 +57,12 @@ def _external_stepper(spin: QSpinBox) -> tuple[QHBoxLayout, QPushButton, QPushBu
         button.setObjectName("batchStepperButton")
         button.setFixedSize(34, 30)
         button.setStyleSheet(
-            "QPushButton#batchStepperButton {"
-            "background: #2b2b3d; color: #e7e7f3; "
-            "border: 1px solid #5d6284; border-radius: 4px; "
-            " padding: 0; }"
-            "QPushButton#batchStepperButton:hover {"
-            "background: #3a3a55; border-color: #7c83ad; }"
-            "QPushButton#batchStepperButton:pressed {"
-            "background: #202032; border-color: #8f96c4; }"
-            "QPushButton#batchStepperButton:disabled {"
-            "background: #eef0f4; color: #98a0ad; border-color: #d5d9e0; }"
+            "QPushButton { background: #eef0f4; color: #212733;"
+            "  border: 1px solid #d5d9e0; border-radius: 4px; padding: 0; }"
+            "QPushButton:hover { background: #e0e4ec; }"
+            "QPushButton:pressed { background: #d5d9e0; }"
+            "QPushButton:disabled { background: #eef0f4; color: #98a0ad;"
+            "  border-color: #d5d9e0; }"
         )
     minus.clicked.connect(lambda: spin.setValue(spin.value() - spin.singleStep()))
     plus.clicked.connect(lambda: spin.setValue(spin.value() + spin.singleStep()))

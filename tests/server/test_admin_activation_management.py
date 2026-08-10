@@ -141,3 +141,23 @@ def test_usage_page_lists_plaintext_and_search() -> None:
     # 搜不存在的码 → 0 条
     _, total = app.state.manage_usage.list_page(1, 50, "IT-XXXX-XXXX")
     assert total == 0
+
+
+def test_renew_code_adds_duration_and_quota() -> None:
+    app = _app()
+    plan = app.state.manage_activation_plans.create(
+        ActivationPlanValues(
+            name="次数包", amount_minor=500, currency="CNY",
+            duration_hours=1, plan_type="quota", quota=10,
+        )
+    )
+    issued = app.state.manage_activation_codes.issue(plan.plan_id, 1)
+    code_id = issued[0].activation.code_id
+    before = app.state.manage_activation_codes.list_page(1, 50, None, None)[0][0]
+    assert before.quota_total == 10
+
+    app.state.manage_activation_codes.renew_by_code_id(code_id, 5, 20)
+
+    after = app.state.manage_activation_codes.list_page(1, 50, None, None)[0][0]
+    assert after.quota_total == 30, after.quota_total
+    assert after.quota_remaining == 30

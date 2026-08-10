@@ -33,21 +33,15 @@ class HomePage(QFrame):
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.setSpacing(32)
 
-        # 标题区域
+        # 标题区域（商标 ™ + 艺术字，字号保持 22px）
         title_group = QVBoxLayout()
         title_group.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        title_group.setSpacing(8)
 
-        title = QLabel("优译图AI 图片翻译")
+        title = QLabel("优译图AI 图片翻译™")
         title.setObjectName("homeTitle")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        subtitle = QLabel("高效本地化您的产品图片")
-        subtitle.setObjectName("homeSubtitle")
-        subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
         title_group.addWidget(title)
-        title_group.addWidget(subtitle)
         layout.addLayout(title_group)
 
         # 第一行：主营功能卡片

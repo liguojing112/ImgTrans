@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QAbstractSpinBox,
@@ -60,12 +62,14 @@ class CopywritingSettingsPanel(QFrame):
 
     settings_changed = Signal(object)  # CopywritingSettings
 
-    def __init__(self) -> None:
+    def __init__(self, preferences_path: Path | None = None) -> None:
         super().__init__()
         self.setProperty("editorStyle", True)
         self.setObjectName("copywritingSettings")
         self.setMinimumWidth(220)
         self.setMaximumWidth(320)
+        self._preferences = None
+        self._preferences_path = preferences_path
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -178,6 +182,19 @@ class CopywritingSettingsPanel(QFrame):
         self._custom_keywords.textChanged.connect(self._emit_settings)
         self._custom_requirements.textChanged.connect(self._emit_settings)
 
+        # 恢复用户上次保存的习惯设置（目标语言/平台/风格/语气等）
+        if self._preferences_path is not None:
+            from src.infrastructure.user_preferences import (
+                JsonCopywritingPreferences,
+            )
+
+            self._preferences = JsonCopywritingPreferences(
+                self._preferences_path
+            )
+            saved = self._preferences.load()
+            if saved:
+                self._apply_settings(saved)
+
     def _get_spin(self, widget: QWidget) -> QSpinBox:
         """从组合控件中提取 QSpinBox。"""
         return widget.property("spin_box")
@@ -215,7 +232,53 @@ class CopywritingSettingsPanel(QFrame):
             self._lang_combo.setCurrentIndex(index)
 
     def _emit_settings(self) -> None:
-        self.settings_changed.emit(self.get_settings())
+        if getattr(self, "_suppress_save", False):
+            return
+        settings = self.get_settings()
+        self.settings_changed.emit(settings)
+        # 保存用户习惯设置，重启后自动恢复
+        if self._preferences is not None:
+            self._preferences.save(settings.to_dict())
+
+    def _apply_settings(self, values: dict) -> None:
+        """恢复保存的设置（不触发保存循环）。"""
+        self._suppress_save = True
+        try:
+            index = self._lang_combo.findData(values.get("target_language"))
+            if index >= 0:
+                self._lang_combo.setCurrentIndex(index)
+            if values.get("target_country"):
+                self._country_edit.setText(str(values["target_country"]))
+            index = self._platform_combo.findData(values.get("platform"))
+            if index >= 0:
+                self._platform_combo.setCurrentIndex(index)
+            index = self._style_combo.findData(values.get("style"))
+            if index >= 0:
+                self._style_combo.setCurrentIndex(index)
+            index = self._tone_combo.findData(values.get("tone"))
+            if index >= 0:
+                self._tone_combo.setCurrentIndex(index)
+            for attr, control in (
+                ("tag_count", self._tag_count),
+                ("keyword_count", self._kw_count),
+                ("title_count", self._title_count),
+                ("title_max_chars", self._title_max_chars),
+            ):
+                value = values.get(attr)
+                if isinstance(value, int):
+                    self._get_spin(control).setValue(value)
+            if isinstance(values.get("keep_brand"), bool):
+                self._keep_brand.setChecked(values["keep_brand"])
+            if isinstance(values.get("keep_model"), bool):
+                self._keep_model.setChecked(values["keep_model"])
+            if isinstance(values.get("banned_words"), list):
+                self._banned_words.setText(",".join(values["banned_words"]))
+            if isinstance(values.get("custom_keywords"), list):
+                self._custom_keywords.setText(",".join(values["custom_keywords"]))
+            if isinstance(values.get("custom_requirements"), str):
+                self._custom_requirements.setText(values["custom_requirements"])
+        finally:
+            self._suppress_save = False
 
     def _create_spin_box(
         self, min_val: int, max_val: int, default: int, step: int = 1

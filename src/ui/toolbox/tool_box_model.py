@@ -38,6 +38,8 @@ class WatermarkItem:
     custom_y: float | None = None
     # 缩放比例（相对默认尺寸）
     scale: float = 1.0
+    # 旋转角度（度）
+    rotation: float = 0
 
 
 @dataclass
@@ -85,7 +87,11 @@ class ToolBoxModel(QObject):
         existing_paths = {img.path.resolve() for img in self._images}
         if path.resolve() in existing_paths:
             return
-        self._images.append(ToolBoxImage(id=str(uuid.uuid4()), path=path))
+        # 默认只选中第一张（当前预览图），避免批量操作误伤其他图片
+        selected = not self._images
+        self._images.append(
+            ToolBoxImage(id=str(uuid.uuid4()), path=path, selected=selected)
+        )
         self.images_changed.emit()
 
     def add_images(self, paths: list[Path]) -> None:

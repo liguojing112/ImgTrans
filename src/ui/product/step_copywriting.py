@@ -6,13 +6,17 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtWidgets import (
     QApplication,
+    QButtonGroup,
     QFrame,
+    QGridLayout,
     QGroupBox,
     QHBoxLayout,
     QLabel,
+    QListWidget,
+    QListWidgetItem,
     QPlainTextEdit,
     QPushButton,
     QScrollArea,
@@ -156,7 +160,21 @@ class StepCopywriting(QFrame):
         self._standard.setPlaceholderText("标准简介...")
         self._intro_tabs.addTab(self._standard, "标准简介")
         intro_layout.addWidget(self._intro_tabs)
+
+        # 商品图片列表（商品来源同款长条样式，固定预留 4 行，无竖直滚动条）
+        self._source_list = QListWidget()
+        self._source_list.setObjectName("copywritingSourceList")
+        self._source_list.setIconSize(QSize(44, 44))
+        self._source_list.setFixedHeight(140)
+        self._source_list.setVerticalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        self._source_list.currentRowChanged.connect(self._on_source_row_changed)
+        intro_layout.addWidget(self._source_list)
         left_layout.addWidget(intro_group, stretch=1)
+        # 每图独立文案结果
+        self._copywriting_results: dict = {}
+        self._current_result_index = 0
 
         left.setWidget(left_widget)
         splitter.addWidget(left)
@@ -171,11 +189,7 @@ class StepCopywriting(QFrame):
 
         self._detail_group = QGroupBox("详情文案")
         detail_layout = QVBoxLayout(self._detail_group)
-        self._detail_tabs = QTabWidget()
-        self._detail_editors: dict[str, QPlainTextEdit] = {}
-        self._detail_copy_btns: dict[str, QPushButton] = {}
-        self._detail_regen_btns: dict[str, QPushButton] = {}
-        sections = [
+        self._detail_sections = [
             ("overview", "产品概述"),
             ("advantages", "核心优势"),
             ("functions", "功能介绍"),
@@ -185,47 +199,64 @@ class StepCopywriting(QFrame):
             ("instructions", "使用说明"),
             ("notes", "注意事项"),
         ]
-        for sec, label in sections:
-            sec_widget = QWidget()
-            sec_layout = QVBoxLayout(sec_widget)
-            sec_layout.setContentsMargins(0, 0, 0, 0)
-            sec_layout.setSpacing(4)
-
-            sec_btns = QHBoxLayout()
-            copy_btn = QPushButton("复制此节")
-            copy_btn.setFixedSize(72, 22)
-            copy_btn.setStyleSheet(
-                "QPushButton { background: #eef0f4; color: #a0a0c0;"
-                "  border: 1px solid #d5d9e0; border-radius: 3px; }"
-                "QPushButton:hover { background: #4d4d6e; }"
+        # 标签：两行横排（4 x 2），点击切换共用内容区
+        self._detail_contents: dict[str, str] = {}
+        self._detail_buttons: dict[str, QPushButton] = {}
+        self._detail_btn_group = QButtonGroup(self)
+        self._detail_btn_group.setExclusive(True)
+        tag_grid = QGridLayout()
+        tag_grid.setSpacing(4)
+        tag_style = (
+            "QPushButton { background: #eef0f4; color: #212733;"
+            "  border: 1px solid #d5d9e0; border-radius: 4px;"
+            "  padding: 4px 8px; }"
+            "QPushButton:hover { background: #e0e4ec; }"
+            "QPushButton:checked { background: #3973db; color: #ffffff;"
+            "  border-color: #3973db; }"
+        )
+        for index, (sec, label) in enumerate(self._detail_sections):
+            button = QPushButton(label)
+            button.setCheckable(True)
+            button.setStyleSheet(tag_style)
+            button.clicked.connect(
+                lambda checked=False, s=sec: self._switch_detail_section(s)
             )
-            copy_btn.clicked.connect(lambda checked=False, s=sec: self._copy_section(s))
-            self._detail_copy_btns[sec] = copy_btn
+            self._detail_buttons[sec] = button
+            self._detail_btn_group.addButton(button)
+            tag_grid.addWidget(button, index // 4, index % 4)
+        detail_layout.addLayout(tag_grid)
 
-            regen_btn = QPushButton("重新生成此节")
-            regen_btn.setFixedSize(88, 22)
-            regen_btn.setStyleSheet(
-                "QPushButton { background: #eef0f4; color: #a0a0c0;"
-                "  border: 1px solid #d5d9e0; border-radius: 3px; }"
-                "QPushButton:hover { background: #4d4d6e; }"
-            )
-            regen_btn.clicked.connect(
-                lambda checked=False, s=sec: self.generate_detail_requested.emit(s)
-            )
-            self._detail_regen_btns[sec] = regen_btn
+        # 操作按钮（针对当前选中区块）
+        detail_ops = QHBoxLayout()
+        detail_ops.setSpacing(6)
+        self._detail_copy_btn = QPushButton("复制此节")
+        self._detail_copy_btn.setFixedSize(90, 30)
+        self._detail_copy_btn.setStyleSheet(
+            "QPushButton { background: #eef0f4; color: #212733;"
+            "  border: 1px solid #d5d9e0; border-radius: 4px; }"
+            "QPushButton:hover { background: #e0e4ec; }"
+        )
+        self._detail_copy_btn.clicked.connect(self._copy_current_section)
+        self._detail_regen_btn = QPushButton("重新生成此节")
+        self._detail_regen_btn.setFixedSize(110, 30)
+        self._detail_regen_btn.setStyleSheet(
+            "QPushButton { background: #eef0f4; color: #212733;"
+            "  border: 1px solid #d5d9e0; border-radius: 4px; }"
+            "QPushButton:hover { background: #e0e4ec; }"
+        )
+        self._detail_regen_btn.clicked.connect(self._regen_current_section)
+        detail_ops.addWidget(self._detail_copy_btn)
+        detail_ops.addWidget(self._detail_regen_btn)
+        detail_ops.addStretch()
+        detail_layout.addLayout(detail_ops)
 
-            sec_btns.addStretch()
-            sec_btns.addWidget(copy_btn)
-            sec_btns.addWidget(regen_btn)
-            sec_layout.addLayout(sec_btns)
+        # 共用内容区
+        self._detail_editor = QPlainTextEdit()
+        self._detail_editor.setPlaceholderText("生成详情文案...")
+        detail_layout.addWidget(self._detail_editor, stretch=1)
 
-            editor = QPlainTextEdit()
-            editor.setPlaceholderText(f"生成 {label}...")
-            sec_layout.addWidget(editor)
-            self._detail_tabs.addTab(sec_widget, label)
-            self._detail_editors[sec] = editor
-
-        detail_layout.addWidget(self._detail_tabs)
+        self._current_detail_section = "overview"
+        self._detail_buttons["overview"].setChecked(True)
         mid_layout.addWidget(self._detail_group, stretch=1)
 
         # 导出
@@ -245,8 +276,15 @@ class StepCopywriting(QFrame):
         mid.setWidget(mid_widget)
         splitter.addWidget(mid)
 
-        # ── 右侧：设置面板 ──
-        self._settings_panel = CopywritingSettingsPanel()
+        # ── 右侧：设置面板（习惯设置持久化到用户配置） ──
+        from src.platform.paths import PlatformPaths
+
+        prefs_path = (
+            PlatformPaths.discover().data_dir
+            / "config"
+            / "copywriting-preferences.json"
+        )
+        self._settings_panel = CopywritingSettingsPanel(prefs_path)
         self._settings_panel.settings_changed.connect(self.settings_changed.emit)
         splitter.addWidget(self._settings_panel)
 
@@ -318,15 +356,78 @@ class StepCopywriting(QFrame):
         self._generate_btn.setEnabled(not active)
         self._generate_btn.setText("⏳ 生成中..." if active else "⚡ 生成全部文案")
 
+    def set_source_images(self, paths: list, image_info: list | None = None) -> None:
+        """显示商品图片列表（商品简介下方，长条列表样式）。
+
+        多图独立文案时：点击图片切换显示该图的文案结果。
+        """
+        del image_info
+        from PySide6.QtGui import QIcon, QPixmap
+
+        self._source_list.blockSignals(True)
+        self._source_list.clear()
+        for path in paths[:3]:
+            name = str(path)
+            item = QListWidgetItem(name.rsplit("/", 1)[-1])
+            pixmap = QPixmap(name)
+            if not pixmap.isNull():
+                item.setIcon(
+                    QIcon(
+                        pixmap.scaled(
+                            40, 40,
+                            Qt.AspectRatioMode.KeepAspectRatio,
+                            Qt.TransformationMode.SmoothTransformation,
+                        )
+                    )
+                )
+            item.setToolTip(name)
+            self._source_list.addItem(item)
+        self._source_list.blockSignals(False)
+        if self._source_list.count():
+            self._source_list.setCurrentRow(0)
+
+    @property
+    def current_result_index(self) -> int:
+        return getattr(self, "_current_result_index", 0)
+
+    def set_results(self, results: dict) -> None:
+        """设置每图独立文案结果；点击图片列表切换显示对应图的那套。"""
+        self._copywriting_results = results
+        if not results:
+            return
+        self._current_result_index = 0
+        self.set_result(results.get(0))
+        if self._source_list.count() == 0:
+            return
+        self._source_list.setCurrentRow(0)
+        if self._source_list.count() > 1:
+            self._source_list.setToolTip("点击切换查看每张图片的文案")
+
+    def _on_source_row_changed(self, row: int) -> None:
+        """点击图片 → 切换显示该图的独立文案。"""
+        if not getattr(self, "_copywriting_results", None) or row < 0:
+            return
+        if row >= len(self._copywriting_results):
+            return
+        self._save_current_edits()
+        self._current_result_index = row
+        self.set_result(self._copywriting_results.get(row))
+
+    def _save_current_edits(self) -> None:
+        """把当前编辑中的文案写回对应图片的结果。"""
+        if not getattr(self, "_copywriting_results", None):
+            return
+        index = getattr(self, "_current_result_index", 0)
+        current = self._copywriting_results.get(index)
+        if current is not None:
+            self._copywriting_results[index] = self.collect_result(current)
+
     def set_regeneration_active(self, item_type: str, active: bool) -> None:
         """Disable the button that owns an in-flight API request."""
         if item_type == "intro":
             self._intro_regen_btn.setEnabled(not active)
         elif item_type.startswith("detail:"):
-            section = item_type.split(":", 1)[1]
-            button = self._detail_regen_btns.get(section)
-            if button is not None:
-                button.setEnabled(not active)
+            self._detail_regen_btn.setEnabled(not active)
 
     def set_result(self, result: CopywritingResult) -> None:
         self._result = result
@@ -342,14 +443,20 @@ class StepCopywriting(QFrame):
             self._standard.setPlainText(result.intro.standard_intro)
 
         for mod in result.detail_modules:
-            editor = self._detail_editors.get(mod.section)
-            if editor:
-                editor.setPlainText(mod.content)
+            self._detail_contents[mod.section] = mod.content
+        # 刷新当前选中的区块内容
+        self._detail_editor.setPlainText(
+            self._detail_contents.get(self._current_detail_section, "")
+        )
 
     def set_error(self, message: str) -> None:
         pass
 
     def collect_result(self, result: CopywritingResult) -> CopywritingResult:
+        # 保存当前编辑中的内容，避免切换区块时丢失
+        self._detail_contents[self._current_detail_section] = (
+            self._detail_editor.toPlainText()
+        )
         result.intro = ProductIntro(
             one_liner=self._one_liner.toPlainText().strip() or (
                 result.intro.one_liner if result.intro else ""
@@ -361,8 +468,8 @@ class StepCopywriting(QFrame):
                 result.intro.standard_intro if result.intro else ""
             ),
         )
-        for sec, editor in self._detail_editors.items():
-            text = editor.toPlainText().strip()
+        for sec, text in self._detail_contents.items():
+            text = text.strip()
             if text:
                 for mod in result.detail_modules:
                     if mod.section == sec:
@@ -385,9 +492,20 @@ class StepCopywriting(QFrame):
         if parts:
             QApplication.clipboard().setText("\n\n".join(parts))
 
-    def _copy_section(self, section: str) -> None:
-        editor = self._detail_editors.get(section)
-        if editor:
-            text = editor.toPlainText().strip()
-            if text:
-                QApplication.clipboard().setText(text)
+    def _switch_detail_section(self, section: str) -> None:
+        """切换详情区块：保存当前编辑内容，加载目标区块内容。"""
+        self._detail_contents[self._current_detail_section] = (
+            self._detail_editor.toPlainText()
+        )
+        self._current_detail_section = section
+        self._detail_editor.setPlainText(
+            self._detail_contents.get(section, "")
+        )
+
+    def _copy_current_section(self) -> None:
+        text = self._detail_editor.toPlainText().strip()
+        if text:
+            QApplication.clipboard().setText(text)
+
+    def _regen_current_section(self) -> None:
+        self.generate_detail_requested.emit(self._current_detail_section)

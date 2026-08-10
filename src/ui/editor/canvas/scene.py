@@ -3,7 +3,15 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
-from PySide6.QtGui import QBrush, QColor, QImage, QPainter, QPen, QPixmap
+from PySide6.QtGui import (
+    QBrush,
+    QColor,
+    QImage,
+    QPainter,
+    QPainterPath,
+    QPen,
+    QPixmap,
+)
 from PySide6.QtWidgets import (
     QGraphicsPixmapItem,
     QGraphicsRectItem,
@@ -29,9 +37,12 @@ class EditorScene(QGraphicsScene):
     layer_dropped = Signal(str, object)
     watermark_selected = Signal(str)
     watermark_dropped = Signal(str, object)
+    layer_edit_requested = Signal(str)  # 双击文字图层请求编辑文字
+    mask_brush_finished = Signal()  # 涂抹松手（自动触发 AI 消除）
     selection_cleared = Signal()
     manual_region_selected = Signal(object)
     area_selected = Signal(str, object)
+    area_selection_cleared = Signal(str)
     edit_mask_changed = Signal(object)
 
     def __init__(self, readonly: bool = False) -> None:
@@ -53,6 +64,9 @@ class EditorScene(QGraphicsScene):
         self._manual_selection_item: QGraphicsRectItem | None = None
         self._selection_mode: str | None = None
         self._selection_aspect_ratio: float | None = None
+        self._crop_selection_rect: QRectF | None = None
+        self._crop_move_origin: QPointF | None = None
+        self._crop_move_start_rect: QRectF | None = None
         self._edit_mask = bytearray(self._scene_width * self._scene_height)
         self._edit_mask_image: QImage | None = None
         self._edit_mask_visible = False
@@ -64,6 +78,21 @@ class EditorScene(QGraphicsScene):
     def readonly(self) -> bool:
         return self._readonly
 
+    @property
+    def pointer_busy(self) -> bool:
+        """左键被选区/画笔等指针模式占用时为 True（视图此时不应左键平移）。"""
+        return self._manual_selection_enabled or self._mask_brush_mode is not None
+
+    def interactive_item_at(self, scene_pos) -> object | None:
+        """返回该位置可交互的文字图层/水印（用于区分左键编辑与画布平移）。"""
+        for item in self._watermark_items.values():
+            if item.contains(item.mapFromScene(scene_pos)):
+                return item
+        for item in self._layer_items.values():
+            if item.contains(item.mapFromScene(scene_pos)):
+                return item
+        return None
+
     # —— 图片 ——
 
     def set_document(self, document: ImageDocument) -> None:
@@ -71,6 +100,9 @@ class EditorScene(QGraphicsScene):
         self._manual_selection_origin = None
         self._manual_selection_enabled = False
         self._selection_aspect_ratio = None
+        self._crop_selection_rect = None
+        self._crop_move_origin = None
+        self._crop_move_start_rect = None
         self.clear()
         self._background = None
         self._comparison_clip = None
@@ -91,6 +123,28 @@ class EditorScene(QGraphicsScene):
         self._background = BackgroundImageItem(pixmap)
         self.addItem(self._background)
         self.setSceneRect(0, 0, asset.width, asset.height)
+
+    def clear_document(self) -> None:
+        """清空画布背景与所有内容（工作台无图片时调用）。"""
+        self._manual_selection_item = None
+        self._manual_selection_origin = None
+        self._manual_selection_enabled = False
+        self._selection_aspect_ratio = None
+        self._crop_selection_rect = None
+        self._crop_move_origin = None
+        self._crop_move_start_rect = None
+        self.clear()
+        self._background = None
+        self._comparison_clip = None
+        self._layer_items.clear()
+        self._ocr_items.clear()
+        self._regions_visible = True
+        self._watermark_items.clear()
+        self._mask_brush_mode = None
+        self._edit_mask_visible = False
+        self._edit_mask_image = None
+        self.setSceneRect(0, 0, 1, 1)
+        self.update()
 
     def set_comparison_document(
         self,
@@ -276,6 +330,39 @@ class EditorScene(QGraphicsScene):
         if not self._manual_selection_enabled:
             self._selection_aspect_ratio = None
             self._clear_manual_selection_item()
+            self.clear_crop_selection()
+
+    @property
+    def crop_selection_box(self) -> TextBox | None:
+        rect = self._crop_selection_rect
+        if rect is None:
+            return None
+        return TextBox(
+            rect.center().x(),
+            rect.center().y(),
+            rect.width(),
+            rect.height(),
+        )
+
+    def set_crop_selection(self, box: TextBox) -> None:
+        rect = QRectF(
+            box.center_x - box.width / 2,
+            box.center_y - box.height / 2,
+            box.width,
+            box.height,
+        ).intersected(self.sceneRect())
+        self._crop_selection_rect = rect if not rect.isEmpty() else None
+        self.update()
+
+    def clear_crop_selection(self, notify: bool = False) -> None:
+        had_selection = self._crop_selection_rect is not None
+        self._crop_selection_rect = None
+        self._crop_move_origin = None
+        self._crop_move_start_rect = None
+        self._clear_manual_selection_item()
+        self.update()
+        if notify and had_selection:
+            self.area_selection_cleared.emit("crop")
 
     def set_selection_aspect_ratio(self, aspect_ratio: float | None) -> None:
         """Update the active drag ratio without changing the selection mode."""
@@ -344,6 +431,19 @@ class EditorScene(QGraphicsScene):
                 self._edit_mask_image,
                 QColor(45, 156, 255, 125),
             )
+        if self._selection_mode == "crop" and self._crop_selection_rect is not None:
+            painter.save()
+            shade = QPainterPath()
+            shade.setFillRule(Qt.FillRule.OddEvenFill)
+            shade.addRect(self.sceneRect())
+            shade.addRect(self._crop_selection_rect)
+            painter.fillPath(shade, QColor(0, 0, 0, 125))
+            pen = QPen(QColor("#2d9cff"), 2)
+            pen.setCosmetic(True)
+            painter.setPen(pen)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawRect(self._crop_selection_rect)
+            painter.restore()
 
     # —— 鼠标事件 ——
 
@@ -352,7 +452,19 @@ class EditorScene(QGraphicsScene):
             self._manual_selection_enabled
             and event.button() is Qt.MouseButton.LeftButton
         ):
-            self._manual_selection_origin = self._clamp_to_scene(event.scenePos())
+            point = self._clamp_to_scene(event.scenePos())
+            if (
+                self._selection_mode == "crop"
+                and self._crop_selection_rect is not None
+                and self._crop_selection_rect.contains(point)
+            ):
+                self._crop_move_origin = QPointF(point)
+                self._crop_move_start_rect = QRectF(self._crop_selection_rect)
+                event.accept()
+                return
+            if self._selection_mode == "crop":
+                self.clear_crop_selection(notify=True)
+            self._manual_selection_origin = point
             self._clear_manual_selection_item()
             self._manual_selection_item = QGraphicsRectItem()
             self._manual_selection_item.setPen(QPen(QColor("#2d9cff"), 2))
@@ -384,6 +496,15 @@ class EditorScene(QGraphicsScene):
                 clicked = item
                 break
         if clicked is None:
+            # 点击 OCR 区域框 → 高亮该区域并联动右侧列表/属性
+            for item in self._ocr_items.values():
+                if item.contains(item.mapFromScene(pos)):
+                    self.highlight_ocr_region(item.region_id)
+                    self.layer_selected.emit(item.region_id)
+                    clicked = item
+                    clicked_kind = "ocr"
+                    break
+        if clicked is None:
             self.clear_selection()
             self.selection_cleared.emit()
         else:
@@ -391,6 +512,8 @@ class EditorScene(QGraphicsScene):
                 self.clear_selection()
                 clicked.setSelected(True)
                 self.watermark_selected.emit(clicked.region_id)
+            elif clicked_kind == "ocr":
+                pass  # 已高亮并联动
             else:
                 self._emit_selection(clicked)
         super().mousePressEvent(event)
@@ -407,7 +530,6 @@ class EditorScene(QGraphicsScene):
                 end,
             )
             self._manual_selection_origin = None
-            self._manual_selection_enabled = False
             self._clear_manual_selection_item()
             if rect.width() >= 4 and rect.height() >= 4:
                 box = TextBox(
@@ -418,7 +540,24 @@ class EditorScene(QGraphicsScene):
                 )
                 if self._selection_mode == "manual_translate":
                     self.manual_region_selected.emit(box)
+                if self._selection_mode == "crop":
+                    self._crop_selection_rect = QRectF(rect)
                 self.area_selected.emit(self._selection_mode or "", box)
+            if self._selection_mode != "crop":
+                self._manual_selection_enabled = False
+            self.update()
+            event.accept()
+            return
+        if (
+            self._selection_mode == "crop"
+            and self._crop_move_origin is not None
+            and event.button() is Qt.MouseButton.LeftButton
+        ):
+            self._crop_move_origin = None
+            self._crop_move_start_rect = None
+            box = self.crop_selection_box
+            if box is not None:
+                self.area_selected.emit("crop", box)
             event.accept()
             return
         if (
@@ -426,6 +565,8 @@ class EditorScene(QGraphicsScene):
             and event.button() is Qt.MouseButton.LeftButton
         ):
             self._last_brush_point = None
+            # 涂抹松手即触发 AI 消除（自动应用当前蒙版）
+            self.mask_brush_finished.emit()
             event.accept()
             return
         super().mouseReleaseEvent(event)
@@ -447,6 +588,7 @@ class EditorScene(QGraphicsScene):
         for item in self._layer_items.values():
             if item.contains(item.mapFromScene(pos)):
                 self._emit_selection(item)
+                self.layer_edit_requested.emit(item.region_id)
                 break
 
     def _emit_selection(self, item: TextLayerItem) -> None:
@@ -455,6 +597,27 @@ class EditorScene(QGraphicsScene):
         self.layer_selected.emit(item.region_id)
 
     def mouseMoveEvent(self, event: QGraphicsSceneMouseEvent) -> None:
+        if (
+            self._selection_mode == "crop"
+            and self._crop_move_origin is not None
+            and self._crop_move_start_rect is not None
+        ):
+            point = self._clamp_to_scene(event.scenePos())
+            delta = point - self._crop_move_origin
+            bounds = self.sceneRect()
+            start = self._crop_move_start_rect
+            dx = min(
+                max(delta.x(), bounds.left() - start.left()),
+                bounds.right() - start.right(),
+            )
+            dy = min(
+                max(delta.y(), bounds.top() - start.top()),
+                bounds.bottom() - start.bottom(),
+            )
+            self._crop_selection_rect = start.translated(dx, dy)
+            self.update()
+            event.accept()
+            return
         if (
             self._manual_selection_enabled
             and self._manual_selection_origin is not None

@@ -9,11 +9,14 @@
 from __future__ import annotations
 
 import html as html_lib
+import os
 import re
+import sys
 import urllib.error
 import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 from html.parser import HTMLParser
 from urllib.parse import urljoin, urlparse
 
@@ -209,11 +212,26 @@ class LinkParser:
 
     @staticmethod
     def _is_challenge_page(html_text: str) -> bool:
-        """检测是否为反爬验证页（1688 x5sec / 通用 captcha）。"""
+        """检测是否为反爬验证页（1688 x5sec / geetest 等）。
+
+        只用强特征标记，避免把普通商品页正文中出现的 captcha/verify
+        等单词误判为验证页（误判会导致验证通过后仍无限等待）。
+        """
         low = html_text.lower()
-        markers = ["x5sec", "punish", "captcha", "verify",
-                   "window._config_", "slide verify", "geetest"]
-        return any(m in low for m in markers)
+        markers = [
+            "x5sec", "punish", "geetest", "slide verify",
+            "window._config_", "滑块验证", "安全验证",
+        ]
+        if any(m in low for m in markers):
+            return True
+        # 结构化验证码表单（id/class 明确包含 captcha / verify-code）
+        return bool(
+            re.search(
+                r'(?:id|class)=["\']?[^"\']*'
+                r'(?:captcha|verify-code|slide-captcha)[^"\']*["\']?',
+                low,
+            )
+        )
 
     @staticmethod
     def _is_login_page(page) -> bool:
@@ -278,6 +296,14 @@ class LinkParser:
 
     def _browser_parse(self, url: str, platform: str,
                        headless: bool) -> LinkParseResult:
+        # PyInstaller 打包环境：chromium 随安装包分发在 _internal/ms-playwright
+        if getattr(sys, "frozen", False):
+            base = getattr(sys, "_MEIPASS", None) or str(
+                Path(sys.executable).parent
+            )
+            os.environ.setdefault(
+                "PLAYWRIGHT_BROWSERS_PATH", str(Path(base) / "ms-playwright")
+            )
         from playwright.sync_api import sync_playwright
 
         with sync_playwright() as p:
@@ -313,7 +339,7 @@ class LinkParser:
                                 "检测到验证码或登录墙：请在浏览器窗口中"
                                 "完成验证/登录，完成后自动继续解析")
                         waited = 0
-                        while waited < 120:
+                        while waited < 300:
                             page.wait_for_timeout(3000)
                             waited += 3
                             try:
@@ -336,7 +362,7 @@ class LinkParser:
                                 break
                         else:
                             raise LinkParseError(
-                                "验证/登录超时：未能在 120 秒内完成")
+                                "验证/登录超时：未能在 300 秒内完成")
                         break
                     if not blocked:
                         # 无头模式或阻塞解除：等待页面导航完成再提取内容

@@ -149,6 +149,9 @@ class LayerStatePanel(QFrame):
             lambda: self._adjust_watermark_font_size(1)
         )
         self.watermark_color_button.clicked.connect(self._choose_watermark_color)
+        self.watermark_rotation.valueChanged.connect(
+            self._preview_watermark_rotation
+        )
         self.watermark_rotation.editingFinished.connect(
             lambda: self._emit_watermark_property(
                 "rotation_degrees",
@@ -529,6 +532,18 @@ class LayerStatePanel(QFrame):
         self._emit_watermark_property(
             "opacity", self.watermark_opacity.value() / 100
         )
+
+    def _preview_watermark_rotation(self) -> None:
+        watermark_id = self._selected_watermark_id or ""
+        watermark = self._watermarks.get(watermark_id)
+        if watermark is None:
+            return
+        preview = replace(
+            watermark,
+            rotation_degrees=self.watermark_rotation.value(),
+        )
+        self._watermarks[watermark_id] = preview
+        self.watermark_preview_changed.emit(preview)
 
     def _preview_watermark_size(self) -> None:
         watermark_id = self._selected_watermark_id or ""

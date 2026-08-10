@@ -102,11 +102,19 @@ class GenerateCopywriting:
         )
 
     def _run_safe(self, fn, *args):
-        try:
-            return fn(*args)
-        except Exception as error:
-            print(f"[Copywriting] 生成失败: {error}", flush=True)
-            return None
+        # 网络/限流偶发失败时重试两次，避免单项内容缺失
+        for attempt in range(3):
+            try:
+                return fn(*args)
+            except Exception as error:
+                print(
+                    f"[Copywriting] 生成失败(第{attempt + 1}次): {error}",
+                    flush=True,
+                )
+                import time
+
+                time.sleep(1.0 * (attempt + 1))
+        return None
 
     def regenerate_item(
         self,
@@ -189,7 +197,7 @@ class GenerateCopywriting:
         )
         raw = self._llm.chat(
             [{"role": "user", "content": prompt}],
-            max_tokens=1024,
+            max_tokens=2048,
         )
         return self._parse_lines(raw, settings, LongTailKeyword)[:settings.keyword_count]
 
@@ -220,7 +228,7 @@ class GenerateCopywriting:
 
         lines = self._llm.chat(
             [{"role": "user", "content": prompt}],
-            max_tokens=1024,
+            max_tokens=2048,
         ).strip().split("\n")
 
         results: list[ProductTitle] = []
@@ -326,15 +334,15 @@ class GenerateCopywriting:
         ]
 
         generated: dict[str, DetailModule] = {}
-        # 分批生成：每批 4 个模块，避免单个请求 JSON 过大
-        # 被 GLM max_tokens=1024 限制截断导致解析失败；各批次与规格并行
+        # 分批生成：每批 4 个模块（max_tokens 4096 下不会截断），
+        # 全部批次与规格并行，减少请求数、缩短总耗时
         batch_size = 4
         non_specs = [item for item in sections if item[0] != "specs"]
         batches = [
             non_specs[start:start + batch_size]
             for start in range(0, len(non_specs), batch_size)
         ]
-        with ThreadPoolExecutor(max_workers=3) as pool:
+        with ThreadPoolExecutor(max_workers=6) as pool:
             specs_future = pool.submit(
                 self._run_safe, self._generate_specs, fact, settings
             )

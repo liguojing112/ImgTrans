@@ -199,6 +199,7 @@ def _apply_watermark(doc: ImageDocument, params: object) -> ImageDocument:
             tiled=bool(getattr(wm, "tiled", False)),
             text=wm.text,
             style=style,
+            rotation_degrees=float(getattr(wm, "rotation", 0)),
         )
         overlay = _watermark_image(layer)
         if getattr(wm, "flip_h", False):
