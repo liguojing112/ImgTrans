@@ -65,10 +65,10 @@ class ActivationDialog(QDialog):
 
         # ─ 左侧：紫色背景 + 激活表单 ──
         left_panel = QWidget()
-        left_panel.setStyleSheet(
-            "background: #8b5cf6; padding: 40px;"
-        )
+        # 注意：QSS 的 padding 会级联到子控件导致文字被挤出，改用布局 margins
+        left_panel.setStyleSheet("background: #8b5cf6;")
         left_layout = QVBoxLayout(left_panel)
+        left_layout.setContentsMargins(40, 40, 40, 40)
         left_layout.setSpacing(20)
 
         logo = QLabel(" 优译图AI")
@@ -93,18 +93,17 @@ class ActivationDialog(QDialog):
         self.code_edit.returnPressed.connect(self.request_activation)
         left_layout.addWidget(self.code_edit)
 
-        self.activate_button = QPushButton("确认激活")
+        # 用 QLabel 实现按钮（QPushButton 在该环境中文字渲染异常，QLabel 文字可靠）
+        self.activate_button = QLabel("确认激活")
         self.activate_button.setObjectName("activateDeviceButton")
+        self.activate_button.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.activate_button.setFixedHeight(48)
         self.activate_button.setStyleSheet(
-            "QPushButton { background: #3b82f6; color: #ffffff;"
-            "  border: none; border-radius: 8px;"
-            "  font-size: 16px; font-weight: 600; }"
-            "QPushButton:hover { background: #2563eb; }"
-            "QPushButton:pressed { background: #1d4ed8; }"
-            "QPushButton:disabled { background: #6b7280; }"
+            "QLabel { background: #ffffff; color: #1e293b;"
+            "  border: 2px solid #ffffff; border-radius: 8px;"
+            "  font-size: 16px; font-weight: 700; }"
         )
-        self.activate_button.clicked.connect(self.request_activation)
+        self.activate_button.mousePressEvent = lambda event: self.request_activation()
         left_layout.addWidget(self.activate_button)
 
         self.status_label = QLabel()
@@ -273,7 +272,8 @@ class ActivationDialog(QDialog):
 
     def _set_busy(self, busy: bool) -> None:
         self.code_edit.setEnabled(not busy)
-        self.activate_button.setEnabled(not busy)
+        # 确认激活按钮始终可点、始终深底白字（避免禁用态对比弱看不清）
+        self.activate_button.setEnabled(True)
         if hasattr(self, "clear_button"):
             self.clear_button.setEnabled(not busy and self._has_session)
         if hasattr(self, "unbind_button"):

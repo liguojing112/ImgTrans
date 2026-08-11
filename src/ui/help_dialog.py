@@ -109,6 +109,23 @@ _HELP_HTML = """
   <li>套餐、激活状态可在「账户 → 查看额度」中确认</li>
 </ul>
 
+<h3>七、安装与卸载</h3>
+<h4>一、安装步骤</h4>
+<ol>
+  <li>双击安装文件：<b>ImgTrans-Setup-v1.1.0.exe</b></li>
+  <li>弹出简体中文安装向导，点击「下一步」</li>
+  <li>选择安装位置（默认安装到 C:\Program Files\ImgTrans），点「下一步」</li>
+  <li>可选择「创建桌面快捷方式」，方便以后打开</li>
+  <li>点击「安装」，等待安装完成</li>
+  <li>安装完成后可选择「立即运行 优译图AI」</li>
+</ol>
+<h4>二、卸载软件</h4>
+<ul>
+  <li><b>方式一</b>：开始菜单 → 「优译图AI 图片翻译」→「卸载」</li>
+  <li><b>方式二</b>：Windows 设置 → 应用 → 已安装的应用 → 搜索「优译图」→ 卸载</li>
+  <li>卸载后如需完全清除数据，可手动删除文件夹：<b>C:\\Users\\你的用户名\\AppData\\Local\\ImgTrans</b></li>
+</ul>
+
 <h3>常用快捷键</h3>
 <ul>
   <li>Ctrl+O 导入图片 &nbsp; Ctrl+S 导出 &nbsp; Ctrl+Shift+S 保存</li>

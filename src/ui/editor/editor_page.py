@@ -800,6 +800,8 @@ class EditorPage(QWidget):
         if mode == "ai_erase":
             self.scene.add_rect_to_edit_mask(box)
             self._show_layer_tool("ai_erase")
+            # 框选松手即自动消除（与涂抹体验一致）
+            self._request_ai_erase()
         elif mode == "crop":
             self.scene.set_crop_selection(box)
             self.crop_dialog.set_selection(box)

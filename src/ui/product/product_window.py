@@ -51,7 +51,6 @@ class ProductWindow(QMainWindow):
 
     back_requested = Signal()
     closed = Signal()  # 窗口被关闭（含点右上角 X），供宿主恢复主界面
-    parse_hint_signal = Signal(str)  # 解析中的用户提示（跨线程）
 
     _AUTO_SAVE_INTERVAL = 60_000  # 自动保存间隔（毫秒）
     _ANALYZE_TIMEOUT = 300  # 分析超时（秒）
@@ -236,8 +235,6 @@ class ProductWindow(QMainWindow):
     def _connect_signals(self) -> None:
         self._step_indicator.step_clicked.connect(self._on_step_clicked)
         self._step_source.next_requested.connect(self._go_to_analysis)
-        self._step_source.parse_requested.connect(self._on_parse_link)
-        self.parse_hint_signal.connect(self._on_parse_hint)
         self._step_analysis.analyze_requested.connect(self._on_analyze)
         self._step_analysis.next_requested.connect(self._go_to_copywriting)
         self._step_analysis.prev_requested.connect(self._go_to_source)
@@ -322,101 +319,6 @@ class ProductWindow(QMainWindow):
             "可通过「文件 → 打开项目」随时继续编辑，\n"
             "或通过导出按钮保存文案结果。"
         )
-
-    # —— 链接解析 ——
-
-    def _on_parse_hint(self, text: str) -> None:
-        """解析中的人工验证提示（主线程）。"""
-        self.statusBar().showMessage(text)
-        self._step_source.set_parse_busy(True)
-        self._step_source.set_parse_hint(text)
-
-    def _on_parse_link(self, url: str) -> None:
-        from src.application.link_parse import LinkParseError, LinkParser
-
-        self._step_source.set_parse_busy(True)
-        self.statusBar().showMessage("正在解析商品链接...")
-
-        # 后台线程 → UI 的安全提示桥
-        def _challenge_hint(text: str):
-            self._parse_hint_signal.emit(text)
-
-        parser = LinkParser(on_challenge=_challenge_hint)
-
-        def _run():
-            result = parser.parse(url)
-            return result
-
-        def _on_success(result):
-            try:
-                self._step_source.set_parse_busy(False)
-                if not result.title and not result.images:
-                    self._step_source.set_parse_error("未能从该链接提取到商品信息，页面可能为动态渲染")
-                    return
-                self._step_source.set_parse_result(
-                    title=result.title,
-                    description=result.description,
-                    attributes=result.attributes,
-                    platform=result.platform,
-                )
-                # 下载主图并加入图片列表
-                if result.images:
-                    self._download_link_images(result.images[:3])
-                if not result.platform:
-                    self.statusBar().showMessage("解析完成（未知平台，可能不完整）")
-                else:
-                    self.statusBar().showMessage(f"链接解析完成: {result.platform}")
-            except Exception as e:
-                print(f"[ProductWindow] 解析结果处理失败: {e}")
-
-        def _on_error(error: Exception):
-            self._step_source.set_parse_busy(False)
-            msg = str(error)
-            print(f"[ProductWindow] 链接解析失败: {msg}")
-            self._step_source.set_parse_error(msg)
-            self.statusBar().showMessage(f"链接解析失败: {msg}")
-
-        self._task_runner.submit(_run, on_success=_on_success, on_error=_on_error)
-
-    def _download_link_images(self, urls: list[str]) -> None:
-        """后台下载链接图片到缓存目录并加入图片列表。"""
-        def _run():
-            from src.platform.paths import PlatformPaths
-            cache_dir = PlatformPaths.discover().cache_dir / "link_images"
-            cache_dir.mkdir(parents=True, exist_ok=True)
-            downloaded: list[Path] = []
-            for i, url in enumerate(urls):
-                try:
-                    import urllib.request
-                    req = urllib.request.Request(url, headers={
-                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
-                    with urllib.request.urlopen(req, timeout=15) as resp:
-                        data = resp.read()
-                    if len(data) < 1000:
-                        continue  # 太小的响应不是有效图片
-                    ext = ".jpg"
-                    ctype = resp.headers.get("Content-Type", "")
-                    if "png" in ctype:
-                        ext = ".png"
-                    elif "webp" in ctype:
-                        ext = ".webp"
-                    path = cache_dir / f"link_{i}_{uuid.uuid4().hex[:8]}{ext}"
-                    path.write_bytes(data)
-                    downloaded.append(path)
-                except Exception as e:
-                    print(f"[ProductWindow] 下载图片失败 {url[:60]}: {e}")
-            return downloaded
-
-        def _on_success(downloaded: list[Path]):
-            if downloaded:
-                for path in downloaded:
-                    self._step_source.add_image(path)
-                self.statusBar().showMessage(f"已下载 {len(downloaded)} 张商品图片")
-
-        def _on_error(error: Exception):
-            print(f"[ProductWindow] 图片下载失败: {error}")
-
-        self._task_runner.submit(_run, on_success=_on_success, on_error=_on_error)
 
     # —— AI 分析 ——
 

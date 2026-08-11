@@ -6,7 +6,13 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QDialog, QLabel, QVBoxLayout
+from PySide6.QtWidgets import (
+    QDialog,
+    QHBoxLayout,
+    QLabel,
+    QVBoxLayout,
+    QWidget,
+)
 
 
 class QuotaDialog(QDialog):
@@ -25,32 +31,85 @@ class QuotaDialog(QDialog):
         super().__init__(parent)
         self.setObjectName("quotaDialog")
         self.setWindowTitle("我的额度")
-        self.setMinimumWidth(380)
+        self.setMinimumSize(820, 500)
 
-        layout = QVBoxLayout(self)
-        layout.setSpacing(12)
+        outer = QHBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
 
-        title = QLabel("我的额度")
-        title.setObjectName("homeCardTitle")
-        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(title)
+        # ── 左侧：紫色背景 + 标题 ──
+        left_panel = QWidget()
+        left_panel.setStyleSheet("background: #8b5cf6;")
+        left_layout = QVBoxLayout(left_panel)
+        left_layout.setContentsMargins(40, 40, 40, 40)
+        left_layout.setSpacing(20)
+
+        logo = QLabel(" 优译图AI")
+        logo.setStyleSheet(
+            "color: #ffffff; font-size: 28px; font-weight: 700;"
+        )
+        logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        left_layout.addWidget(logo)
+
+        subtitle = QLabel("我的额度")
+        subtitle.setStyleSheet(
+            "color: #ffffff; font-size: 20px; font-weight: 600;"
+        )
+        subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        left_layout.addWidget(subtitle)
+
+        hint = QLabel("查看当前激活码的剩余使用额度")
+        hint.setStyleSheet("color: #d8c7ff; font-size: 13px;")
+        hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        hint.setWordWrap(True)
+        left_layout.addWidget(hint)
+        left_layout.addStretch()
+
+        outer.addWidget(left_panel, stretch=1)
+
+        # ── 右侧：额度信息 ──
+        right_panel = QWidget()
+        right_panel.setStyleSheet("background: #ffffff;")
+        layout = QVBoxLayout(right_panel)
+        layout.setContentsMargins(48, 48, 48, 48)
+        layout.setSpacing(20)
 
         self._code_label = QLabel(f"激活码：{code}")
-        self._code_label.setObjectName("homeCardDesc")
+        self._code_label.setStyleSheet(
+            "color: #212733; font-size: 16px; font-weight: 600;"
+        )
         self._code_label.setWordWrap(True)
         layout.addWidget(self._code_label)
+
+        from PySide6.QtGui import QFont, QFontMetrics
+
+        _big_font = QFont("Microsoft YaHei", 18)
+        _big_font.setBold(True)
+        _big_height = QFontMetrics(_big_font).height() + 8
 
         self._duration_label = QLabel(
             f"翻译时长剩余：{_format_duration(expires_at)}"
         )
-        self._duration_label.setObjectName("homeCardDesc")
+        self._duration_label.setFont(_big_font)
+        self._duration_label.setStyleSheet("color: #212733;")
+        self._duration_label.setFixedHeight(_big_height)
         layout.addWidget(self._duration_label)
 
         self._quota_label = QLabel(
             f"商品详情次数剩余：{quota_remaining} / {quota_total}"
         )
-        self._quota_label.setObjectName("homeCardDesc")
+        self._quota_label.setFont(_big_font)
+        self._quota_label.setStyleSheet("color: #212733;")
+        self._quota_label.setFixedHeight(_big_height)
         layout.addWidget(self._quota_label)
+
+        note = QLabel("提示：时长额度是所有功能的基础；商品详情生成另需次数额度。")
+        note.setStyleSheet("color: #98a0ad; font-size: 12px;")
+        note.setWordWrap(True)
+        layout.addWidget(note)
+        layout.addStretch()
+
+        outer.addWidget(right_panel, stretch=2)
 
         if refresh_usage is not None and task_runner is not None:
             self._quota_label.setText("商品详情次数剩余：查询中…")

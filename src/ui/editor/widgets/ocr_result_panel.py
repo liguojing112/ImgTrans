@@ -43,7 +43,7 @@ class OcrResultPanel(QFrame):
         self._translation_result: object | None = None
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(4)
 
         title = QLabel("文字区域")

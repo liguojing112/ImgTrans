@@ -1532,12 +1532,16 @@ class EditorMainWindow(QMainWindow):
     # —— 翻译 ——
 
     def _check_translation_access(self) -> bool:
-        """图片翻译前检查是否已激活且时长未过期；未购买时长包弹窗提示。"""
+        """图片翻译前检查是否已激活且时长未过期；未激活/无时长时提示。"""
         try:
             session = self._activation_status() if self._activation_status else None
         except Exception:
             session = None
         if session is None or not getattr(session, "active", False):
+            # 底部状态栏 + 弹窗双重提示（避免弹窗不显示时用户无感知）
+            self.statusBar().showMessage(
+                "未激活：请先「账户 → 激活」并购买翻译时长包", 8000
+            )
             from PySide6.QtWidgets import QMessageBox
 
             QMessageBox.warning(self, "提示", "您还没有可用的翻译时长，请先购买时长包")

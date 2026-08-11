@@ -75,7 +75,7 @@ class TranslateControls(QFrame):
         self._activity_timer.timeout.connect(self._update_activity_label)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(6)
         layout.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
 

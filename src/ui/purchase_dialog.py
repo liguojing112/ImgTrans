@@ -382,9 +382,46 @@ class PurchaseDialog(QDialog):
         super().__init__(parent)
         self.setObjectName("purchaseDialog")
         self.setWindowTitle("续购套餐" if renew_code is not None else "扫码购买")
-        self.setMinimumSize(380, 540)
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
+        self.setMinimumSize(820, 500)
+        outer = QHBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        # ── 左侧：紫色背景 + 标题 ──
+        left_panel = QWidget()
+        left_panel.setStyleSheet("background: #8b5cf6;")
+        left_layout = QVBoxLayout(left_panel)
+        left_layout.setContentsMargins(40, 40, 40, 40)
+        left_layout.setSpacing(20)
+        logo = QLabel(" 优译图AI")
+        logo.setStyleSheet(
+            "color: #ffffff; font-size: 28px; font-weight: 700;"
+        )
+        logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        left_layout.addWidget(logo)
+        title = QLabel("续购时长/次数" if renew_code is not None else "扫码购买")
+        title.setStyleSheet(
+            "color: #ffffff; font-size: 20px; font-weight: 600;"
+        )
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        left_layout.addWidget(title)
+        hint = QLabel(
+            "选择套餐后用微信扫码支付，时长/次数将叠加到当前激活码。"
+            if renew_code is not None
+            else "选择套餐后用微信扫码支付，支付成功后自动生成激活码。"
+        )
+        hint.setStyleSheet("color: #d8c7ff; font-size: 13px;")
+        hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        hint.setWordWrap(True)
+        left_layout.addWidget(hint)
+        left_layout.addStretch()
+        outer.addWidget(left_panel, stretch=1)
+
+        # ── 右侧：购买面板 ──
+        right_panel = QWidget()
+        right_panel.setStyleSheet("background: #ffffff;")
+        layout = QVBoxLayout(right_panel)
+        layout.setContentsMargins(24, 24, 24, 8)
         layout.setSpacing(0)
         self._panel = PurchasePanel(
             payment_client,
@@ -399,7 +436,15 @@ class PurchaseDialog(QDialog):
         layout.addWidget(self._panel)
         buttons = QHBoxLayout()
         close_button = QPushButton("关闭")
+        close_button.setFixedSize(90, 34)
+        close_button.setStyleSheet(
+            "QPushButton { background: #ffffff; color: #3973db;"
+            "  border: 1px solid #3973db; border-radius: 6px;"
+            "  font-size: 14px; font-weight: 600; }"
+            "QPushButton:hover { background: #eef2fb; }"
+        )
         close_button.clicked.connect(self.reject)
         buttons.addStretch()
         buttons.addWidget(close_button)
         layout.addLayout(buttons)
+        outer.addWidget(right_panel, stretch=2)

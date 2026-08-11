@@ -37,10 +37,9 @@ class FallbackInpaintAdapter:
                 "transparent-text-clear",
                 (perf_counter() - started) * 1000,
             )
-        if (
-            _has_light_neutral_mask_background(request)
-            or _is_text_shaped_mask(request)
-        ):
+        # 仅文字形小蒙版走快速填充；水印/杂物等区域一律走 LaMa
+        # 脑补背景（避免浅色背景被误判后直接填白，失去纹理/环境填充）
+        if _is_text_shaped_mask(request):
             return InpaintingResult(
                 _fill_text_mask(request),
                 "opencv-text-fill",
@@ -150,42 +149,6 @@ def _has_transparent_background(request: InpaintingRequest) -> bool:
         4,
     )[:, :, 3]
     return float(np.count_nonzero(alpha <= 8)) / float(alpha.size) >= 0.15
-
-
-def _has_light_neutral_mask_background(
-    request: InpaintingRequest,
-) -> bool:
-    mask = _effective_mask(request)
-    area_ratio = float(np.count_nonzero(mask)) / float(mask.size)
-    if not 0 < area_ratio <= _MAX_GLOBAL_FALLBACK_AREA_RATIO:
-        return False
-    document = request.document
-    channels = 4 if document.mode == "RGBA" else 3
-    pixels = np.frombuffer(document.pixels, dtype=np.uint8).reshape(
-        document.asset.height,
-        document.asset.width,
-        channels,
-    )[:, :, :3]
-    border = (
-        cv2.dilate(
-            mask.astype(np.uint8),
-            np.ones((9, 9), dtype=np.uint8),
-        )
-        > 0
-    ) & ~mask
-    samples = pixels[border]
-    if len(samples) < 32:
-        return False
-    minimum = samples.min(axis=1)
-    chroma = (
-        samples.max(axis=1).astype(np.int16)
-        - minimum.astype(np.int16)
-    )
-    light_neutral = (minimum >= 210) & (chroma <= 30)
-    return (
-        float(np.count_nonzero(light_neutral)) / float(len(samples))
-        >= 0.65
-    )
 
 
 def _clear_transparent_text(request: InpaintingRequest) -> ImageDocument:
