@@ -1,7 +1,7 @@
 # TASK-M0-001：Windows x64/macOS arm64 PySide6 启动与打包验证
 
 **里程碑**：M0 技术风险验证
-**状态**：进行中（Windows x64 已验证；macOS arm64 GitHub Actions 已实现、首次运行待完成）
+**状态**：已完成（Windows x64 与 GitHub Actions macOS arm64 构建、运行和产物验证通过）
 **优先级**：P0
 **类型**：独立技术原型
 **关联需求**：FR-PLAT-001、FR-PLAT-002、FR-PLAT-004、FR-PLAT-005、NFR-001、NFR-005、NFR-006
@@ -97,7 +97,7 @@ python prototypes/platform_bootstrap/verify_artifact.py --target macos-arm64
 
 2026-07-15 在 Windows x64 / Python 3.11.9 环境完成：
 
-- 自动测试连续三轮通过，最终复验为 11/11 通过。
+- 自动测试连续三轮通过，当前完整复验为 26/26 通过。
 - PySide6 6.11.1、Pillow 12.3.0、OpenCV 4.13.0 和 PyInstaller 6.19.0 可加载。
 - 源码离屏烟雾测试通过，工作任务正常完成。
 - Windows x64 目录式打包成功，产物为 255 个文件、约 286.12 MiB。
@@ -107,7 +107,11 @@ python prototypes/platform_bootstrap/verify_artifact.py --target macos-arm64
 - 工作区绝对路径和敏感模式扫描无发现。
 - RapidOCR、ONNX Runtime 尚未安装，已按可选候选记录；由 TASK-M0-002 选择并验证。
 - PyTorch 2.6.0 CPU 可加载，但未纳入 UI profile 打包；由 TASK-M0-004 决定修复运行时。
-- GitHub Actions macOS arm64 工作流已实现，固定使用 `macos-14` runner，包含架构确认、自动测试、依赖探测、PyInstaller 构建、产物验证、临时签名校验、`.app` 归档和 artifact 上传；本地工作区尚未推送，因此暂无首次 CI 运行结果。
+- GitHub Actions macOS arm64 工作流已真实运行成功，固定使用 `macos-14` arm64 runner，完成架构确认、自动测试、依赖探测、PyInstaller 构建、产物验证、临时签名校验、`.app` 归档和 artifact 上传。
+- CI 环境为 macOS 14.8.7 arm64 / Python 3.11.9；PySide6 6.11.1、Pillow 12.3.0、OpenCV 4.13.0 和 PyInstaller 6.19.0 加载成功。
+- `PlatformBootstrap-macos-arm64.app` 的 Mach-O 架构为 arm64，Qt imageformats 包含 JPEG、WebP、TIFF、GIF 等插件；工作区路径和敏感模式扫描无发现。
+- 打包后离屏烟雾测试通过：窗口创建、工作线程完成、必需运行时依赖无缺失。
+- 下载归档复核通过：ZIP 大小 88,345,930 字节、861 个成员、主程序权限 `0755`、Mach-O CPU 类型 arm64；SHA-256 为 `4fc507cf0b3953f21d2e983752f0912bc4de28a024de30412f690bf6a8ecbf4b`。
 
 结果文件：
 
@@ -115,8 +119,12 @@ python prototypes/platform_bootstrap/verify_artifact.py --target macos-arm64
 - `prototypes/platform_bootstrap/results/windows-x64-source-smoke.json`
 - `prototypes/platform_bootstrap/results/windows-x64.json`
 - `prototypes/platform_bootstrap/results/windows-x64-verification.json`
+- `artifacts/TASK-M0-001/macos-arm64/run-002/extracted/platform-bootstrap-macos-arm64-run3/results/macos-arm64-dependencies.json`
+- `artifacts/TASK-M0-001/macos-arm64/run-002/extracted/platform-bootstrap-macos-arm64-run3/results/macos-arm64.json`
+- `artifacts/TASK-M0-001/macos-arm64/run-002/extracted/platform-bootstrap-macos-arm64-run3/results/macos-arm64-verification.json`
+- `artifacts/TASK-M0-001/macos-arm64/run-002/extracted/platform-bootstrap-macos-arm64-run3/dist/macos-arm64/PlatformBootstrap-macos-arm64.zip`
 
-下一步是在代码推送后取得 GitHub Actions macOS arm64 首次成功运行证据。真实 Apple Silicon Mac 的 GUI、签名、公证和安装验证归入 M4，不作为 M0 自动构建任务的前置条件。
+TASK-M0-001 的 M0 自动化验收已完成。真实 Apple Silicon Mac 的可见 GUI、正式签名、公证、安装、升级和卸载验证归入 M4，不作为本任务完成的前置条件。
 
 ## 审查边界
 

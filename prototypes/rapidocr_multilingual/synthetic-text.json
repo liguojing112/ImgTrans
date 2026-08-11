@@ -1,0 +1,28 @@
+{
+  "zh-Hans": ["夏季促销", "正品保障", "极速发货", "新品上市", "限时优惠"],
+  "zh-Hant": ["夏季促銷", "正品保障", "快速出貨", "新品上市", "限時優惠"],
+  "ru": ["Летняя распродажа", "Гарантия качества", "Быстрая доставка", "Новая модель", "Скидка сегодня"],
+  "ja": ["夏のセール", "品質保証", "すぐに発送", "新商品", "期間限定"],
+  "ko": ["여름 할인", "정품 보장", "빠른 배송", "신제품 출시", "기간 한정"],
+  "en": ["Summer sale", "Quality guaranteed", "Fast delivery", "New arrival", "Limited offer"],
+  "th": ["ลดราคาฤดูร้อน", "รับประกันคุณภาพ", "จัดส่งรวดเร็ว", "สินค้าใหม่", "ข้อเสนอจำกัด"],
+  "ar": ["تخفيضات الصيف", "جودة مضمونة", "توصيل سريع", "منتج جديد", "عرض محدود"],
+  "vi": ["Khuyến mãi hè", "Đảm bảo chất lượng", "Giao hàng nhanh", "Sản phẩm mới", "Ưu đãi giới hạn"],
+  "it": ["Saldi estivi", "Qualità garantita", "Consegna rapida", "Nuovo arrivo", "Offerta limitata"],
+  "de": ["Sommerschlussverkauf", "Qualität garantiert", "Schnelle Lieferung", "Neu eingetroffen", "Begrenztes Angebot"],
+  "id": ["Promo musim panas", "Kualitas terjamin", "Pengiriman cepat", "Produk baru", "Penawaran terbatas"],
+  "pt-PT": ["Promoção de verão", "Qualidade garantida", "Entrega rápida", "Novo produto", "Oferta limitada"],
+  "fil": ["Benta sa tag-init", "Garantisadong kalidad", "Mabilis na padala", "Bagong produkto", "Limitadong alok"],
+  "pt-BR": ["Promoção de verão", "Qualidade garantida", "Entrega rápida", "Produto novo", "Oferta limitada"],
+  "pl": ["Letnia wyprzedaż", "Gwarancja jakości", "Szybka dostawa", "Nowy produkt", "Oferta limitowana"],
+  "ms": ["Jualan musim panas", "Kualiti terjamin", "Penghantaran pantas", "Produk baharu", "Tawaran terhad"],
+  "hi": ["गर्मियों की बिक्री", "गुणवत्ता की गारंटी", "तेज़ डिलीवरी", "नया उत्पाद", "सीमित ऑफ़र"],
+  "es": ["Oferta de verano", "Calidad garantizada", "Entrega rápida", "Producto nuevo", "Oferta limitada"],
+  "fr": ["Soldes d’été", "Qualité garantie", "Livraison rapide", "Nouveau produit", "Offre limitée"],
+  "bn": ["গ্রীষ্মকালীন ছাড়", "মানের নিশ্চয়তা", "দ্রুত ডেলিভারি", "নতুন পণ্য", "সীমিত অফার"],
+  "ur": ["گرمیوں کی فروخت", "معیار کی ضمانت", "تیز ترسیل", "نئی مصنوعات", "محدود پیشکش"],
+  "tr": ["Yaz indirimi", "Kalite garantisi", "Hızlı teslimat", "Yeni ürün", "Sınırlı teklif"],
+  "fa": ["فروش تابستانی", "تضمین کیفیت", "ارسال سریع", "محصول جدید", "پیشنهاد محدود"],
+  "sw": ["Ofa ya majira", "Ubora umehakikishwa", "Uwasilishaji haraka", "Bidhaa mpya", "Ofa maalum"]
+}
+

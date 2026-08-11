@@ -7,7 +7,7 @@ from src.domain.translation import TranslationAdapterItem
 
 class MockTranslationAdapter:
     adapter_id = "mock-local"
-    _PLACEHOLDER = re.compile(r'(<x id="\d+"/>)')
+    _PLACEHOLDER = re.compile(r"(⟦\d+⟧)")
     _DICTIONARIES = {
         "zh-Hans": {
             "SUMMER SALE": "夏季促销",

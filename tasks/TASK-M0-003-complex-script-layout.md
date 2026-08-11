@@ -1,7 +1,7 @@
 # TASK-M0-003：复杂脚本与 RTL 排版验证
 
 **里程碑**：M0 技术风险验证
-**状态**：实施中（Windows x64 已通过；macOS arm64 CI 与母语视觉审阅待完成）
+**状态**：技术验证完成（Windows x64/macOS arm64 已通过；母语视觉审阅保留为产品验收项）
 **优先级**：P0
 **类型**：独立技术原型
 **关联需求**：FR-LAYOUT-002、FR-LAYOUT-006、FR-LAYOUT-007
@@ -86,8 +86,11 @@ python prototypes/complex_script_layout/compare.py --results artifacts/m0/comple
 - Windows 结构签名为 `2fff0ecb950920b98600e0a076c4106db17a5c9e2d2db1edbb74d6000bf5ba87`；证据位于忽略提交的 `artifacts/m0/complex-layout/run-003/`。
 - 首选后端为通过 UI 无关接口封装的 Qt `QTextLayout`；替代后端为 HarfBuzz + python-bidi + 字素安全贪心断行。
 - 已验证 PySide6 6.11.1 和 uharfbuzz 0.55.0 均存在可由 macOS 13 arm64 Python 使用的官方 wheel。第三方依赖采用同时含 arm64 切片的 wheel 不改变本项目仅生成 arm64 应用产物的范围。
-- macOS arm64 必须通过新增 GitHub Actions 工作流生成运行证据，并与 Windows 结构签名比较后，才能关闭跨平台验收项。
-- 阿拉伯语、乌尔都语、波斯语、印地语、孟加拉语和泰语调试图仍需母语审阅；自动结构检查不替代语言正确性审核。
+- GitHub Actions 已在 macOS 14.8.7 arm64、Python 3.11.9 完成运行：Qt 与 HarfBuzz 后端均为 120/120，失败为 0，结构违规为 0。
+- macOS 与 Windows 的行范围、方向和字形簇结构签名完全一致，均为 `2fff0ecb950920b98600e0a076c4106db17a5c9e2d2db1edbb74d6000bf5ba87`；跨平台验证报告 `passed=true`。
+- macOS Artifact 包含 480 张可解码 PNG、240 份逐例 JSON、5 个校验通过的固定字体及汇总证据。HarfBuzz 后端 240 张图片与 Windows 像素完全一致。
+- Qt 后端受 CoreText 与 Windows 字体栅格化差异影响，像素不要求完全相同；本轮最大字形原点偏差 4.36 px、最大边界分量偏差 5.31 px，未改变字形 ID、换行、方向或字形簇结构。正式视觉几何阈值由后续编辑排版原型继续验证。
+- 阿拉伯语、乌尔都语、波斯语、印地语、孟加拉语和泰语调试图仍需母语审阅；自动结构检查和非母语肉眼检查不替代语言正确性审核。
 
 ## 审查边界
 
