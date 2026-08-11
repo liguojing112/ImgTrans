@@ -10,10 +10,10 @@ jobs:
     runs-on: macos-14         # Apple Silicon（arm64）。勿用 macos-13/macos-latest（Intel）
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Python 3.11
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.11'
 
@@ -27,11 +27,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p /tmp/lama
-          # 需先手动上传 inpainting_lama_2025jan.onnx 到 GitHub Release（tag 任意）
-          if ! gh release download --pattern "inpainting_lama_2025jan.onnx" --dir /tmp/lama 2>/dev/null; then
-            echo "❌ 未找到 LAMA 模型资产。请先运行："
-            echo "   gh release create models inpainting_lama_2025jan.onnx"
-            echo "   （把项目 packaging/bundled_models/lama-inpainting/inpainting_lama_2025jan.onnx 上传）"
+          # 指定 tag "models" 下载（pre-release 也能下，避免 latest 取到别的 release）
+          if ! gh release download models --pattern "inpainting_lama_2025jan.onnx" --dir /tmp/lama 2>/dev/null; then
+            echo "❌ 未找到 LAMA 模型资产。请先上传："
+            echo "   gh release create models packaging/bundled_models/lama-inpainting/inpainting_lama_2025jan.onnx"
             exit 1
           fi
           ls -lh /tmp/lama/
