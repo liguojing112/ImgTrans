@@ -55,6 +55,7 @@ from src.infrastructure.server_translation_adapter import ServerTranslationAdapt
 from src.infrastructure.text_renderer import QtBasicTextLayoutAdapter, QtTextRenderer
 from src.infrastructure.user_preferences import (
     JsonBrandTermsPreferences,
+    JsonEcommercePreferences,
     JsonModelTermsPreferences,
     JsonTerminologyPreferences,
 )
@@ -88,6 +89,8 @@ def _create_translation_adapter(
     backend_url: str,
     activation: ActivationCoordinator | None,
     access_token=None,
+    ecommerce_terms: dict[str, str] | None = None,
+    ecommerce_prompt: str | None = None,
 ) -> MockTranslationAdapter | ServerTranslationAdapter:
     translation_mode = os.environ.get(
         "IMGTRANS_TRANSLATION_MODE",
@@ -102,7 +105,22 @@ def _create_translation_adapter(
             raise ValueError(
                 "IMGTRANS_API_BASE_URL is required for server translation mode"
             )
-        return ServerTranslationAdapter(backend_url, token_source)
+        # 电商翻译模式：词库 + LLM 直接电商翻译；LLM 不可用时自动降级 Azure
+        llm_adapter = None
+        try:
+            from src.infrastructure.server_llm_adapter import ServerLLMAdapter
+
+            llm_adapter = ServerLLMAdapter(backend_url, token_source)
+        except Exception:
+            llm_adapter = None
+        return ServerTranslationAdapter(
+            backend_url,
+            token_source,
+            llm_adapter=llm_adapter,
+            ecommerce=True,
+            ecommerce_terms=ecommerce_terms,
+            ecommerce_prompt=ecommerce_prompt,
+        )
     raise ValueError("IMGTRANS_TRANSLATION_MODE must be mock or server")
 
 
@@ -184,10 +202,15 @@ def create_main_window() -> MainWindow:
         )
 
     access_token = _create_access_token_source(activation)
+    preferences_path = startup.data_dir / "config" / "preferences.json"
+    ecommerce_preferences = JsonEcommercePreferences(preferences_path)
+    ecommerce_terms, ecommerce_prompt = ecommerce_preferences.load()
     translation_adapter = _create_translation_adapter(
         backend_url,
         activation,
         access_token,
+        ecommerce_terms=ecommerce_terms,
+        ecommerce_prompt=ecommerce_prompt,
     )
     terminology_catalog = TerminologyCatalog()
     translate = TranslateRegions(
@@ -232,7 +255,6 @@ def create_main_window() -> MainWindow:
         batch_result_store,
         export_image,
     )
-    preferences_path = startup.data_dir / "config" / "preferences.json"
     brand_terms_preferences = JsonBrandTermsPreferences(preferences_path)
     terminology_preferences = JsonTerminologyPreferences(preferences_path)
     logger.info("application_ready version=%s", product.version)
@@ -251,6 +273,12 @@ def create_main_window() -> MainWindow:
         brand_terms_preferences=brand_terms_preferences,
         terminology_preferences=terminology_preferences,
         terminology_catalog=terminology_catalog,
+        ecommerce_preferences=ecommerce_preferences,
+        update_ecommerce_translation=getattr(
+            translation_adapter,
+            "set_ecommerce_override",
+            None,
+        ),
         export_batch_selection=export_batch_selection,
         task_runner=task_runner,
         refresh_image_limits=image_limits.refresh,
@@ -402,8 +430,15 @@ def _create_editor_window() -> EditorMainWindow:
         JsonTerminologyPreferences(preferences_path).load()
     )
     terminology_prefs = JsonTerminologyPreferences(preferences_path)
+    ecommerce_prefs = JsonEcommercePreferences(preferences_path)
+    ecommerce_terms, ecommerce_prompt = ecommerce_prefs.load()
 
-    translation_adapter = _create_translation_adapter(backend_url, activation)
+    translation_adapter = _create_translation_adapter(
+        backend_url,
+        activation,
+        ecommerce_terms=ecommerce_terms,
+        ecommerce_prompt=ecommerce_prompt,
+    )
     translate = TranslateRegions(
         translation_adapter,
         ProtectionEngine(),
@@ -489,6 +524,12 @@ def _create_editor_window() -> EditorMainWindow:
         export_batch_selection=export_batch_selection,
         terminology_catalog=terminology_catalog,
         terminology_preferences=terminology_prefs,
+        ecommerce_preferences=ecommerce_prefs,
+        update_ecommerce_translation=getattr(
+            translation_adapter,
+            "set_ecommerce_override",
+            None,
+        ),
         translation_service_label=(
             "翻译服务：服务端代理已配置"
             if translation_adapter.adapter_id != "mock-local"

@@ -6,6 +6,7 @@ from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 from uuid import uuid4
 import json
+import re
 
 from src.domain.translation import (
     TranslationAdapterItem,
@@ -17,6 +18,22 @@ _MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 TokenSource = str | Callable[[], str | None]
 
 
+_DEFAULT_ECOMMERCE_PROMPT = (
+    "请将以下中文商品图片文字翻译成美国电商图片风格的英文。\n"
+    "要求：\n"
+    "1. 保留商品含义\n"
+    "2. 不直译中文，用美国电商图片标题风格：短促名词短语、标题式大写"
+    "（Title Case）、营销语调。少用机械的直译，例如用 No Additives 而"
+    "不是 Additive-free，用 Dry & Wet Use 而不是 For dry & wet use；"
+    "其它示例：零添加→No Additives，柔软细腻→Soft & Smooth，"
+    "干湿两用→Dry & Wet Use\n"
+    "3. 简洁，适合图片上的短文本，尽量简短，每条控制在 2~5 个英文单词，"
+    "不要超过 8 个单词\n"
+    "4. 严格按编号逐行输出，每行格式：编号. 译文（例如：1. Soft & Smooth），"
+    "编号与输入一一对应，不要输出任何编号以外的说明"
+)
+
+
 class ServerTranslationAdapter:
     adapter_id = "imgtrans-server"
     reports_source_language = True
@@ -26,6 +43,10 @@ class ServerTranslationAdapter:
         base_url: str,
         api_token: TokenSource,
         timeout_seconds: float = 15.0,
+        llm_adapter=None,
+        ecommerce: bool = True,
+        ecommerce_terms: dict[str, str] | None = None,
+        ecommerce_prompt: str | None = None,
     ) -> None:
         parsed = urlsplit(base_url)
         if parsed.scheme not in {"http", "https"} or not parsed.netloc:
@@ -41,8 +62,45 @@ class ServerTranslationAdapter:
         self._url = f"{base_url.rstrip('/')}/v1/translations"
         self._token_source = api_token
         self._timeout_seconds = timeout_seconds
+        self._llm = llm_adapter
+        self._ecommerce = bool(ecommerce and llm_adapter is not None)
+        self._ecommerce_terms_override: dict[str, str] = {}
+        self._ecommerce_prompt: str | None = None
+        self.set_ecommerce_override(ecommerce_terms, ecommerce_prompt)
+
+    def set_ecommerce_override(
+        self,
+        terms: dict[str, str] | None = None,
+        prompt: str | None = None,
+    ) -> None:
+        """设置电商翻译的用户覆盖：词库合并到内置词库之上；提示词非空时覆盖内置。"""
+        self._ecommerce_terms_override = {
+            key.strip(): value.strip()
+            for key, value in (terms or {}).items()
+            if key.strip() and value.strip()
+        }
+        self._ecommerce_prompt = (
+            prompt.strip() if prompt and prompt.strip() else None
+        )
 
     def translate(
+        self,
+        texts: tuple[str, ...],
+        source_language: str | None,
+        target_language: str,
+    ) -> tuple[TranslationAdapterItem, ...]:
+        # 电商模式：词库整句命中优先，未命中批量走 LLM 电商翻译；
+        # LLM 失败时自动降级到服务端（Azure）直译
+        if self._ecommerce:
+            try:
+                return self._ecommerce_translate(texts, target_language)
+            except TranslationError:
+                raise
+            except Exception:
+                pass
+        return self._azure_translate(texts, source_language, target_language)
+
+    def _azure_translate(
         self,
         texts: tuple[str, ...],
         source_language: str | None,
@@ -107,6 +165,60 @@ class ServerTranslationAdapter:
             )
         return value
 
+    # —— 电商翻译模式（LLM 直接翻译 + 词库） ——
+
+    def _ecommerce_translate(
+        self,
+        texts: tuple[str, ...],
+        target_language: str,
+    ) -> tuple[TranslationAdapterItem, ...]:
+        from src.infrastructure.ecommerce_terms import ECOMMERCE_TERMS
+
+        terms = {**ECOMMERCE_TERMS, **self._ecommerce_terms_override}
+        results: list[TranslationAdapterItem | None] = []
+        pending: list[str] = []
+        pending_indexes: list[int] = []
+        for index, text in enumerate(texts):
+            mapped = terms.get(text.strip())
+            if mapped:
+                results.append(TranslationAdapterItem(translated_text=mapped))
+            else:
+                results.append(None)
+                pending.append(text)
+                pending_indexes.append(index)
+        if pending:
+            translated = self._llm_batch_ecommerce(pending, target_language)
+            for index, translated_text in zip(pending_indexes, translated):
+                results[index] = TranslationAdapterItem(
+                    translated_text=translated_text
+                )
+        return tuple(
+            item if item is not None else TranslationAdapterItem(
+                translated_text=text
+            )
+            for item, text in zip(results, texts, strict=True)
+        )
+
+    def _llm_batch_ecommerce(
+        self,
+        texts: list[str],
+        target_language: str,
+    ) -> list[str]:
+        """批量调 LLM 做电商风格翻译，返回与输入一一对应的英文列表。"""
+        if self._llm is None:
+            raise RuntimeError("电商翻译需要 LLM 适配器")
+        items_text = "\n".join(
+            f"{index + 1}. {text}" for index, text in enumerate(texts)
+        )
+        prompt = (
+            self._ecommerce_prompt or _DEFAULT_ECOMMERCE_PROMPT
+        )
+        raw = self._llm.chat(
+            [{"role": "user", "content": f"{prompt}\n\n待翻译：\n{items_text}"}],
+            max_tokens=4096,
+        )
+        return _parse_llm_translations(raw, len(texts), texts)
+
 
 def _parse_response(
     encoded: bytes,
@@ -167,3 +279,45 @@ def _backend_error_code(status: int) -> str:
     if status in {400, 413, 422}:
         return "backend_rejected_request"
     return "backend_failed"
+
+
+_NUMBERED_LINE = re.compile(r"^(\d{1,3})\s*[.、:)\]\-]\s*(.+)$")
+_BULLET_PREFIX = re.compile(r"^[-*•·]\s*")
+
+
+def _parse_llm_translations(
+    raw: str,
+    expected_count: int,
+    fallbacks: list[str],
+) -> list[str]:
+    """解析 LLM 电商翻译输出，稳健对齐到输入条数。
+
+    优先按「编号. 译文」逐行解析；LLM 偶尔会少发几行，缺失条目用原文兜底，
+    避免渲染出空文本。完全没有可用输出时抛异常，交由上层降级到服务端直译。
+    """
+    numbered: dict[int, str] = {}
+    plain: list[str] = []
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        match = _NUMBERED_LINE.match(line)
+        if match:
+            index = int(match.group(1)) - 1
+            if 0 <= index < expected_count:
+                numbered[index] = match.group(2).strip()
+        else:
+            cleaned = _BULLET_PREFIX.sub("", line).strip()
+            if cleaned:
+                plain.append(cleaned)
+    if not numbered and not plain:
+        raise RuntimeError("电商翻译 LLM 未返回有效内容")
+    if numbered:
+        return [
+            numbered.get(index) or fallbacks[index]
+            for index in range(expected_count)
+        ]
+    return [
+        plain[index] if index < len(plain) else fallbacks[index]
+        for index in range(expected_count)
+    ]

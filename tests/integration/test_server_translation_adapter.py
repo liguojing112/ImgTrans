@@ -158,6 +158,151 @@ def test_adapter_resolves_updated_device_token_for_each_request(monkeypatch) -> 
     assert seen["authorization"] == "Bearer itd_live_device_token_123456"
 
 
+def test_llm_parse_aligns_numbered_lines_and_ignores_preamble() -> None:
+    raw = "Here are the translations:\n1. Soft & Smooth\n2. Ultra-thick\n3. Additive-free"
+    assert module._parse_llm_translations(raw, 3, ["a", "b", "c"]) == [
+        "Soft & Smooth",
+        "Ultra-thick",
+        "Additive-free",
+    ]
+
+
+def test_llm_parse_fills_missing_lines_with_source_text() -> None:
+    raw = "1. Soft & Smooth\n2. Ultra-thick"
+    assert module._parse_llm_translations(
+        raw, 4, ["柔软细腻", "加厚", "零添加", "洗脸巾"]
+    ) == [
+        "Soft & Smooth",
+        "Ultra-thick",
+        "零添加",
+        "洗脸巾",
+    ]
+
+
+def test_llm_parse_uses_plain_lines_when_no_numbering() -> None:
+    raw = "Soft & Smooth\nUltra-thick"
+    assert module._parse_llm_translations(raw, 2, ["a", "b"]) == [
+        "Soft & Smooth",
+        "Ultra-thick",
+    ]
+
+
+def test_llm_parse_raises_when_no_usable_output() -> None:
+    with pytest.raises(RuntimeError):
+        module._parse_llm_translations("", 2, ["a", "b"])
+
+
+def test_ecommerce_translate_uses_dictionary_and_llm_numbered_output() -> None:
+    class _LLM:
+        def chat(self, messages, max_tokens=None):
+            del messages, max_tokens
+            return "1. New Arrival"
+
+    adapter = ServerTranslationAdapter(
+        "https://imgtrans.example.test",
+        "fixture-client-token-123456",
+        llm_adapter=_LLM(),
+        ecommerce=True,
+    )
+    result = adapter.translate(("柔软细腻", "新品上市"), None, "en")
+    assert [item.translated_text for item in result] == [
+        "Soft & Smooth",
+        "New Arrival",
+    ]
+
+
+def test_ecommerce_falls_back_to_azure_when_llm_output_unusable(monkeypatch) -> None:
+    class _LLM:
+        def chat(self, messages, max_tokens=None):
+            del messages, max_tokens
+            return ""
+
+    captured = {}
+
+    def open_request(request, timeout):
+        del timeout
+        captured["body"] = json.loads(request.data.decode("utf-8"))
+        return _Response(
+            {
+                "items": [
+                    {
+                        "item_id": "item-0",
+                        "status": "translated",
+                        "translated_text": "New arrival",
+                        "source_language": "zh-Hans",
+                    }
+                ]
+            }
+        )
+
+    monkeypatch.setattr(module, "urlopen", open_request)
+    adapter = ServerTranslationAdapter(
+        "https://imgtrans.example.test",
+        "fixture-client-token-123456",
+        llm_adapter=_LLM(),
+        ecommerce=True,
+    )
+    result = adapter.translate(("新品上市",), None, "en")
+    assert result[0].translated_text == "New arrival"
+    assert captured["body"]["items"][0]["text"] == "新品上市"
+
+
+def test_ecommerce_override_merges_over_builtin_dictionary() -> None:
+    adapter = ServerTranslationAdapter(
+        "https://imgtrans.example.test",
+        "fixture-client-token-123456",
+        llm_adapter=object(),
+        ecommerce=True,
+        ecommerce_terms={
+            "零添加": "Free From Additives",
+            "自定义短语": "Custom Phrase",
+        },
+    )
+    result = adapter._ecommerce_translate(
+        ("零添加", "自定义短语", "柔软细腻"),
+        "en",
+    )
+    assert [item.translated_text for item in result] == [
+        "Free From Additives",
+        "Custom Phrase",
+        "Soft & Smooth",
+    ]
+
+
+def test_ecommerce_prompt_override_is_used_for_llm() -> None:
+    captured = {}
+
+    class _LLM:
+        def chat(self, messages, max_tokens=None):
+            del max_tokens
+            captured["prompt"] = messages[0]["content"]
+            return "1. New Arrival"
+
+    adapter = ServerTranslationAdapter(
+        "https://imgtrans.example.test",
+        "fixture-client-token-123456",
+        llm_adapter=_LLM(),
+        ecommerce=True,
+        ecommerce_prompt="自定义要求：务必使用电商标题风格",
+    )
+    result = adapter.translate(("新品上市",), None, "en")
+    assert result[0].translated_text == "New Arrival"
+    assert captured["prompt"].startswith("自定义要求：务必使用电商标题风格")
+    assert "待翻译：\n1. 新品上市" in captured["prompt"]
+
+
+def test_ecommerce_override_can_be_updated_at_runtime() -> None:
+    adapter = ServerTranslationAdapter(
+        "https://imgtrans.example.test",
+        "fixture-client-token-123456",
+        llm_adapter=object(),
+        ecommerce=True,
+    )
+    adapter.set_ecommerce_override({"新词": "New Word"}, "新提示词")
+    result = adapter._ecommerce_translate(("新词",), "en")
+    assert result[0].translated_text == "New Word"
+
+
 def test_server_detection_filters_mixed_language_regions_after_ocr(monkeypatch) -> None:
     captured = {}
 

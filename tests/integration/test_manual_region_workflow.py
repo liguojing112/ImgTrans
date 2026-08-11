@@ -206,7 +206,7 @@ def test_manual_source_translation_uses_current_brand_terms() -> None:
     )
 
     assert adapter.calls == [
-        (('<x id="0"/> SALE',), None, "zh-Hans"),
+        (("⟦0⟧ SALE",), None, "zh-Hans"),
     ]
     assert result.translated_text == "Alpha SALE translated"
 

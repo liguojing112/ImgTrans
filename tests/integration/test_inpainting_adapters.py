@@ -3,6 +3,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from PIL import Image, ImageDraw, ImageFont
 
 from src.domain.image import ImageAsset, ImageDocument, ImageFileFormat
 from src.domain.inpainting import (
@@ -11,10 +12,16 @@ from src.domain.inpainting import (
     InpaintingRequest,
     InpaintingResult,
 )
-from src.infrastructure.fallback_inpaint_adapter import FallbackInpaintAdapter
+from src.infrastructure.fallback_inpaint_adapter import (
+    FallbackInpaintAdapter,
+    _is_text_shaped_mask,
+    _should_fill_with_background,
+    _text_on_solid_background_mask,
+)
 from src.infrastructure.inpainting_process import ProcessLamaAdapter
 from src.infrastructure.lama_onnx_adapter import LamaOnnxAdapter
 from src.infrastructure.opencv_inpaint_adapter import OpenCvInpaintAdapter
+from src.infrastructure.pillow_mask_rasterizer import PillowMaskRasterizer
 
 
 def _request(mode: str = "RGBA") -> InpaintingRequest:
@@ -395,6 +402,59 @@ def test_large_mapped_text_mask_uses_clean_light_background_fill() -> None:
     assert np.min(repaired[mask > 0, :3]) >= 240
     assert np.all(repaired[:, :, 3] == 173)
     assert np.array_equal(repaired[mask == 0], pixels[mask == 0])
+
+
+def test_short_text_on_solid_colored_label_uses_background_fill() -> None:
+    width, height = 400, 200
+    image = Image.new("RGB", (width, height), (245, 245, 245))
+    draw = ImageDraw.Draw(image)
+    draw.rounded_rectangle([40, 110, 360, 170], radius=30, fill=(232, 96, 140))
+    try:
+        font = ImageFont.truetype("C:/Windows/Fonts/arialbd.ttf", 40)
+    except OSError:
+        font = ImageFont.load_default()
+    draw.text((75, 118), "SALE OFF", font=font, fill=(255, 255, 255))
+    pixels = np.asarray(image).copy()
+    document = ImageDocument(
+        ImageAsset(
+            Path("pink-label.png"),
+            width,
+            height,
+            1,
+            ImageFileFormat.PNG,
+            False,
+            False,
+        ),
+        "RGB",
+        pixels.tobytes(),
+    )
+    polygon = ((75, 112), (330, 112), (330, 168), (75, 168))
+    mask = PillowMaskRasterizer().rasterize_text(document, (polygon,), 2)
+    mask_pixels = np.frombuffer(mask.pixels, dtype=np.uint8).reshape(height, width)
+
+    assert _should_fill_with_background(
+        InpaintingRequest(document, mask, context_pixels=96)
+    )
+    result = FallbackInpaintAdapter(
+        _UnavailableAdapter(),
+        _UnavailableAdapter(),
+    ).inpaint(InpaintingRequest(document, mask, context_pixels=96))
+    repaired = np.frombuffer(result.document.pixels, dtype=np.uint8).reshape(
+        height,
+        width,
+        3,
+    )
+
+    assert result.backend_id == "opencv-text-fill"
+    assert np.allclose(repaired[mask_pixels > 0], (232, 96, 140), atol=12)
+    assert np.array_equal(repaired[mask_pixels == 0], pixels[mask_pixels == 0])
+
+
+def test_solid_box_mask_on_uniform_background_uses_lama() -> None:
+    request = _request("RGB")
+    assert not _should_fill_with_background(request)
+    assert not _is_text_shaped_mask(request)
+    assert not _text_on_solid_background_mask(request)
 
 
 def test_fallback_clears_translated_pixels_on_transparent_background() -> None:

@@ -19,6 +19,8 @@ _KNOWN_FIELDS = {
     "model_terms",
     "terminology_entries",
     "copywriting_settings",
+    "ecommerce_terms",
+    "ecommerce_llm_prompt",
 }
 
 
@@ -244,4 +246,44 @@ class JsonCopywritingPreferences:
         filtered = {k: v for k, v in settings.items() if k in self._ALLOWED}
         payload = self._file.load()
         payload["copywriting_settings"] = filtered
+        self._file.save(payload)
+
+
+class JsonEcommercePreferences:
+    """电商翻译的用户配置：词库覆盖（中文→英文）与 LLM 提示词覆盖。
+
+    词库只保存用户自定义/覆盖的条目，内置词库作为默认兜底；提示词为空时
+    使用内置提示词模板。
+    """
+
+    def __init__(self, path: Path) -> None:
+        self._file = _JsonPreferencesFile(path)
+
+    def load(self) -> tuple[dict[str, str], str | None]:
+        payload = self._file.load()
+        terms = payload.get("ecommerce_terms", {})
+        if not isinstance(terms, dict) or not all(
+            isinstance(key, str) and isinstance(value, str)
+            for key, value in terms.items()
+        ):
+            terms = {}
+        prompt = payload.get("ecommerce_llm_prompt")
+        if not isinstance(prompt, str) or not prompt.strip():
+            prompt = None
+        return {
+            key.strip(): value.strip()
+            for key, value in terms.items()
+            if key.strip() and value.strip()
+        }, prompt
+
+    def save(self, terms: dict[str, str], prompt: str | None) -> None:
+        normalized = {
+            key.strip(): value.strip()
+            for key, value in terms.items()
+            if key.strip() and value.strip()
+        }
+        normalized_prompt = prompt.strip() if prompt and prompt.strip() else None
+        payload = self._file.load()
+        payload["ecommerce_terms"] = normalized
+        payload["ecommerce_llm_prompt"] = normalized_prompt
         self._file.save(payload)

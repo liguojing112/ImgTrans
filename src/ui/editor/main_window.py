@@ -93,6 +93,8 @@ class EditorMainWindow(QMainWindow):
         export_batch_selection: ExportBatchSelection | None = None,
         terminology_catalog: TerminologyCatalog | None = None,
         terminology_preferences: object | None = None,
+        ecommerce_preferences: object | None = None,
+        update_ecommerce_translation: object | None = None,
         translation_service_label: str = "翻译服务：可用",
         translation_service_available: bool = True,
         manual_translation_adapter: object | None = None,
@@ -135,6 +137,8 @@ class EditorMainWindow(QMainWindow):
         self._batch_snapshot: BatchSnapshot | None = None
         self._terminology_catalog = terminology_catalog
         self._terminology_preferences = terminology_preferences
+        self._ecommerce_preferences = ecommerce_preferences
+        self._update_ecommerce_translation = update_ecommerce_translation
         self._terminology_entries: tuple[TerminologyEntry, ...] = ()
         self._updating_terminology = False
         self._translation_service_label = translation_service_label
@@ -658,9 +662,40 @@ class EditorMainWindow(QMainWindow):
         self._editor_page.remove_document_requested.connect(
             self._on_remove_document
         )
+        controls.ecommerce_settings_requested.connect(
+            self._show_ecommerce_settings
+        )
         self._load_terminology()
 
     # —— 操作 ——
+
+    def _show_ecommerce_settings(self) -> None:
+        if self._ecommerce_preferences is None:
+            return
+        from PySide6.QtWidgets import QDialog
+        from src.ui.ecommerce_settings_dialog import EcommerceSettingsDialog
+
+        try:
+            terms, prompt = self._ecommerce_preferences.load()
+        except Exception as error:
+            self.statusBar().showMessage(f"无法加载电商翻译设置：{error}", 7000)
+            return
+        dialog = EcommerceSettingsDialog(terms, prompt, self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        terms, prompt = dialog.resulting_settings()
+        try:
+            self._ecommerce_preferences.save(terms, prompt)
+        except Exception as error:
+            self.statusBar().showMessage(f"无法保存电商翻译设置：{error}", 7000)
+            return
+        if self._update_ecommerce_translation is not None:
+            try:
+                self._update_ecommerce_translation(terms, prompt)
+            except Exception as error:
+                self.statusBar().showMessage(f"无法应用电商翻译设置：{error}", 7000)
+                return
+        self.statusBar().showMessage("电商翻译设置已保存并生效", 5000)
 
     def _enter_editor(self) -> None:
         self._stack.setCurrentWidget(self._editor_page)

@@ -38,28 +38,26 @@ def test_fully_protected_and_placeholder_damage_are_detected() -> None:
 
 def test_restore_accepts_standard_placeholder() -> None:
     value = ProtectionEngine().protect("堵头*2")
-    assert value.restore('Plug * <x id="0"/>') == "Plug * 2"
+    assert value.restore("Plug * ⟦0⟧") == "Plug * 2"
 
 
-def test_restore_accepts_spaces_around_equals() -> None:
+def test_restore_rejects_whitespace_inside_placeholder() -> None:
     value = ProtectionEngine().protect("堵头*2")
-    assert value.restore('Plug * <x id = "0"/>') == "Plug * 2"
-
-
-def test_restore_accepts_multiple_spaces_inside_tag() -> None:
-    value = ProtectionEngine().protect("堵头*2")
-    assert value.restore('Plug * <x  id = "0" />') == "Plug * 2"
+    with pytest.raises(ProtectionError, match="占位符"):
+        value.restore("Plug * ⟦ 0⟧")
+    with pytest.raises(ProtectionError, match="占位符"):
+        value.restore("Plug * ⟦0 ⟧")
 
 
 def test_restore_preserves_ordinary_sentence_spacing() -> None:
     value = ProtectionEngine().protect("堵头*2")
-    translated = 'Use  plug <b>count</b>:  <x id= "0" />  today'
+    translated = "Use  plug <b>count</b>:  ⟦0⟧  today"
     assert value.restore(translated) == "Use  plug <b>count</b>:  2  today"
 
 
 def test_restore_matches_multiple_placeholders_by_id() -> None:
     value = ProtectionEngine().protect("X100 saves 25%")
-    translated = 'Save <x  id = "1" /> with <x id = "0"/>'
+    translated = "Save ⟦1⟧ with ⟦0⟧"
     assert value.restore(translated) == "Save 25% with X100"
 
 
@@ -72,31 +70,31 @@ def test_restore_rejects_missing_placeholder() -> None:
 def test_restore_rejects_duplicate_placeholder_id() -> None:
     value = ProtectionEngine().protect("堵头*2")
     with pytest.raises(ProtectionError, match="占位符"):
-        value.restore('<x id="0"/> and <x id = "0"/>')
+        value.restore("⟦0⟧ and ⟦0⟧")
 
 
 def test_restore_rejects_unknown_placeholder_id() -> None:
     value = ProtectionEngine().protect("堵头*2")
     with pytest.raises(ProtectionError, match="占位符"):
-        value.restore('<x id="0"/> and <x id="9"/>')
+        value.restore("⟦0⟧ and ⟦9⟧")
 
 
 def test_restore_rejects_changed_placeholder_id() -> None:
     value = ProtectionEngine().protect("堵头*2")
     with pytest.raises(ProtectionError, match="占位符"):
-        value.restore('<x id="1"/>')
+        value.restore("⟦1⟧")
 
 
 @pytest.mark.parametrize(
     "translated",
     (
-        '<y id="0"/>',
-        '<x id="0">',
-        '<x id="0"/> and <x id="9">',
-        '<x id="0" extra="value"/>',
+        "⟦⟧",
+        "⟦a⟧",
+        "⟦0⟧ and ⟦⟧",
+        "⟦0⟧ and ⟦01⟧",
     ),
 )
-def test_restore_rejects_non_x_or_damaged_placeholder_tags(translated: str) -> None:
+def test_restore_rejects_malformed_or_unknown_placeholders(translated: str) -> None:
     value = ProtectionEngine().protect("堵头*2")
     with pytest.raises(ProtectionError, match="占位符"):
         value.restore(translated)

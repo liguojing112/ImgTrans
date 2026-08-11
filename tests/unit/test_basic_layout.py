@@ -50,6 +50,7 @@ from src.infrastructure.text_renderer import (
     _estimate_arc_text_path,
     _fit_dense_short_word_overflow,
     _fit_enhanced_tangent_layer,
+    _fit_short_latin_spacing,
     _font_for_layer,
     _font_for_style,
     _font_for_text,
@@ -1350,6 +1351,55 @@ def test_long_translation_is_marked_as_overflow_in_tiny_box() -> None:
         _translation("tiny", "这是一段无法放入极小文字框的长译文"),
     )
     assert layout.layers[0].overflow
+
+
+def test_short_latin_text_gets_letter_spacing_to_fill_wide_box() -> None:
+    QApplication.instance() or QApplication(["layout-latin-spacing-test"])
+    layer = TextLayer(
+        "short",
+        "Soft",
+        TextBox(60, 20, 120, 30),
+        TextStyle("Arial", 22.5, (20, 20, 20), wrap=False),
+    )
+
+    fitted = _fit_short_latin_spacing((layer,))
+
+    assert fitted[0].style.letter_spacing > 0
+    assert not fitted[0].overflow
+    assert _text_fits(
+        fitted[0],
+        fitted[0].text,
+        fitted[0].style.font_size,
+        fitted[0].style.font_stretch,
+    )
+
+
+def test_latin_text_that_fills_box_gets_no_letter_spacing() -> None:
+    QApplication.instance() or QApplication(["layout-latin-spacing-none-test"])
+    layer = TextLayer(
+        "fill",
+        "Additive-free",
+        TextBox(60, 20, 130, 30),
+        TextStyle("Arial", 22.5, (20, 20, 20), wrap=False),
+    )
+
+    fitted = _fit_short_latin_spacing((layer,))
+
+    assert fitted[0].style.letter_spacing == 0.0
+
+
+def test_cjk_text_gets_no_letter_spacing() -> None:
+    QApplication.instance() or QApplication(["layout-latin-spacing-cjk-test"])
+    layer = TextLayer(
+        "cjk",
+        "商品促销",
+        TextBox(60, 20, 120, 30),
+        TextStyle("Arial", 22.5, (20, 20, 20), wrap=False),
+    )
+
+    fitted = _fit_short_latin_spacing((layer,))
+
+    assert fitted[0].style.letter_spacing == 0.0
 
 
 def test_dense_short_word_overflow_uses_compact_readable_font() -> None:

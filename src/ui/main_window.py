@@ -116,6 +116,8 @@ class MainWindow(QMainWindow):
         brand_terms_preferences: BrandTermsPreferences | None = None,
         terminology_preferences: TerminologyPreferences | None = None,
         terminology_catalog: TerminologyCatalog | None = None,
+        ecommerce_preferences: object | None = None,
+        update_ecommerce_translation: Callable[[dict[str, str], str | None], None] | None = None,
         export_batch_selection: ExportBatchSelection | None = None,
         confirm_discard: Callable[[str], bool] | None = None,
         refresh_image_limits: Callable[[], ImageLimitsRefreshResult] | None = None,
@@ -142,6 +144,8 @@ class MainWindow(QMainWindow):
         self._batch_result_store = batch_result_store
         self._brand_terms_preferences = brand_terms_preferences
         self._terminology_preferences = terminology_preferences
+        self._ecommerce_preferences = ecommerce_preferences
+        self._update_ecommerce_translation = update_ecommerce_translation
         self._terminology_catalog = terminology_catalog or (
             translate_regions.terminology_catalog
             if translate_regions is not None
@@ -208,6 +212,9 @@ class MainWindow(QMainWindow):
             self._terminology_pair_changed
         )
         self._load_terminology()
+        self.translation_panel.ecommerce_settings_button.clicked.connect(
+            self._show_ecommerce_settings
+        )
         self.setStyleSheet(_STYLE)
 
     def _load_brand_terms(self) -> None:
@@ -229,6 +236,34 @@ class MainWindow(QMainWindow):
             self._brand_terms_preferences.save(brand_terms)
         except Exception as error:
             self.statusBar().showMessage(f"无法保存品牌保护词：{error}", 7000)
+
+    def _show_ecommerce_settings(self) -> None:
+        if self._ecommerce_preferences is None:
+            return
+        from PySide6.QtWidgets import QDialog
+        from src.ui.ecommerce_settings_dialog import EcommerceSettingsDialog
+
+        try:
+            terms, prompt = self._ecommerce_preferences.load()
+        except Exception as error:
+            self.statusBar().showMessage(f"无法加载电商翻译设置：{error}", 7000)
+            return
+        dialog = EcommerceSettingsDialog(terms, prompt, self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        terms, prompt = dialog.resulting_settings()
+        try:
+            self._ecommerce_preferences.save(terms, prompt)
+        except Exception as error:
+            self.statusBar().showMessage(f"无法保存电商翻译设置：{error}", 7000)
+            return
+        if self._update_ecommerce_translation is not None:
+            try:
+                self._update_ecommerce_translation(terms, prompt)
+            except Exception as error:
+                self.statusBar().showMessage(f"无法应用电商翻译设置：{error}", 7000)
+                return
+        self.statusBar().showMessage("电商翻译设置已保存并生效", 5000)
 
     def _load_terminology(self) -> None:
         try:
@@ -440,6 +475,15 @@ class MainWindow(QMainWindow):
         )
         self.activation_action.triggered.connect(self.show_activation_dialog)
         account_menu.addAction(self.activation_action)
+        help_menu = self.menuBar().addMenu("帮助")
+        help_action = QAction("使用说明…", self)
+        help_action.triggered.connect(self._show_help_dialog)
+        help_menu.addAction(help_action)
+
+    def _show_help_dialog(self) -> None:
+        from src.ui.help_dialog import HelpDialog
+
+        HelpDialog(self).show()
 
     def _enter_product(self) -> None:
         """打开商品详情生成窗口（LLM 由服务端代理）。"""

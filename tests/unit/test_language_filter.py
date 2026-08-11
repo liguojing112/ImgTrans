@@ -823,7 +823,7 @@ def test_brand_terms_skip_fully_protected_regions_and_restore_partial_spans() ->
     assert result.units[1].status is TranslationStatus.TRANSLATED
     assert result.units[1].translated_text == "translated:Alpha SALE"
     assert adapter.calls == [
-        (('<x id="0"/> SALE',), None, "zh-Hans"),
+        (("⟦0⟧ SALE",), None, "zh-Hans"),
     ]
 
 
@@ -923,7 +923,7 @@ def test_brand_protection_precedes_exact_terminology() -> None:
 
     assert result.units[0].status is TranslationStatus.SKIPPED_PROTECTED
     assert result.units[1].translated_text == "translated:Alpha SALE"
-    assert adapter.calls == [(('<x id="0"/> SALE',), None, "zh-Hans")]
+    assert adapter.calls == [(("⟦0⟧ SALE",), None, "zh-Hans")]
 
 
 def test_review_precedes_terminology_and_manual_override_can_use_term() -> None:
@@ -1124,7 +1124,7 @@ def test_short_cjk_text_retries_when_auto_detection_claims_target_language() -> 
                 )
             return (
                 TranslationAdapterItem(
-                    translated_text='Plug*<x id="0"/>',
+                    translated_text="Plug*⟦0⟧",
                     source_language="zh-Hans",
                 ),
             )

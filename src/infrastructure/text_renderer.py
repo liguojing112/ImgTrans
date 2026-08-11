@@ -143,10 +143,12 @@ class QtBasicTextLayoutAdapter:
         aligned_panels = _align_panel_title_and_body(repeated_vertical)
         normalized = _normalize_visual_group_sizes(source, aligned_panels)
         return TextLayout(
-            _fit_dense_short_word_overflow(
-                ocr_result,
-                translation_result,
-                normalized,
+            _fit_short_latin_spacing(
+                _fit_dense_short_word_overflow(
+                    ocr_result,
+                    translation_result,
+                    normalized,
+                )
             )
         )
 
@@ -484,6 +486,53 @@ def _fit_dense_short_word_overflow(
             ),
             overflow=False,
         )
+    return tuple(fitted)
+
+
+def _fit_short_latin_spacing(
+    layers: tuple[TextLayer, ...],
+) -> tuple[TextLayer, ...]:
+    """电商短英文译文单行留白较大时适度加大字距，缩小与原文的视觉占比差距。
+
+    只在「纯拉丁、非路径、未溢出、单行且仍有明显留白」时生效，且重新校验加
+    字距后仍能完整放进文字框，避免把原本排版好的文本撑到换行或溢出。
+    """
+    if not layers:
+        return layers
+    fitted = list(layers)
+    for index, layer in enumerate(fitted):
+        text = layer.text
+        if (
+            not text.strip()
+            or layer.path is not None
+            or layer.overflow
+            or not layer.visible
+            or layer.style.letter_spacing != 0.0
+            or not _contains_latin(text)
+            or _contains_cjk(text)
+        ):
+            continue
+        metrics = QFontMetricsF(_font_for_text(layer.style, text))
+        horizontal_scale = layer.style.font_stretch / 100
+        text_width = metrics.horizontalAdvance(text) * horizontal_scale
+        if text_width <= 0 or text_width >= layer.box.width * 0.85:
+            continue
+        spare = layer.box.width - text_width
+        spacing = min(spare * 0.5, layer.style.font_size * 0.35)
+        if spacing <= 0.1:
+            continue
+        candidate = replace(
+            layer,
+            style=replace(layer.style, letter_spacing=spacing),
+        )
+        if not _text_fits(
+            candidate,
+            text,
+            candidate.style.font_size,
+            candidate.style.font_stretch,
+        ):
+            continue
+        fitted[index] = candidate
     return tuple(fitted)
 
 

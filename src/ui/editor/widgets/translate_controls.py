@@ -63,6 +63,7 @@ class TranslateControls(QFrame):
     ocr_only_requested = Signal()
     cancel_requested = Signal()
     activity_changed = Signal(bool)
+    ecommerce_settings_requested = Signal()
 
     def __init__(self) -> None:
         super().__init__()
@@ -323,6 +324,14 @@ class TranslateControls(QFrame):
         layout.addWidget(terminology_label)
         layout.addWidget(self.terminology_editor)
         layout.addWidget(self.terminology_status)
+
+        # —— 电商翻译设置 ——
+        self.ecommerce_settings_button = QPushButton("电商翻译设置…")
+        self.ecommerce_settings_button.setObjectName("ecommerceSettingsButton")
+        self.ecommerce_settings_button.clicked.connect(
+            self.ecommerce_settings_requested.emit
+        )
+        layout.addWidget(self.ecommerce_settings_button)
 
         layout.addLayout(action_row)
         layout.addWidget(self.translate_hint)

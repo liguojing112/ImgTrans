@@ -262,10 +262,33 @@ def _high_contrast_text_mask(
         )
         if chroma <= 45 and distance >= 80
     )
+    distance_to_background = np.linalg.norm(
+        pixels.astype(np.float32) - background,
+        axis=2,
+    )
     if neutral_candidates:
         contrast, foreground = max(
             neutral_candidates,
             key=lambda candidate: candidate[0],
+        )
+        foreground_chroma = float(foreground.max() - foreground.min())
+        if (
+            contrast < 80
+            or (foreground_chroma > 45 and background_chroma > 35)
+        ):
+            return np.asarray(geometry, dtype=np.uint8)
+        # 文字 = 距前景色近 且 距背景色远：既排除浅色/渐变背景（离背景近），
+        # 又排除多色背景里的其它色块（离前景色远）。
+        distance_to_foreground = np.linalg.norm(
+            pixels.astype(np.float32) - foreground,
+            axis=2,
+        )
+        foreground_limit = max(72.0, min(180.0, contrast * 0.65))
+        background_minimum = max(72.0, contrast * 0.5)
+        candidate = polygon & (
+            distance_to_foreground <= foreground_limit
+        ) & (
+            distance_to_background >= background_minimum
         )
     elif background_chroma <= 35:
         contrast, foreground = max(
@@ -275,23 +298,29 @@ def _high_contrast_text_mask(
             ),
             key=lambda candidate: candidate[0],
         )
+        distance_to_foreground = np.linalg.norm(
+            pixels.astype(np.float32) - foreground,
+            axis=2,
+        )
+        foreground_limit = max(72.0, min(180.0, contrast * 0.65))
+        background_minimum = max(72.0, contrast * 0.5)
+        candidate = polygon & (
+            distance_to_foreground <= foreground_limit
+        ) & (
+            distance_to_background >= background_minimum
+        )
     else:
-        return np.asarray(geometry, dtype=np.uint8)
-    foreground_chroma = float(foreground.max() - foreground.min())
-    if (
-        contrast < 80
-        or (foreground_chroma > 45 and background_chroma > 35)
-    ):
-        return np.asarray(geometry, dtype=np.uint8)
-    distance_limit = max(72.0, min(180.0, contrast * 0.65))
-    distance = np.linalg.norm(
-        pixels.astype(np.float32) - foreground,
-        axis=2,
+        # 彩色背景上的彩色/深色文字（无中性前景）：按「与背景的差异」提取文字
+        candidate = polygon & (distance_to_background >= 48.0)
+    candidate_ratio = (
+        float(np.count_nonzero(candidate)) / float(np.count_nonzero(polygon))
+        if np.any(candidate)
+        else 1.0
     )
-    candidate = polygon & (distance <= distance_limit)
-    ratio = float(np.count_nonzero(candidate)) / float(np.count_nonzero(polygon))
-    if not 0.015 <= ratio <= 0.5:
+    if candidate_ratio > 0.9:
         return np.asarray(geometry, dtype=np.uint8)
+    # 不再因候选占框比例过低而退回整框蒙版：纯色背景上的文字即使紧贴文字框，
+    # 也应当只擦除文字笔画，保留背景颜色与形状，避免整框走修复破坏背景。
     return candidate.astype(np.uint8) * 255
 
 

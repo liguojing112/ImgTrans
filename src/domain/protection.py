@@ -11,13 +11,7 @@ class ProtectionError(ValueError):
     pass
 
 
-_PLACEHOLDER_TAG = re.compile(
-    r'<x\s+id\s*=\s*"(?P<id>\d+)"\s*/\s*>'
-)
-_X_TAG_FRAGMENT = re.compile(
-    r"<\s*/?\s*x(?=\s|/|>|$)",
-    re.IGNORECASE,
-)
+_PLACEHOLDER = re.compile(r"⟦(?P<id>\d+)⟧")
 
 
 class ProtectionKind(str, Enum):
@@ -65,7 +59,7 @@ class ProtectedText:
     def restore(self, translated: str) -> str:
         expected: dict[int, ProtectedSpan] = {}
         for span in self.spans:
-            match = _PLACEHOLDER_TAG.fullmatch(span.placeholder)
+            match = _PLACEHOLDER.fullmatch(span.placeholder)
             if match is None:
                 raise ProtectionError("翻译结果未完整保留保护词占位符")
             placeholder_id = int(match.group("id"))
@@ -73,14 +67,14 @@ class ProtectedText:
                 raise ProtectionError("翻译结果未完整保留保护词占位符")
             expected[placeholder_id] = span
 
-        matches = tuple(_PLACEHOLDER_TAG.finditer(translated))
+        matches = tuple(_PLACEHOLDER.finditer(translated))
         actual_ids = Counter(int(match.group("id")) for match in matches)
         if actual_ids != Counter(expected.keys()):
             raise ProtectionError("翻译结果未完整保留保护词占位符")
-        without_placeholders = _PLACEHOLDER_TAG.sub("", translated)
-        if _X_TAG_FRAGMENT.search(without_placeholders):
+        remaining = _PLACEHOLDER.sub("", translated)
+        if "⟦" in remaining or "⟧" in remaining:
             raise ProtectionError("翻译结果未完整保留保护词占位符")
-        return _PLACEHOLDER_TAG.sub(
+        return _PLACEHOLDER.sub(
             lambda match: expected[int(match.group("id"))].text,
             translated,
         )
