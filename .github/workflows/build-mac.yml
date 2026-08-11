@@ -22,22 +22,21 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e '.[release]'
 
-      - name: Download LAMA model from Release
+      - name: Download bundled models
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          mkdir -p /tmp/lama
-          # 指定 tag "models" 下载（pre-release 也能下，避免 latest 取到别的 release）
-          if ! gh release download models --pattern "inpainting_lama_2025jan.onnx" --dir /tmp/lama 2>/dev/null; then
-            echo "❌ 未找到 LAMA 模型资产。请先上传："
-            echo "   gh release create models packaging/bundled_models/lama-inpainting/inpainting_lama_2025jan.onnx"
+          mkdir -p /tmp/models
+          # 完整模型包（Windows 打包上传，含 LAMA + 全部 rapidocr onnx）
+          if ! gh release download models --pattern "bundled_models.zip" --dir /tmp/models 2>/dev/null; then
+            echo "❌ 请先上传 bundled_models.zip 到 models release："
+            echo "   gh release upload models bundled_models.zip"
             exit 1
           fi
-          ls -lh /tmp/lama/
-
-      - name: Prepare bundled models
-        run: |
-          python scripts/prepare_bundled_models.py --lama-model /tmp/lama/inpainting_lama_2025jan.onnx
+          rm -rf packaging/bundled_models
+          mkdir -p packaging/bundled_models
+          python -c "import zipfile; zipfile.ZipFile('/tmp/models/bundled_models.zip').extractall('packaging/bundled_models')"
+          find packaging/bundled_models -type f | wc -l
 
       - name: Build .app
         run: |
