@@ -519,7 +519,7 @@ def _fit_short_latin_spacing(
         if text_width <= 0 or text_width >= layer.box.width * 0.85:
             continue
         spare = layer.box.width - text_width
-        spacing = min(spare * 0.5, layer.style.font_size * 0.35)
+        spacing = min(spare * 0.5, layer.style.font_size * 0.35, 50)
         if spacing <= 0.1:
             continue
         candidate = replace(

@@ -723,6 +723,30 @@ class MainWindow(QMainWindow):
         self.image_canvas.set_regions(self._ocr_result.regions)
         self.statusBar().showMessage("增强 OCR 结果已人工确认，可进入翻译", 5000)
 
+    def _confirm_all_ocr_regions(self) -> None:
+        if self._ocr_result is None:
+            return
+        regions = []
+        changed = False
+        for region in self._ocr_result.regions:
+            if region.enhanced_only and not region.auto_process_eligible:
+                regions.append(
+                    replace(
+                        region,
+                        text=region.text.strip(),
+                        auto_process_eligible=True,
+                    )
+                )
+                changed = True
+            else:
+                regions.append(region)
+        if not changed:
+            return
+        self._ocr_result = replace(self._ocr_result, regions=tuple(regions))
+        self.ocr_panel.set_result(self._ocr_result)
+        self.image_canvas.set_regions(self._ocr_result.regions)
+        self.statusBar().showMessage("全部待确认区域已确认，可进入翻译", 5000)
+
     def request_translation(self) -> None:
         if not self._ocr_result or not self._translate_regions or not self._task_runner:
             return
@@ -1147,6 +1171,9 @@ class MainWindow(QMainWindow):
         self.image_canvas.point_selected.connect(self._ocr_center_selected)
         self.ocr_panel.region_confirmation_requested.connect(
             self._confirm_ocr_region
+        )
+        self.ocr_panel.confirm_all_regions_requested.connect(
+            self._confirm_all_ocr_regions
         )
         translation_codes = (
             self._translate_regions.language_codes if self._translate_regions else ()

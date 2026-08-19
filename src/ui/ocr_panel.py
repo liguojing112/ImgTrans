@@ -33,6 +33,7 @@ from src.ui.languages import LANGUAGE_LABELS
 class OcrPanel(QFrame):
     center_pick_requested = Signal()
     region_confirmation_requested = Signal(str, str)
+    confirm_all_regions_requested = Signal()
 
     def __init__(self, language_codes: tuple[str, ...]) -> None:
         super().__init__()
@@ -131,6 +132,17 @@ class OcrPanel(QFrame):
             )
         )
         layout.addWidget(self.confirm_button)
+        self.confirm_all_button = QPushButton("一键确认全部待确认区域")
+        self.confirm_all_button.setObjectName("confirmAllOcrRegionsButton")
+        self.confirm_all_button.setEnabled(False)
+        self.confirm_all_button.setToolTip(
+            "把高召回识别结果中的全部“待确认”区域标记为已确认，"
+            "随后即可全部进入翻译（仍可先逐条修改错字再确认）。"
+        )
+        self.confirm_all_button.clicked.connect(
+            lambda: self.confirm_all_regions_requested.emit()
+        )
+        layout.addWidget(self.confirm_all_button)
         self._result: OcrResult | None = None
 
     @property
@@ -198,6 +210,13 @@ class OcrPanel(QFrame):
                 item.setForeground(3, Qt.GlobalColor.darkYellow)
             self.results.addTopLevelItem(item)
         self.preview_strips_button.setEnabled(bool(result.preview_strips))
+        self.confirm_all_button.setEnabled(
+            result.mode is OcrMode.HIGH_RECALL
+            and any(
+                region.enhanced_only and not region.auto_process_eligible
+                for region in result.regions
+            )
+        )
         if result.regions:
             self.status_label.setText(
                 f"识别到 {len(result.regions)} 个区域 · {result.elapsed_ms / 1000:.2f} 秒"
@@ -210,6 +229,7 @@ class OcrPanel(QFrame):
         self.results.clear()
         self.preview_strips_button.setEnabled(False)
         self.confirm_button.setEnabled(False)
+        self.confirm_all_button.setEnabled(False)
         self.status_label.setText("点击“识别文字”开始")
 
     def show_preview_strips(self, result: OcrResult | None = None) -> None:

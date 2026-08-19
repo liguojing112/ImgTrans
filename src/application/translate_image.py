@@ -106,8 +106,15 @@ class TranslateImage:
                 lambda: self._layout.layout(document, ocr, translation),
                 on_stage,
             )
+            # 弧形/旋转文字（圆环、竖排、弧线）译文通常比原文长，放不下时一律
+            # 渲染自适应缩小的译文，而不是恢复原文；仅普通水平文字放不下才保留
+            # 原文（避免长译文挤乱直排版面）。
             overflow_region_ids = frozenset(
-                layer.region_id for layer in layout.layers if layer.overflow
+                layer.region_id
+                for layer in layout.layers
+                if layer.overflow
+                and layer.path is None
+                and abs(layer.box.rotation_degrees) <= 3
             )
             protected_conflict_region_ids = (
                 self._repair.translated_protection_conflicts(
