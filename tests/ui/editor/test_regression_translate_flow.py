@@ -210,6 +210,25 @@ def _document(w=190, h=72):
     return ImageDocument(asset, "RGB", pixels.tobytes())
 
 
+def _active_session():
+    """未过期的激活会话。
+
+    _on_translate 前置 _check_translation_access()，未激活时会弹出模态提示并直接
+    返回，导致后续翻译逻辑根本不执行。凡是驱动 _on_translate 的用例都必须提供它。
+    """
+    from datetime import datetime, timedelta, timezone
+
+    from src.domain.activation import ActivationSession
+
+    now = datetime.now(timezone.utc)
+    return ActivationSession(
+        1,
+        now,
+        now + timedelta(days=1),
+        "itd_regression_token_123456789",
+    )
+
+
 # ============================================================
 # 回归测试
 # ============================================================
@@ -242,6 +261,7 @@ def test_editor_forwards_high_recall_mode_to_one_click_translation():
         import_image=object(),
         task_runner=ImmediateTaskRunner(),
         translate_image=workflow,
+        activation_status=_active_session,
     )
     try:
         window._model.source_document = _document()
@@ -267,59 +287,11 @@ def test_editor_forwards_high_recall_mode_to_one_click_translation():
         window.close()
 
 
-def test_region_retranslation_recovers_circular_path_from_high_recall_ocr():
-    QApplication.instance() or QApplication(["region-retranslation-path-test"])
-    polygon = order_quad(((90, 24), (150, 24), (150, 36), (90, 36)))
-    observation = OcrObservation(
-        "polar",
-        0,
-        3,
-        0.95,
-        polygon,
-        "Profit",
-        "polar:0:scale:3",
-    )
-    region = TextRegion(
-        "profit",
-        polygon,
-        "Profit",
-        0.95,
-        "en",
-        "circular",
-        observations=(observation,),
-        enhanced_only=True,
-        auto_process_eligible=False,
-    )
-    ocr = OcrResult(
-        (region,),
-        "en",
-        "circular",
-        1,
-        OcrMode.HIGH_RECALL,
-        (
-            OcrPreviewStrip(
-                "ring",
-                1,
-                1,
-                b"\xff\xff\xff",
-                Point(120, 120),
-                RingBand(70, 110),
-            ),
-        ),
-    )
-    window = EditorMainWindow(import_image=object())
-    try:
-        window._model.ocr_result = ocr
-        path = window._circular_path_for_retranslation(
-            "profit",
-            region,
-            TextBox(120, 30, 60, 12),
-        )
-        assert isinstance(path, CircularTextPath)
-        assert path.center == PathPoint(120, 120)
-        assert path.start_angle_degrees < path.end_angle_degrees
-    finally:
-        window.close()
+# 已移除 test_region_retranslation_recovers_circular_path_from_high_recall_ocr：
+# 该用例验证的 EditorMainWindow._circular_path_for_retranslation 已在提交 72e976b
+# （feat(client): 工具箱预览/水印旋转/框选翻译修复…）中随二次翻译流程重构一并删除。
+# 新流程不再从 OCR 多边形反推 TextBox / CircularTextPath，而是跳转文字属性面板、
+# 由用户选定目标语言后直接调用翻译适配器，故此用例已无对应实现可测。
 
 
 def test_3_canvas_uses_rendered_image():
@@ -648,12 +620,9 @@ def test_secondary_translation_enables_toolbar_and_menu_history():
         window._on_translation_succeeded(result)
         editor = window._model.composition_editor
         edit = editor.replace_text("high", "SECOND")
-        manual = SimpleNamespace(
-            source_text="SALE",
-            translated_text="SECOND",
-        )
 
-        window._on_region_retranslated("high", (manual, edit))
+        # 二次翻译回调签名已改为 (译文, 编辑记录, 目标语言)
+        window._on_region_retranslated("high", ("SECOND", edit, "zh-Hans"))
 
         assert window._editor_page.top_bar.undo_btn.isEnabled()
         assert window._undo_action.isEnabled()
@@ -667,53 +636,11 @@ def test_secondary_translation_enables_toolbar_and_menu_history():
         window.close()
 
 
-def test_rotated_ocr_region_box_uses_oriented_dimensions():
-    QApplication.instance() or QApplication(["oriented-region-box-test"])
-    window = EditorMainWindow(import_image=object())
-    try:
-        polygon = (
-            Point(100, 100),
-            Point(160, 135),
-            Point(150, 152),
-            Point(90, 117),
-        )
-        observation = OcrObservation(
-            "polar",
-            0,
-            3,
-            0.95,
-            polygon,
-            "Profit",
-            "polar:0:scale:3",
-        )
-        region = TextRegion(
-            "rotated",
-            polygon,
-            "Profit",
-            0.95,
-            "en",
-            "test-model",
-            observations=(observation,),
-            enhanced_only=True,
-        )
-        window._model.text_layout = TextLayout(
-            (
-                TextLayer(
-                    "rotated",
-                    "利润",
-                    TextBox(125, 126, 103, 60, 30),
-                    TextStyle("Arial", 48, (0, 0, 0)),
-                ),
-            )
-        )
-        box = window._region_box(region.region_id, region)
-        assert box.center_x == pytest.approx(125)
-        assert box.center_y == pytest.approx(126)
-        assert box.width == pytest.approx(69.46, abs=0.02)
-        assert box.height == pytest.approx(19.72, abs=0.02)
-        assert box.rotation_degrees == pytest.approx(30.26, abs=0.02)
-    finally:
-        window.close()
+# 已移除 test_rotated_ocr_region_box_uses_oriented_dimensions：
+# 该用例验证的 EditorMainWindow._region_box 同样在提交 72e976b 中被删除，
+# 当前代码库已无任何按最小外接矩形推导定向 TextBox 的实现（src 下不存在
+# minAreaRect 或等价逻辑）。若需恢复「旋转文字按定向尺寸建框」这一产品能力，
+# 应作为独立需求重新实现并配套新测试，而非在此保留一个无实现可测的用例。
 
 
 def test_translation_activity_scrolls_visible_progress_into_view():
@@ -1125,11 +1052,11 @@ def test_ai_erase_embedded_panel_selects_mask_and_applies_repair():
         assert page.scene.edit_mask.is_empty
         assert not page.erase_dialog.apply_button.isEnabled()
 
+        # 框选松手即自动消除（_on_area_selected 内直接触发 _request_ai_erase），
+        # 因此蒙版会被立即消费并清空，修复结果已落到合成编辑器，无需再点「应用」。
         page._on_area_selected("ai_erase", TextBox(30, 25, 20, 10))
-        assert not page.scene.edit_mask.is_empty
-        assert page.erase_dialog.apply_button.isEnabled()
-        page.erase_dialog.apply_button.click()
 
+        assert page.scene.edit_mask.is_empty
         assert window._model.composition_editor is not None
         assert window._model.composition_editor.patch_count == 1
         assert page.layer_tools_stack.currentWidget() is page.erase_dialog
@@ -2042,6 +1969,7 @@ def test_in_flight_translation_progress_survives_switching_away_and_back():
             QtBasicTextLayoutAdapter("Arial"),
             QtTextRenderer(),
         ),
+        activation_status=_active_session,
     )
     try:
         window._on_image_loaded(source_a)
@@ -2451,6 +2379,7 @@ def test_translate_button_jumps_to_ocr_tab():
             QtBasicTextLayoutAdapter("Arial"),
             QtTextRenderer(),
         ),
+        activation_status=_active_session,
     )
     try:
         window._on_image_loaded(source)

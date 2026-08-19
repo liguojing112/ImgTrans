@@ -102,7 +102,6 @@ def test_runtime_recovery_does_not_submit_duplicate_refreshes(tmp_path: Path) ->
         ),
         task_runner=runner,
         refresh_image_limits=lambda: None,
-        update_models=lambda: None,
         activate_device=lambda code: session,
         activation_status=lambda: session,
         clear_activation=lambda: None,
@@ -111,8 +110,11 @@ def test_runtime_recovery_does_not_submit_duplicate_refreshes(tmp_path: Path) ->
     window.request_runtime_recovery("network-online")
     assert len(runner.pending) == 2
 
+    # 激活检查完成后重入守卫应释放，再次恢复可以重新提交激活检查；
+    # 图片限制任务仍在进行中，其守卫未释放，因此只新增一个任务。
     activation_task = next(item for item in runner.pending if item[0]() == session)
     activation_task[1](session)
+    window.request_runtime_recovery("resume")
     assert len(runner.pending) == 3
     window.close()
 

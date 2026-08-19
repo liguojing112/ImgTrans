@@ -18,22 +18,12 @@ class FakeCodec:
         raise FileNotFoundError(path)
 
 
-class FakeLLMConfig:
-    api_key = "test-api-key"
-
-
-class FakeLLMConfigStore:
-    def load(self) -> FakeLLMConfig:
-        return FakeLLMConfig()
-
-
 def _make_window() -> ProductWindow:
     app = QApplication.instance() or QApplication(["product-window-test"])
     window = ProductWindow(
         task_runner=FakeTaskRunner(),
         codec=FakeCodec(),
         ocr_adapter=object(),
-        llm_config_store=FakeLLMConfigStore(),
         llm_adapter=object(),
     )
     window.show()
@@ -112,7 +102,8 @@ def test_regeneration_controls_disable_while_request_is_in_flight() -> None:
     window = _make_window()
     try:
         intro = window._step_copywriting._intro_regen_btn
-        detail = window._step_copywriting._detail_regen_btns["specs"]
+        # 详情重生成已从「每节一个按钮」改为「当前节单个按钮」
+        detail = window._step_copywriting._detail_regen_btn
 
         window._step_copywriting.set_regeneration_active("intro", True)
         window._step_copywriting.set_regeneration_active("detail:specs", True)

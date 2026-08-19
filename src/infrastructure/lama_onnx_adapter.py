@@ -14,7 +14,9 @@ from src.domain.inpainting import InpaintingError, InpaintingRequest, Inpainting
 
 
 LAMA_MODEL_FILENAME = "inpainting_lama_2025jan.onnx"
-LAMA_MODEL_SHA256 = "7df918ac3921d3daf0aae1d219776cf0dc4e4935f035af81841b40adcf74fdf2"
+# big-lama ONNX 导出（Carve/LaMa-ONNX 的 lama_fp32.onnx，Apache-2.0）：
+# 输入 image[N,3,512,512] / mask[N,1,512,512]，输出 0-255 量级，与 _infer 契约一致。
+LAMA_MODEL_SHA256 = "1faef5301d78db7dda502fe59966957ec4b79dd64e16f03ed96913c7a4eb68d6"
 
 
 class LamaOnnxAdapter:

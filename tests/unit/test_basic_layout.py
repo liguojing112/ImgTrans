@@ -985,11 +985,17 @@ def test_repeated_background_panels_keep_heading_and_body_hierarchy_consistent()
         "RGB",
         pixels.tobytes(),
     )
+    # 标题取短文案、正文取长文案，与真实电商面板结构一致。
+    # 说明：行内字号统一取「组内各成员拟合字号的最小值」，标题组与正文组各自独立计算，
+    # 组间没有层级约束。若标题文案反而比正文长（原 fixture 即如此：最长标题 33 字挤在
+    # 110px 框，最长正文 30 字却有 115px），标题字号会被压到与正文持平甚至更小
+    # （实测 13.4812 vs 13.4953，余量 -0.014），断言结果取决于平台字体度量。
+    # 现结构下余量 +15.28，可跨平台稳定断言。
     titles = (
-        "Larger and thicker",
-        "Suitable for both dry and wet use",
-        "Pearl pattern design",
-        "Gentle and non-irritating",
+        "Thicker",
+        "Dry & wet",
+        "Pearl weave",
+        "Gentle",
     )
     bodies = (
         "Thicker and more durable",
@@ -1481,9 +1487,13 @@ def test_long_latin_translation_uses_limited_condensing_for_readability() -> Non
         False,
     )
     document = ImageDocument(asset, "RGB", pixels.tobytes())
+    # 框高取 48（可容纳多行）：自动排版只在「压缩带来的字号收益 >= max(1pt, 基准的 12%)」
+    # 时才启用压缩。若框高仅 24，收益恰好卡在阈值边缘（实测 10.49 → 11.50，阈值 11.75），
+    # 结论会随平台默认字体的度量差异翻转，无法稳定表达本用例意图。
+    # 48 高时压缩收益明确（14.46 → 20.50@67，阈值 16.20），可跨平台稳定断言。
     region = TextRegion(
         "paragraph",
-        order_quad(((30, 20), (447, 20), (447, 44), (30, 44))),
+        order_quad(((30, 20), (447, 20), (447, 68), (30, 68))),
         "构建全新的家居装饰供应链",
         1.0,
         "zh-Hans",

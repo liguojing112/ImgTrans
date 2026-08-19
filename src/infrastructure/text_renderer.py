@@ -139,7 +139,8 @@ class QtBasicTextLayoutAdapter:
             self.reflow,
         )
         repeated_panels = _normalize_repeated_panel_rows(source, repeated_curves)
-        repeated_vertical = _normalize_repeated_vertical_labels(repeated_panels)
+        repeated_grid = _normalize_panel_grid_layers(source, repeated_panels)
+        repeated_vertical = _normalize_repeated_vertical_labels(repeated_grid)
         aligned_panels = _align_panel_title_and_body(repeated_vertical)
         normalized = _normalize_visual_group_sizes(source, aligned_panels)
         return TextLayout(
@@ -583,16 +584,24 @@ def _rgba_bytes(image: QImage, width: int, height: int) -> np.ndarray:
     return buffer[:, : width * 4].reshape(height, width, 4).copy()
 
 
+_HORIZONTAL_SNAP_DEGREES = 3.0
+
+
 def _text_box(region: TextRegion) -> TextBox:
     p0, p1, _, p3 = region.polygon
     width = hypot(p1.x - p0.x, p1.y - p0.y)
     height = hypot(p3.x - p0.x, p3.y - p0.y)
+    rotation = degrees(atan2(p1.y - p0.y, p1.x - p0.x))
+    # 检测框对水平文字常有 1~3 度的轻微歪斜（分割边界抖动所致）。原样保留会让译文
+    # 相对邻近的水平文字明显倾斜，观感上像排版错误；而真正的斜排文字角度远大于此。
+    if abs(rotation) <= _HORIZONTAL_SNAP_DEGREES:
+        rotation = 0.0
     return TextBox(
         sum(point.x for point in region.polygon) / 4,
         sum(point.y for point in region.polygon) / 4,
         max(1, width),
         max(1, height),
-        degrees(atan2(p1.y - p0.y, p1.x - p0.x)),
+        rotation,
     )
 
 
@@ -858,11 +867,19 @@ def _estimate_arc_text_path(
         (width, height),
     )
     gray = cv2.cvtColor(crop, cv2.COLOR_RGB2GRAY)
+    # 二值化极性必须跟着背景明暗走。THRESH_BINARY_INV 取「暗」像素作前景，只适用于
+    # 深字浅底；遇到白字深底会把字间的背景块当成字形，采到的基线点高低不齐，进而把
+    # 水平文字误拟合成弧线（实测深色胶囊上的白色标签被判为 ArcTextPath 而渲染成倾斜）。
+    border = np.concatenate(
+        (gray[0, :], gray[-1, :], gray[:, 0], gray[:, -1])
+    )
+    dark_background = float(np.mean(border)) < 128.0
     _, foreground = cv2.threshold(
         gray,
         0,
         255,
-        cv2.THRESH_BINARY_INV | cv2.THRESH_OTSU,
+        (cv2.THRESH_BINARY if dark_background else cv2.THRESH_BINARY_INV)
+        | cv2.THRESH_OTSU,
     )
     component_count, _, stats, centroids = cv2.connectedComponentsWithStats(
         foreground
@@ -1348,6 +1365,129 @@ def _normalize_repeated_panel_rows(
                 ),
             )
     return tuple(normalized)
+
+
+_GRID_MIN_MEMBERS = 4
+_GRID_MIN_ROWS = 2
+_GRID_MIN_COLUMNS = 2
+
+
+def _normalize_panel_grid_layers(
+    document: ImageDocument,
+    layers: tuple[TextLayer, ...],
+) -> tuple[TextLayer, ...]:
+    """把网格状重复面板里的文字统一为同一字号/压缩率。
+
+    `_normalize_repeated_panel_rows` 只处理「同一横排」的重复面板：它要求两者
+    center_y 之差不超过框高的 0.3 倍。功能卖点常排成多行多列的网格（实测 3 行 2 列
+    共 6 格），跨行的成员因此分不到同一组，字号各自按自身文案长度拟合，结果同一张图
+    里相邻格子的字号差到 27.5 与 44.5，观感明显不齐。
+
+    这里放开纵向约束，但把门槛收紧以避免误并：必须同时满足背景签名一致、文字色一致、
+    框高接近，且成员数 >= 4 并真正跨越 >= 2 行 >= 2 列——即确实是重复网格，而不是
+    恰好底色相同的散落文字。
+    """
+    if len(layers) < _GRID_MIN_MEMBERS:
+        return layers
+    signatures = tuple(_background_signature(document, layer.box) for layer in layers)
+    parents = list(range(len(layers)))
+
+    def find(index: int) -> int:
+        while parents[index] != index:
+            parents[index] = parents[parents[index]]
+            index = parents[index]
+        return index
+
+    def union(first: int, second: int) -> None:
+        first_root, second_root = find(first), find(second)
+        if first_root != second_root:
+            parents[second_root] = first_root
+
+    for first in range(len(layers)):
+        left = layers[first]
+        if left.path is not None or abs(left.box.rotation_degrees) > 3:
+            continue
+        for second in range(first + 1, len(layers)):
+            right = layers[second]
+            if right.path is not None or abs(right.box.rotation_degrees) > 3:
+                continue
+            heights = (left.box.height, right.box.height)
+            if min(heights) <= 0 or max(heights) / min(heights) > 1.15:
+                continue
+            if (
+                float(
+                    np.linalg.norm(
+                        np.asarray(left.style.fill_rgb, dtype=float)
+                        - np.asarray(right.style.fill_rgb, dtype=float)
+                    )
+                )
+                > 25
+                or float(np.linalg.norm(signatures[first][0] - signatures[second][0])) > 35
+                or abs(signatures[first][2] - signatures[second][2]) > 35
+            ):
+                continue
+            union(first, second)
+
+    groups: dict[int, list[int]] = {}
+    for index in range(len(layers)):
+        groups.setdefault(find(index), []).append(index)
+
+    normalized = list(layers)
+    for indexes in groups.values():
+        if len(indexes) < _GRID_MIN_MEMBERS:
+            continue
+        members = [layers[index] for index in indexes]
+        pitch_y = float(np.median([member.box.height for member in members]))
+        pitch_x = float(np.median([member.box.width for member in members]))
+        rows = _distinct_positions(
+            [member.box.center_y for member in members], max(1.0, pitch_y)
+        )
+        columns = _distinct_positions(
+            [member.box.center_x for member in members], max(1.0, pitch_x)
+        )
+        if rows < _GRID_MIN_ROWS or columns < _GRID_MIN_COLUMNS:
+            continue
+        common_stretch = min(member.style.font_stretch for member in members)
+        common_size = min(
+            fit_font_size(
+                6,
+                max(6, min(160, member.box.height * 0.9)),
+                lambda size, member=member: _text_fits(
+                    member, member.text, size, common_stretch
+                ),
+            )[0]
+            for member in members
+        )
+        for index in indexes:
+            candidate = replace(
+                layers[index],
+                style=replace(
+                    layers[index].style,
+                    font_size=common_size,
+                    font_stretch=common_stretch,
+                ),
+            )
+            normalized[index] = replace(
+                candidate,
+                overflow=not _text_fits(
+                    candidate, candidate.text, common_size, common_stretch
+                ),
+            )
+    return tuple(normalized)
+
+
+def _distinct_positions(values: list[float], tolerance: float) -> int:
+    """把一维坐标按容差聚成若干簇，返回簇数，用于判断是否构成多行/多列。"""
+    if not values:
+        return 0
+    ordered = sorted(values)
+    count = 1
+    anchor = ordered[0]
+    for value in ordered[1:]:
+        if value - anchor > tolerance:
+            count += 1
+            anchor = value
+    return count
 
 
 def _normalize_repeated_curved_layers(
