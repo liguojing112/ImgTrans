@@ -67,6 +67,20 @@ jobs:
       - name: Install locked product and release dependencies
         run: python -m pip install -e ".[test,server,release]"
 
+      - name: Download bundled models
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p /tmp/models
+          if ! gh release download models --pattern "bundled_models.zip" --dir /tmp/models 2>/dev/null; then
+            echo "❌ 请先上传 bundled_models.zip 到 models release"
+            exit 1
+          fi
+          rm -rf packaging/bundled_models
+          mkdir -p packaging/bundled_models
+          python -c "import zipfile; zipfile.ZipFile('/tmp/models/bundled_models.zip').extractall('packaging/bundled_models')"
+          find packaging/bundled_models -type f | wc -l
+
       - name: Run release source hardening gates
         run: python -m scripts.release_hardening check-source
 
@@ -143,6 +157,20 @@ jobs:
 
       - name: Install locked product and release dependencies
         run: python -m pip install -e ".[test,server,release]"
+
+      - name: Download bundled models
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p /tmp/models
+          if ! gh release download models --pattern "bundled_models.zip" --dir /tmp/models 2>/dev/null; then
+            echo "❌ 请先上传 bundled_models.zip 到 models release"
+            exit 1
+          fi
+          rm -rf packaging/bundled_models
+          mkdir -p packaging/bundled_models
+          python -c "import zipfile; zipfile.ZipFile('/tmp/models/bundled_models.zip').extractall('packaging/bundled_models')"
+          find packaging/bundled_models -type f | wc -l
 
       - name: Run release source hardening gates
         run: python -m scripts.release_hardening check-source
