@@ -45,9 +45,11 @@ jobs:
       - name: Create dmg
         run: |
           mkdir -p dist/installer
+          ditto dist/release-candidate/macos-arm64/ImgTrans.app /tmp/ImgTrans-staging.app
           hdiutil create -volname "优译图AI" \
-            -srcfolder dist/release-candidate/macos-arm64/ImgTrans.app \
+            -srcfolder /tmp/ImgTrans-staging.app \
             -ov -format UDZO dist/installer/ImgTrans-macos-arm64.dmg
+          rm -rf /tmp/ImgTrans-staging.app
 
       - name: Upload dmg artifact
         uses: actions/upload-artifact@v4
