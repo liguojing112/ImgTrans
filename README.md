@@ -34,6 +34,8 @@
 <img src="https://img.shields.io/badge/License-%E9%97%AD%E6%BA%90%E5%95%86%E7%94%A8-red?style=flat-square" alt="License 闭源商用">
 </p>
 
+<p><b>本仓库为完全闭源的商业软件，保留所有权利。未经书面授权，禁止复制、分发、修改或用于任何商业用途。详见 <a href="LICENSE">LICENSE</a>。</b></p>
+
 </div>
 
 ---
