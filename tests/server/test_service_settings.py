@@ -23,7 +23,7 @@ SESSION_SECRET = "test-admin-session-secret-1234567890abcdef"
 ACTIVATION_SECRET = "test-activation-secret-1234567890abcdef"
 
 WECHAT = {
-    "wechat_appid": "wx1234567890abcdef",
+    "wechat_appid": "wx-appid-for-tests-only",
     "wechat_mchid": "1900000111",
     "wechat_apiv3_key": "aA1Bb2Cc3Dd4Ee5Ff6Gg7Hh8Ii9Jj0Kk",
     "wechat_private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvQ==\n-----END PRIVATE KEY-----",
