@@ -34,3 +34,7 @@ docs/
 
 # 运行时生成的加密密钥文件（含密钥，绝不能提交）
 config/settings-key.bin
+
+# 临时模型目录与交付压缩包（体积大/非源码，不入库）
+tmp-models/
+*.zip
