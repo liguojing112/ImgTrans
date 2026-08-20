@@ -187,11 +187,36 @@ class ServerTranslationAdapter:
                 pending.append(text)
                 pending_indexes.append(index)
         if pending:
-            translated = self._llm_batch_ecommerce(pending, target_language)
-            for index, translated_text in zip(pending_indexes, translated):
-                results[index] = TranslationAdapterItem(
-                    translated_text=translated_text
+            short_pending: list[str] = []
+            short_indexes: list[int] = []
+            long_pending: list[str] = []
+            long_indexes: list[int] = []
+            for index, text in zip(pending_indexes, pending):
+                if _is_ecommerce_phrase(text):
+                    short_pending.append(text)
+                    short_indexes.append(index)
+                else:
+                    # 免责声明/长句不适合电商短词风格，走服务端直译避免错译
+                    long_pending.append(text)
+                    long_indexes.append(index)
+            if short_pending:
+                translated = self._llm_batch_ecommerce(
+                    short_pending, target_language
                 )
+                for index, translated_text in zip(
+                    short_indexes, translated
+                ):
+                    results[index] = TranslationAdapterItem(
+                        translated_text=translated_text
+                    )
+            if long_pending:
+                long_results = self._azure_translate(
+                    tuple(long_pending),
+                    None,
+                    target_language,
+                )
+                for index, item in zip(long_indexes, long_results):
+                    results[index] = item
         return tuple(
             item if item is not None else TranslationAdapterItem(
                 translated_text=text
@@ -218,6 +243,21 @@ class ServerTranslationAdapter:
             max_tokens=4096,
         )
         return _parse_llm_translations(raw, len(texts), texts)
+
+
+def _is_ecommerce_phrase(text: str) -> bool:
+    """判断文本是否适合电商短词风格翻译。
+
+    电商 LLM 提示词要求「2~5 个英文单词的短促名词短语」，只适合短的商品
+    短语（如「防臭气」「50-75管通用」）。免责声明/长句（含句号等句子标点、
+    长度较长）会被 LLM 强行压缩成无关短词，应分流到服务端直译。
+    """
+    value = text.strip()
+    if not value or len(value) > 16:
+        return False
+    if any(character in value for character in "。！？；，、:：\n"):
+        return False
+    return True
 
 
 def _parse_response(

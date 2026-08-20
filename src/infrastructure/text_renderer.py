@@ -286,12 +286,20 @@ class QtTextRenderer:
                 -1 if layer.mirror_y else 1,
             )
             painter.setFont(font)
+            padding = layer.style.box_padding
             target = QRectF(
                 -layer.box.width / (2 * horizontal_scale),
                 -layer.box.height / 2,
                 layer.box.width / horizontal_scale,
                 layer.box.height,
             )
+            if padding > 0:
+                target = target.adjusted(
+                    padding / horizontal_scale,
+                    padding,
+                    -padding / horizontal_scale,
+                    -padding,
+                )
             painter.setClipRect(target)
             if (
                 layer.style.background_rgb is not None
@@ -1960,19 +1968,22 @@ def _text_fits(
             )
             and metrics.height() * len(lines) <= layer.box.height + 0.5
         )
+    padding = layer.style.box_padding
+    usable_width = max(1.0, layer.box.width - 2 * padding)
+    usable_height = max(1.0, layer.box.height - 2 * padding)
     bounds = metrics.boundingRect(
         QRectF(
             0,
             0,
-            layer.box.width / horizontal_scale,
-            layer.box.height,
+            usable_width / horizontal_scale,
+            usable_height,
         ),
         _text_flags(layer.style, text),
         text,
     )
     return (
-        bounds.width() * horizontal_scale <= layer.box.width + 0.5
-        and bounds.height() <= layer.box.height + 0.5
+        bounds.width() * horizontal_scale <= usable_width + 0.5
+        and bounds.height() <= usable_height + 0.5
     )
 
 

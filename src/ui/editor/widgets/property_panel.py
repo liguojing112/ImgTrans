@@ -276,6 +276,11 @@ class PropertyPanel(QFrame):
         self.letter_spacing_spin.valueChanged.connect(
             lambda v: self._on_field_changed("letter_spacing", v)
         )
+        self.box_padding_spin = _dspin(0, 200, " px")
+        self.box_padding_spin.setSingleStep(1)
+        self.box_padding_spin.valueChanged.connect(
+            lambda v: self._on_field_changed("box_padding", v)
+        )
         self.text_opacity_spin = QSpinBox()
         self.text_opacity_spin.setRange(0, 100)
         self.text_opacity_spin.setSuffix("%")
@@ -387,6 +392,7 @@ class PropertyPanel(QFrame):
         form.addRow(_lbl("拉伸"), _wrap_spin(self.font_stretch_spin, label="拉伸"))
         form.addRow(_lbl("行高"), _wrap_spin(self.line_height_spin, label="行高"))
         form.addRow(_lbl("字间距"), _wrap_spin(self.letter_spacing_spin, label="字间距"))
+        form.addRow(_lbl("框内边距"), _wrap_spin(self.box_padding_spin, label="框内边距"))
         form.addRow(_lbl("文字透明度"), _wrap_spin(self.text_opacity_spin, label="文字透明度"))
         form.addRow(_lbl("背景色"), self.background_color_button)
         form.addRow(_lbl("背景透明度"), _wrap_spin(self.background_opacity_spin, label="背景透明度"))
@@ -781,6 +787,7 @@ class PropertyPanel(QFrame):
             self.shadow_opacity_spin.setValue(round(style.shadow_opacity * 100))
             self.line_height_spin.setValue(style.line_height)
             self.letter_spacing_spin.setValue(style.letter_spacing)
+            self.box_padding_spin.setValue(style.box_padding)
             self.text_opacity_spin.setValue(round(style.text_opacity * 100))
             self.background_opacity_spin.setValue(
                 round(style.background_opacity * 100)
@@ -910,8 +917,9 @@ class PropertyPanel(QFrame):
             self.circle_center_y, self.circle_radius, self.circle_start,
             self.circle_end, self.artistic_preset, self.font_stretch_spin,
             self.wrap_check, self.alignment_combo, self.vertical_alignment_combo,
-            self.line_height_spin, self.letter_spacing_spin, self.text_opacity_spin,
-            self.background_color_button, self.background_opacity_spin,
+            self.line_height_spin, self.letter_spacing_spin, self.box_padding_spin,
+            self.text_opacity_spin, self.background_color_button,
+            self.background_opacity_spin,
             self.color_button, self.stroke_width_spin, self.stroke_color_button,
             self.shadow_check, self.shadow_x_spin, self.shadow_y_spin,
             self.shadow_opacity_spin, self.shadow_color_button,
@@ -932,6 +940,7 @@ class PropertyPanel(QFrame):
             "rotation_degrees": self.rotation_spin, "font_size": self.font_size_spin,
             "font_stretch": self.font_stretch_spin, "line_height": self.line_height_spin,
             "letter_spacing": self.letter_spacing_spin,
+            "box_padding": self.box_padding_spin,
             "text_opacity": self.text_opacity_spin,
             "background_opacity": self.background_opacity_spin,
             "stroke_width": self.stroke_width_spin,
@@ -1052,8 +1061,9 @@ class PropertyPanel(QFrame):
             self.circle_center_y, self.circle_radius, self.circle_start, self.circle_end,
             self.artistic_preset,
             self.font_stretch_spin, self.wrap_check, self.alignment_combo, self.vertical_alignment_combo,
-            self.line_height_spin, self.letter_spacing_spin, self.text_opacity_spin,
-            self.background_color_button, self.background_opacity_spin,
+            self.line_height_spin, self.letter_spacing_spin, self.box_padding_spin,
+            self.text_opacity_spin, self.background_color_button,
+            self.background_opacity_spin,
             self.color_button, self.stroke_width_spin, self.stroke_color_button,
             self.shadow_check, self.shadow_x_spin, self.shadow_y_spin,
             self.shadow_opacity_spin, self.shadow_color_button,
@@ -1081,6 +1091,7 @@ class PropertyPanel(QFrame):
             self.font_stretch_spin.setValue(100)
             self.line_height_spin.setValue(1)
             self.letter_spacing_spin.setValue(0)
+            self.box_padding_spin.setValue(0)
             self.text_opacity_spin.setValue(100)
             self.background_opacity_spin.setValue(0)
             self.wrap_check.setChecked(False)

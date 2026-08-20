@@ -3,7 +3,7 @@
 ; 产物：dist/installer/ImgTrans-Setup-0.1.0.exe
 
 #define MyAppName "优译图AI 图片翻译"
-#define MyAppVersion "1.1.3"
+#define MyAppVersion "1.1.5"
 #define MyAppPublisher "ImgTrans"
 #define MyAppExeName "ImgTrans.exe"
 #define SourceDir "..\dist\release-candidate\windows-x64\ImgTrans"

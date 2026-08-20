@@ -32,10 +32,12 @@ from src.domain.layout import (
     ArtisticPreset,
     CircularTextPath,
     PathPoint,
+    TextAlignment,
     TextBox,
     TextLayer,
     TextLayout,
     TextStyle,
+    VerticalAlignment,
     default_arc_path,
 )
 from src.ui.editor.canvas.scene import EditorScene
@@ -690,6 +692,8 @@ class EditorPage(QWidget):
             self.set_document(display_document)
             if self._model.preview_mode == "layers":
                 self.scene.set_text_layout(edit_result.layout)
+            # set_document 会清空 OCR 识别框，编辑后恢复，避免识别框消失
+            self._restore_ocr_regions()
             self.layer_state_panel.set_composition(
                 edit_result.layout,
                 getattr(edit_result, "watermarks", ()),
@@ -831,6 +835,19 @@ class EditorPage(QWidget):
             self._model.selected_layer_id = region_id
         # 画布选中 → 右侧 OCR 列表同步选中对应行（不跳转标签页）
         self.ocr_result_panel.select_region(region_id)
+        # 画布点选识别框：若该区域已有文字图层，切换到图层编辑模式，
+        # 改对齐/样式立即生效（否则停留在 OCR 待应用模式，改动不生效）
+        if hasattr(self, "_model") and self._model is not None:
+            try:
+                layer = self._model.text_layout.layer_by_id(region_id)
+            except KeyError:
+                layer = None
+            if layer is not None:
+                self.property_panel.set_layer(
+                    layer,
+                    self._find_ocr_region(region_id),
+                    self._find_translation_unit(region_id),
+                )
 
     def _on_layer_dropped(self, region_id: str, box: TextBox) -> None:
         """拖动画布图层后发射 edit_requested。"""
@@ -872,6 +889,19 @@ class EditorPage(QWidget):
                 self._find_translation_unit(region_id),
                 self._ocr_property_overrides.get(region_id),
             )
+        elif has_layer:
+            # 翻译后点选识别框：该区域已有文字图层，切换到图层编辑模式
+            # （改对齐/样式立即生效），而不是停留在 OCR 待应用模式。
+            try:
+                layer = self._model.text_layout.layer_by_id(region_id)
+            except KeyError:
+                layer = None
+            if layer is not None:
+                self.property_panel.set_layer(
+                    layer,
+                    ocr_region,
+                    self._find_translation_unit(region_id),
+                )
         # OCR-only 模式直接打开属性页编辑；翻译完成后点选行不跳转标签页，
         # 由「重新翻译选中区域」按钮等显式操作才跳转到文字属性。
         has_translation = bool(
@@ -905,6 +935,20 @@ class EditorPage(QWidget):
         after = self._apply_field_change(before, field, value)
         if after is None or after == before:
             return
+        if field == "alignment":
+            alignment_value = (
+                value
+                if isinstance(value, TextAlignment)
+                else TextAlignment(str(value))
+            )
+            if alignment_value is TextAlignment.LEFT:
+                # 左对齐时把文字框左边缘对齐回 OCR 识别框左边缘：
+                # 排版归一化会把垂直堆叠的行对称扩展框宽（居中无影响），
+                # 改成左对齐后文字会从扩展框左边缘开始，跑到识别框左侧外面。
+                after = self._snap_left_alignment_box(after, region_id)
+            elif alignment_value is TextAlignment.CENTER:
+                # 改回居中时恢复自动布局的原始框，避免左对齐移动后的框残留
+                after = self._restore_original_box(after, region_id)
 
         # 分类字段组
         if field == "text":
@@ -928,6 +972,7 @@ class EditorPage(QWidget):
             "shadow_offset_y",
             "line_height",
             "letter_spacing",
+            "box_padding",
             "text_opacity",
             "background_rgb",
             "background_opacity",
@@ -940,6 +985,78 @@ class EditorPage(QWidget):
             kind = "box"
 
         self.edit_requested.emit(region_id, kind, after, before)
+
+    def _restore_ocr_regions(self) -> None:
+        """从当前 OCR 结果重建识别框（set_document 会清空 _ocr_items）。"""
+        if not hasattr(self, "_model") or self._model is None:
+            return
+        ocr_result = getattr(self._model, "ocr_result", None)
+        if ocr_result is None:
+            return
+        self.scene.set_regions(tuple(getattr(ocr_result, "regions", ())))
+        self.scene.set_regions_visible(
+            self.ocr_result_panel.show_regions.isChecked()
+        )
+
+    def _snap_left_alignment_box(
+        self, layer: TextLayer, region_id: str
+    ) -> TextLayer:
+        """左对齐时把文字框左边缘对齐回 OCR 识别框左边缘，保持框宽不变。
+
+        排版归一化会把垂直堆叠的多行对称扩展框宽（中心不变，居中渲染
+        无影响）；用户改成左对齐后，文字从扩展后的框左边缘开始，会比
+        原文识别框左边缘偏左。这里把左边缘平移回识别框左边缘（宽度
+        保持不变，中心相应移动），这样左/中/右对齐在视觉上仍有差异。
+        """
+        if (
+            layer.path is not None
+            or abs(layer.box.rotation_degrees) > 3
+            or not hasattr(self, "_model")
+            or self._model is None
+        ):
+            return layer
+        ocr = self._model.ocr_result
+        if ocr is None:
+            return layer
+        region = next(
+            (item for item in ocr.regions if item.region_id == region_id),
+            None,
+        )
+        if region is None:
+            return layer
+        xs = [point.x for point in region.polygon]
+        left_edge = min(xs)
+        width = layer.box.width
+        return replace(
+            layer,
+            box=replace(
+                layer.box,
+                center_x=left_edge + width / 2,
+                width=width,
+            ),
+        )
+
+    def _restore_original_box(
+        self, layer: TextLayer, region_id: str
+    ) -> TextLayer:
+        """改回居中时恢复自动布局的原始框（防止左对齐移动后的框残留）。"""
+        if not hasattr(self, "_model") or self._model is None:
+            return layer
+        result = self._model.translation_result
+        if result is None or not hasattr(result, "layout"):
+            return layer
+        try:
+            original = result.layout.layer_by_id(region_id)
+        except KeyError:
+            return layer
+        return replace(
+            layer,
+            box=replace(
+                layer.box,
+                center_x=original.box.center_x,
+                width=original.box.width,
+            ),
+        )
 
     def _on_ocr_property_changed(
         self, region_id: str, field: str, value: object
@@ -1071,8 +1188,20 @@ class EditorPage(QWidget):
             if weight in (400, 600, 700): style = replace(style, font_weight=weight)
             else: return None
         elif field == "wrap": style = replace(style, wrap=bool(value))
-        elif field == "alignment": style = replace(style, alignment=value)
-        elif field == "vertical_alignment": style = replace(style, vertical_alignment=value)
+        elif field == "alignment":
+            alignment = (
+                value
+                if isinstance(value, TextAlignment)
+                else TextAlignment(str(value))
+            )
+            style = replace(style, alignment=alignment)
+        elif field == "vertical_alignment":
+            vertical_alignment = (
+                value
+                if isinstance(value, VerticalAlignment)
+                else VerticalAlignment(str(value))
+            )
+            style = replace(style, vertical_alignment=vertical_alignment)
         elif field == "stroke_rgb": style = replace(style, stroke_rgb=tuple(value))
         elif field == "stroke_width": style = replace(style, stroke_width=float(value))
         elif field == "shadow_rgb": style = replace(style, shadow_rgb=tuple(value))
@@ -1085,6 +1214,7 @@ class EditorPage(QWidget):
         elif field == "font_stretch": style = replace(style, font_stretch=int(value))
         elif field == "line_height": style = replace(style, line_height=float(value))
         elif field == "letter_spacing": style = replace(style, letter_spacing=float(value))
+        elif field == "box_padding": style = replace(style, box_padding=float(value))
         elif field == "text_opacity": style = replace(style, text_opacity=float(value) / 100)
         elif field == "background_rgb": style = replace(style, background_rgb=tuple(value))
         elif field == "background_opacity": style = replace(style, background_opacity=float(value) / 100)

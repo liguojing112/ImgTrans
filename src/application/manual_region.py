@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from pathlib import Path
 from uuid import uuid4
 
 from src.application.ocr import RecognizeText
@@ -11,7 +12,7 @@ from src.application.ports import (
     TextLayoutAdapter,
 )
 from src.application.translation import TranslateRegions
-from src.domain.image import ImageDocument
+from src.domain.image import ImageAsset, ImageDocument, ImageFileFormat
 from src.domain.inpainting import InpaintingRequest
 from src.domain.manual_region import (
     ManualInputMode,
@@ -67,7 +68,9 @@ class ProcessManualRegion:
         region_language = selection.source_language or ocr_language
         if spec.mode is ManualInputMode.AUTO:
             crop = self._cropper.crop(source, spec.selection_box)
-            recognized = self._recognize.execute(crop, ocr_language)
+            recognized = self._recognize.execute(
+                _embed_crop_on_canvas(crop), ocr_language
+            )
             region_language = recognized.language_code
             source_text = " ".join(
                 region.text.strip() for region in recognized.regions if region.text.strip()
@@ -196,6 +199,41 @@ def _validate_box(document: ImageDocument, box: TextBox) -> None:
     for point in box_to_quad(box):
         if not 0 <= point.x <= document.asset.width or not 0 <= point.y <= document.asset.height:
             raise ManualRegionError("manual_box_outside", "手动区域必须位于图片范围内")
+
+
+def _embed_crop_on_canvas(
+    crop: ImageDocument,
+    minimum_size: int = 320,
+) -> ImageDocument:
+    """把框选裁剪图嵌入一个白底画布中央。
+
+    DBNet 检测器对孤立小裁剪图（文字框紧贴文字）常常检不出任何文字，
+    而同样的内容放在足够大的画布上就能正常识别。这里把裁剪子图原尺寸
+    居中放入至少 320px 的白底画布，子图不缩放，避免引入额外失真。
+    """
+    import numpy as np
+
+    height = crop.asset.height
+    width = crop.asset.width
+    canvas_size = max(minimum_size, width, height)
+    channels = 4 if crop.mode == "RGBA" else 3
+    pixels = np.frombuffer(crop.pixels, dtype=np.uint8).reshape(
+        height, width, channels
+    )
+    canvas = np.full((canvas_size, canvas_size, channels), 255, dtype=np.uint8)
+    y0 = (canvas_size - height) // 2
+    x0 = (canvas_size - width) // 2
+    canvas[y0 : y0 + height, x0 : x0 + width] = pixels
+    asset = ImageAsset(
+        Path("manual-crop-canvas.png"),
+        canvas_size,
+        canvas_size,
+        1,
+        ImageFileFormat.PNG,
+        crop.mode == "RGBA",
+        False,
+    )
+    return ImageDocument(asset, crop.mode, canvas.tobytes())
 
 
 def _contains_latin(text: str) -> bool:

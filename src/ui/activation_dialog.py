@@ -99,8 +99,9 @@ class ActivationDialog(QDialog):
         self.activate_button.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.activate_button.setFixedHeight(48)
         self.activate_button.setStyleSheet(
-            "QLabel { background: #ffffff; color: #1e293b;"
-            "  border: 2px solid #ffffff; border-radius: 8px;"
+            "QLabel { background: qlineargradient(x1:0, y1:0, x2:0, y2:1,"
+            "  stop:0 #4a8af4, stop:1 #3973db); color: #ffffff;"
+            "  border: 1px solid #5a9af4; border-radius: 8px;"
             "  font-size: 16px; font-weight: 700; }"
         )
         self.activate_button.mousePressEvent = lambda event: self.request_activation()

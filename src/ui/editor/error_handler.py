@@ -74,6 +74,14 @@ def classify_error(error: Exception) -> tuple[str, str, str]:
     if "OcrError" in type(error).__name__:
         return _ERROR_SUGGESTIONS["model_load"]
 
+    # 框选翻译相关错误
+    if error_code == "manual_ocr_empty":
+        return ("识别失败", "框选区域没有识别到文字", "请框选包含文字的区域，或确认 OCR 语言设置正确。")
+    if error_code == "manual_translation_skipped":
+        return ("翻译跳过", "该文本被语言筛选或保护规则跳过", "请直接在译文区域输入翻译结果，或调整语言/保护词设置。")
+    if error_code == "manual_layout_failed":
+        return ("渲染失败", "框选区域排版失败", "请尝试调整译文区域大小后重试。")
+
     if error_code == "unsupported_output_format":
         return _ERROR_SUGGESTIONS["export_error"]
 

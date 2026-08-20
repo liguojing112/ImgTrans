@@ -218,6 +218,7 @@ class TextStyle:
     text_opacity: float = 1.0
     background_rgb: tuple[int, int, int] | None = None
     background_opacity: float = 0.0
+    box_padding: float = 0.0
 
     def __post_init__(self) -> None:
         if not self.font_family or self.font_size <= 0:
@@ -241,6 +242,8 @@ class TextStyle:
             raise ValueError("Letter spacing must be between -10 and 50")
         if not 0 <= self.text_opacity <= 1:
             raise ValueError("Text opacity must be between zero and one")
+        if not 0 <= self.box_padding <= 200:
+            raise ValueError("Box padding must be between 0 and 200")
         if not 0 <= self.background_opacity <= 1:
             raise ValueError("Text background opacity must be between zero and one")
         if self.background_rgb is not None and (

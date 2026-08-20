@@ -1841,7 +1841,7 @@ class EditorMainWindow(QMainWindow):
             self._apply_preview_mode("original")
 
     def _on_toggle_split_compare(self) -> None:
-        if self._model.translation_result is None:
+        if not self._has_comparable_document():
             return
         enabled = not self._editor_page.is_split_view()
         if enabled:
@@ -1855,7 +1855,7 @@ class EditorMainWindow(QMainWindow):
         self._editor_page.top_bar.set_split_view(enabled)
 
     def _on_toggle_slider_compare(self) -> None:
-        if self._model.translation_result is None:
+        if not self._has_comparable_document():
             self._editor_page.top_bar.set_slider_compare(False)
             return
         enabled = not self._editor_page.is_slider_compare()
@@ -1871,7 +1871,7 @@ class EditorMainWindow(QMainWindow):
             self._apply_preview_mode(self._last_non_original_preview)
 
     def _on_compare_hold_started(self) -> None:
-        if self._model.translation_result is None:
+        if not self._has_comparable_document():
             return
         self._hold_preview_mode = self._model.preview_mode
         self._hold_slider_compare = self._editor_page.is_slider_compare()
@@ -1889,6 +1889,17 @@ class EditorMainWindow(QMainWindow):
         self._apply_preview_mode(restore_mode)
         if restore_slider:
             self._editor_page.set_slider_compare(True)
+
+    def _has_comparable_document(self) -> bool:
+        """是否有可对比的译图（原图 + 渲染结果都存在）。
+
+        框选翻译只写 rendered_document，不写 translation_result，所以对比
+        功能用「是否存在渲染结果」判断，而不是依赖完整的整图翻译结果。
+        """
+        return (
+            self._model.source_document is not None
+            and self._model.rendered_document is not None
+        )
 
     def _apply_preview_mode(self, mode: str) -> None:
         """切换原图、干净成品图和可编辑辅助层。"""
@@ -2127,9 +2138,12 @@ class EditorMainWindow(QMainWindow):
         self._model.text_layout = edit.layout
         self._model.selected_layer_id = manual.region_id
         self._editor_page.top_bar.set_has_layers(True)
+        self._editor_page.top_bar.set_has_result(True)
+        self._editor_page.manual_region_panel.clear_selection()
         self._editor_page.manual_region_dialog.accept()
         self._editor_page.toolbar.set_active_tool("select")
-        self._apply_preview_mode("translated")
+        # 进入「图层」预览模式：文字图层可点选、可改属性（与 AI 消除等编辑操作一致）
+        self._apply_preview_mode("layers")
         self.statusBar().showMessage(
             f"框选翻译完成：{manual.source_text} → {manual.translated_text}",
             7000,
@@ -2597,12 +2611,23 @@ class EditorMainWindow(QMainWindow):
         )
 
     def _on_manual_region_failed(self, error: Exception) -> None:
+        error_code = getattr(error, "code", None)
+        # OCR 识别失败时保留对话框，让用户切换到「直接输入原文」模式
+        keep_dialog = error_code in ("manual_ocr_empty",)
+        if keep_dialog:
+            self.statusBar().showMessage(
+                "框选区域未识别到文字，请切换到「直接输入原文」模式手动输入",
+                8000,
+            )
+        else:
+            self._editor_page.manual_region_panel.clear_selection()
+            self._editor_page.manual_region_dialog.accept()
+            title, message, suggestion = classify_error(error)
+            self.statusBar().showMessage(
+                f"{title}：{message}。{suggestion}",
+                8000,
+            )
         self._editor_page.toolbar.set_active_tool("select")
-        title, message, suggestion = classify_error(error)
-        self.statusBar().showMessage(
-            f"{title}：{message}。{suggestion}",
-            8000,
-        )
 
     # —— 撤销/重做（桥接 EditComposition）——
 
@@ -2677,9 +2702,13 @@ class EditorMainWindow(QMainWindow):
         elif kind == "box":
             op = lambda: editor.replace_box(region_id, after_layer.box)
         elif kind == "style":
-            op = lambda: editor.replace_style(
-                region_id, after_layer.style, after_layer.box.rotation_degrees
-            )
+            if after_layer.box != before_layer.box:
+                # 对齐调整同时移动了框（左边缘对齐 OCR），需连同框一起应用
+                op = lambda: editor.replace_layer(after_layer)
+            else:
+                op = lambda: editor.replace_style(
+                    region_id, after_layer.style, after_layer.box.rotation_degrees
+                )
         elif kind == "path":
             op = lambda: editor.replace_path(region_id, after_layer.path)
         else:

@@ -261,6 +261,15 @@ class TranslateRegions:
                 try:
                     restored = protected.restore(adapter_item.translated_text or "")
                 except ProtectionError as error:
+                    retried = self._retry_without_number_protection(
+                        region,
+                        selection,
+                        brand_terms,
+                        protected,
+                    )
+                    if retried is not None:
+                        units[index] = retried
+                        continue
                     units[index] = TranslationUnit(
                         region.region_id,
                         region.text,
@@ -349,6 +358,56 @@ class TranslateRegions:
             for position, item in zip(positions, retried, strict=True):
                 values[position] = item
         return tuple(values)
+
+    def _retry_without_number_protection(
+        self,
+        region: TextRegion,
+        selection: TranslationSelection,
+        brand_terms: tuple[str, ...],
+        protected: ProtectedText,
+    ) -> TranslationUnit | None:
+        """占位符在翻译中被破坏时，去掉数字保护重试一次。
+
+        商品参数文本（如「堵头*2」「50-75管通用」）里的数字/符号被保护成
+        ⟦N⟧ 占位符，翻译服务（LLM/Azure）不理解该符号，返回时常把它还原
+        成原文数字或直接丢弃，导致 restore 报 placeholder_damaged。若失败
+        文本恰好含数字保护，用不保护数字的方式直译一次，通常能正常翻译，
+        避免这类词直接标成「翻译失败」。
+        """
+        if not any(span.kind is ProtectionKind.NUMBER for span in protected.spans):
+            return None
+        plain = self._protection.protect(
+            region.text,
+            brand_terms,
+            preserve_numbers=False,
+        )
+        if plain.fully_protected:
+            return None
+        try:
+            items = self._adapter.translate(
+                (plain.masked,),
+                selection.source_language or region.language_code,
+                selection.target_language,
+            )
+        except Exception:
+            return None
+        if not items or items[0].error_code is not None:
+            return None
+        try:
+            restored = plain.restore(items[0].translated_text or "")
+        except ProtectionError:
+            return None
+        if not restored.strip():
+            return None
+        return TranslationUnit(
+            region.region_id,
+            region.text,
+            region.language_code,
+            selection.target_language,
+            restored,
+            TranslationStatus.TRANSLATED,
+            plain.spans,
+        )
 
     @staticmethod
     def _skipped_unit(
