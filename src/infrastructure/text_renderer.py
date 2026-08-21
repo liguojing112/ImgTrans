@@ -69,7 +69,12 @@ class QtBasicTextLayoutAdapter:
             grouped_regions = tuple(item[1] for item in group)
             unit = units[0]
             region = grouped_regions[0]
-            text = " ".join(item.translated_text for item in units)
+            if units[0].paragraph_group_id is not None:
+                # 整段合并翻译：各行共享同一段落译文，直接取整段译文，
+                # 逐行 join 会重复 N 次。
+                text = units[0].translated_text
+            else:
+                text = " ".join(item.translated_text for item in units)
             box = (
                 _paragraph_text_box(grouped_regions)
                 if len(grouped_regions) > 1
@@ -995,7 +1000,18 @@ def _translated_groups(
     )
     groups: list[list[tuple[TranslationUnit, TextRegion]]] = []
     for entry in entries:
-        if groups and _same_paragraph_line(groups[-1][-1], entry):
+        group_id = entry[0].paragraph_group_id
+        if (
+            groups
+            and group_id is not None
+            and groups[-1][-1][0].paragraph_group_id == group_id
+        ):
+            groups[-1].append(entry)
+        elif (
+            groups
+            and group_id is None
+            and _same_paragraph_line(groups[-1][-1], entry)
+        ):
             groups[-1].append(entry)
         else:
             groups.append([entry])

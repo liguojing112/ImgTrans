@@ -1681,3 +1681,141 @@ def test_unspaced_cjk_text_can_wrap_between_characters() -> None:
     flags = _text_flags(style, "复杂中文排版")
     assert flags & Qt.TextFlag.TextWordWrap
     assert flags & Qt.TextFlag.TextWrapAnywhere
+
+
+def test_paragraph_group_units_render_one_continuous_block() -> None:
+    QApplication.instance() or QApplication(["layout-paragraph-group-test"])
+    pixels = np.full((90, 480, 3), (30, 70, 150), dtype=np.uint8)
+    asset = ImageAsset(
+        Path("paragraph-group.png"),
+        480,
+        90,
+        1,
+        ImageFileFormat.PNG,
+        False,
+        False,
+    )
+    document = ImageDocument(asset, "RGB", pixels.tobytes())
+    regions = (
+        TextRegion(
+            "line-1",
+            order_quad(((30, 10), (447, 10), (447, 34), (30, 34))),
+            "根据新广告法规定所有页面不得出现绝对化用词",
+            1.0,
+            "zh-Hans",
+            "fixture",
+        ),
+        TextRegion(
+            "line-2",
+            order_quad(((30, 54), (447, 54), (447, 78), (30, 78))),
+            "我们支持新广告法为了不影响正常消费者正常购物",
+            1.0,
+            "zh-Hans",
+            "fixture",
+        ),
+    )
+    paragraph_text = (
+        "According to the new advertising law, no absolute wording is "
+        "allowed on any page."
+    )
+    translations = tuple(
+        TranslationUnit(
+            region.region_id,
+            region.text,
+            "zh-Hans",
+            "en",
+            paragraph_text,
+            TranslationStatus.TRANSLATED,
+            paragraph_group_id="paragraph-0",
+        )
+        for region in regions
+    )
+    result = TranslationResult(
+        translations,
+        TranslationSelection(TranslationMode.ALL, "en"),
+        "fixture",
+        1,
+    )
+
+    layout = QtBasicTextLayoutAdapter().layout(
+        document,
+        OcrResult(regions, "zh-Hans", "fixture", 1),
+        result,
+    )
+
+    # 行间距 20 远超几何启发式阈值，但显式段落组 ID 仍合并为一个连续块，
+    # 且文本取整段译文一次（而非逐行 join 重复两次）。
+    assert len(layout.layers) == 1
+    layer = layout.layers[0]
+    assert layer.region_id == "line-1"
+    assert layer.text == paragraph_text
+    assert layer.style.alignment is TextAlignment.LEFT
+    assert layer.box.width == 417
+    assert layer.box.height == 68
+
+
+def test_widely_spaced_lines_without_group_id_stay_separate_layers() -> None:
+    QApplication.instance() or QApplication([
+        "layout-paragraph-group-control-test"
+    ])
+    pixels = np.full((90, 480, 3), (30, 70, 150), dtype=np.uint8)
+    asset = ImageAsset(
+        Path("paragraph-group-control.png"),
+        480,
+        90,
+        1,
+        ImageFileFormat.PNG,
+        False,
+        False,
+    )
+    document = ImageDocument(asset, "RGB", pixels.tobytes())
+    regions = (
+        TextRegion(
+            "line-1",
+            order_quad(((30, 10), (447, 10), (447, 34), (30, 34))),
+            "根据新广告法规定所有页面不得出现绝对化用词",
+            1.0,
+            "zh-Hans",
+            "fixture",
+        ),
+        TextRegion(
+            "line-2",
+            order_quad(((30, 54), (447, 54), (447, 78), (30, 78))),
+            "我们支持新广告法为了不影响正常消费者正常购物",
+            1.0,
+            "zh-Hans",
+            "fixture",
+        ),
+    )
+    translations = (
+        TranslationUnit(
+            "line-1",
+            regions[0].text,
+            "zh-Hans",
+            "en",
+            "First line translation stays on its own layer.",
+            TranslationStatus.TRANSLATED,
+        ),
+        TranslationUnit(
+            "line-2",
+            regions[1].text,
+            "zh-Hans",
+            "en",
+            "Second line translation stays on its own layer.",
+            TranslationStatus.TRANSLATED,
+        ),
+    )
+    result = TranslationResult(
+        translations,
+        TranslationSelection(TranslationMode.ALL, "en"),
+        "fixture",
+        1,
+    )
+
+    layout = QtBasicTextLayoutAdapter().layout(
+        document,
+        OcrResult(regions, "zh-Hans", "fixture", 1),
+        result,
+    )
+
+    assert [layer.region_id for layer in layout.layers] == ["line-1", "line-2"]

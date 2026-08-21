@@ -671,3 +671,92 @@ def test_overflow_layer_is_not_rendered_and_original_pixels_are_restored(
     assert not any(
         unit.status is TranslationStatus.FAILED for unit in result.translation.units
     )
+
+
+class ParagraphFixtureOcrAdapter:
+    language_codes = ("zh-Hans",)
+
+    def recognize(self, document: ImageDocument, language_code: str, fast: bool = False) -> OcrResult:
+        return OcrResult(
+            (
+                TextRegion(
+                    "para-line-1",
+                    order_quad(((18, 18), (172, 18), (172, 40), (18, 40))),
+                    "根据新广告法规定所有页面不得出现绝对化用词",
+                    0.95,
+                    "zh-Hans",
+                    "fixture",
+                ),
+                TextRegion(
+                    "para-line-2",
+                    order_quad(((18, 48), (172, 48), (172, 70), (18, 70))),
+                    "我们支持新广告法为了不影响正常消费者正常购物",
+                    0.95,
+                    "zh-Hans",
+                    "fixture",
+                ),
+            ),
+            language_code,
+            "fixture",
+            1,
+        )
+
+
+class ParagraphFixtureLayoutAdapter:
+    def layout(self, source, ocr_result, translation_result) -> TextLayout:
+        return TextLayout(
+            (
+                TextLayer(
+                    "para-line-1",
+                    "Combined paragraph translation that overflows the box",
+                    TextBox(95, 44, 154, 52),
+                    TextStyle("Arial", 18, (0, 0, 0)),
+                    overflow=True,
+                ),
+            )
+        )
+
+
+def test_overflowing_paragraph_layer_is_still_rendered_when_readable() -> None:
+    QApplication.instance() or QApplication(["workflow-paragraph-overflow-test"])
+    translation_adapter = ShortTranslationAdapter()
+    repair_adapter = RecordingProtectRepairAdapter()
+    renderer = OverflowBleedingRenderer()
+    workflow = TranslateImage(
+        RecognizeText(ParagraphFixtureOcrAdapter()),
+        TranslateRegions(translation_adapter, ProtectionEngine()),
+        RepairTranslatedRegions(
+            BuildEraseMask(PillowMaskRasterizer(), expansion=2),
+            repair_adapter,
+        ),
+        ParagraphFixtureLayoutAdapter(),
+        renderer,
+    )
+    source = _document()
+    result = workflow.execute(
+        source,
+        "zh-Hans",
+        TranslationSelection(TranslationMode.ALL, "en"),
+    )
+
+    # 两行中文被合并为一次整段翻译
+    combined = (
+        "根据新广告法规定所有页面不得出现绝对化用词"
+        "我们支持新广告法为了不影响正常消费者正常购物"
+    )
+    assert translation_adapter.calls == [((combined,), None, "en")]
+    assert [unit.status for unit in result.translation.units] == [
+        TranslationStatus.TRANSLATED,
+        TranslationStatus.TRANSLATED,
+    ]
+    group_ids = [unit.paragraph_group_id for unit in result.translation.units]
+    assert group_ids[0] is not None
+    assert group_ids[0] == group_ids[1]
+
+    # 段落层 overflow=True 但自适应字号（18 >= 52/2*0.45）仍可读，
+    # 豁免“overflow 保留原文”规则，正常渲染整段译文。
+    assert renderer.received_layout is not None
+    assert [layer.region_id for layer in renderer.received_layout.layers] == [
+        "para-line-1"
+    ]
+    assert result.layout.layer_by_id("para-line-1").overflow

@@ -74,6 +74,9 @@ class TranslationUnit:
     protected_spans: tuple[ProtectedSpan, ...] = ()
     error_code: str | None = None
     error_message: str | None = None
+    # 同一段落的多行 OCR 区域共享同一 ID：整段合并翻译，布局时重排为一个
+    # 连续文本块，避免逐行独立翻译导致的断句与排版碎片化。
+    paragraph_group_id: str | None = None
 
     def __post_init__(self) -> None:
         failed = self.status is TranslationStatus.FAILED

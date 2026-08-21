@@ -108,13 +108,33 @@ class TranslateImage:
             )
             # 弧形/旋转文字（圆环、竖排、弧线）译文通常比原文长，放不下时一律
             # 渲染自适应缩小的译文，而不是恢复原文；仅普通水平文字放不下才保留
-            # 原文（避免长译文挤乱直排版面）。
+            # 原文（避免长译文挤乱直排版面）。整段合并翻译的段落层例外：段落
+            # 译文整体比原文长是常态，只要自适应字号仍可读（不小于原行高 45%）
+            # 就渲染译文，否则整段流畅译文会因膨胀回退成原文。
+            paragraph_line_counts: dict[str, int] = {}
+            paragraph_head_by_group: dict[str, str] = {}
+            for unit in translation.units:
+                group_id = unit.paragraph_group_id
+                if group_id is None:
+                    continue
+                head_id = paragraph_head_by_group.setdefault(
+                    group_id, unit.region_id
+                )
+                paragraph_line_counts[head_id] = (
+                    paragraph_line_counts.get(head_id, 0) + 1
+                )
             overflow_region_ids = frozenset(
                 layer.region_id
                 for layer in layout.layers
                 if layer.overflow
                 and layer.path is None
                 and abs(layer.box.rotation_degrees) <= 3
+                and not (
+                    layer.region_id in paragraph_line_counts
+                    and layer.style.font_size
+                    >= (layer.box.height / paragraph_line_counts[layer.region_id])
+                    * 0.45
+                )
             )
             protected_conflict_region_ids = (
                 self._repair.translated_protection_conflicts(

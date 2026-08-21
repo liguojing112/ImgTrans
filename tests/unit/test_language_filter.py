@@ -1144,3 +1144,125 @@ def test_short_cjk_text_retries_when_auto_detection_claims_target_language() -> 
     assert result.units[0].status is TranslationStatus.TRANSLATED
     assert result.units[0].translated_text == "Plug*2"
     assert [call[1] for call in adapter.calls] == [None, "zh-Hans"]
+
+
+def _cjk_line(
+    region_id: str,
+    text: str,
+    y: float,
+    x0: float = 0,
+    x1: float = 200,
+    height: float = 30,
+    confidence: float = 0.95,
+) -> TextRegion:
+    return TextRegion(
+        region_id,
+        order_quad(((x0, y), (x1, y), (x1, y + height), (x0, y + height))),
+        text,
+        confidence,
+        "zh-Hans",
+        "fixture-model",
+    )
+
+
+def test_adjacent_cjk_lines_merge_into_single_paragraph_translation() -> None:
+    adapter = _RecordingAdapter()
+    result = TranslateRegions(adapter, ProtectionEngine()).execute(
+        OcrResult(
+            (
+                _cjk_line("line-1", "根据新广告法规定所有页面不得出现绝对化用词", 0),
+                _cjk_line("line-2", "我们支持新广告法，为了不影响正常消费者购物", 50),
+                _cjk_line("line-3", "页面明显区域我们会逐步排查和完善修改", 100),
+            ),
+            "zh-Hans",
+            "fixture-model",
+            1,
+        ),
+        TranslationSelection(TranslationMode.ALL, "en"),
+    )
+    joined = (
+        "根据新广告法规定所有页面不得出现绝对化用词"
+        "我们支持新广告法，为了不影响正常消费者购物"
+        "页面明显区域我们会逐步排查和完善修改"
+    )
+    assert [texts for texts, _, _ in adapter.calls] == [(joined,)]
+    assert [unit.region_id for unit in result.units] == [
+        "line-1",
+        "line-2",
+        "line-3",
+    ]
+    assert all(unit.status is TranslationStatus.TRANSLATED for unit in result.units)
+    assert [unit.source_text for unit in result.units] == [
+        "根据新广告法规定所有页面不得出现绝对化用词",
+        "我们支持新广告法，为了不影响正常消费者购物",
+        "页面明显区域我们会逐步排查和完善修改",
+    ]
+    assert all(
+        unit.translated_text == f"translated:{joined}" for unit in result.units
+    )
+    group_ids = {unit.paragraph_group_id for unit in result.units}
+    assert len(group_ids) == 1
+    assert next(iter(group_ids)) is not None
+
+
+def test_widely_spaced_cjk_lines_stay_separate_translations() -> None:
+    adapter = _RecordingAdapter()
+    result = TranslateRegions(adapter, ProtectionEngine()).execute(
+        OcrResult(
+            (
+                _cjk_line("line-1", "根据新广告法规定所有页面不得出现绝对化用词", 0),
+                _cjk_line("line-2", "我们支持新广告法，为了不影响正常消费者购物", 100),
+            ),
+            "zh-Hans",
+            "fixture-model",
+            1,
+        ),
+        TranslationSelection(TranslationMode.ALL, "en"),
+    )
+    assert len(adapter.calls) == 1
+    assert len(adapter.calls[0][0]) == 2
+    assert all(unit.paragraph_group_id is None for unit in result.units)
+
+
+def test_left_misaligned_cjk_lines_stay_separate_translations() -> None:
+    adapter = _RecordingAdapter()
+    result = TranslateRegions(adapter, ProtectionEngine()).execute(
+        OcrResult(
+            (
+                _cjk_line(
+                    "line-1", "根据新广告法规定所有页面不得出现绝对化用词", 0, x0=0
+                ),
+                _cjk_line(
+                    "line-2", "我们支持新广告法，为了不影响正常消费者购物", 50, x0=100
+                ),
+            ),
+            "zh-Hans",
+            "fixture-model",
+            1,
+        ),
+        TranslationSelection(TranslationMode.ALL, "en"),
+    )
+    assert len(adapter.calls) == 1
+    assert len(adapter.calls[0][0]) == 2
+    assert all(unit.paragraph_group_id is None for unit in result.units)
+
+
+def test_latin_lines_keep_per_line_translation_even_when_adjacent() -> None:
+    adapter = _RecordingAdapter()
+    result = TranslateRegions(adapter, ProtectionEngine()).execute(
+        OcrResult(
+            (
+                _region("line-1", "According to the new advertising law", "en", 0),
+                _region(
+                    "line-2", "all pages must not contain absolute words", "en", 50
+                ),
+            ),
+            "en",
+            "fixture-model",
+            1,
+        ),
+        TranslationSelection(TranslationMode.ALL, "zh-Hans"),
+    )
+    assert len(adapter.calls) == 1
+    assert len(adapter.calls[0][0]) == 2
+    assert all(unit.paragraph_group_id is None for unit in result.units)

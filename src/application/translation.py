@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from difflib import SequenceMatcher
 from math import atan2, degrees, hypot
 from time import perf_counter
@@ -79,6 +79,7 @@ class TranslateRegions:
         started = perf_counter()
         units: list[TranslationUnit | None] = [None] * len(ocr_result.regions)
         prepared: list[tuple[int, TextRegion, ProtectedText]] = []
+        prepared_info: dict[int, tuple[TextRegion, ProtectedText]] = {}
         repeated_review_candidates: list[
             tuple[int, TextRegion, ProtectedText]
         ] = []
@@ -203,6 +204,16 @@ class TranslateRegions:
                 )
                 continue
             prepared.append((index, region, protected))
+            prepared_info[index] = (region, protected)
+        prepared, paragraph_members = self._combine_paragraph_groups(
+            ocr_result,
+            prepared,
+            prepared_info,
+            selection,
+            brand_terms,
+            preserve_numbers,
+            units,
+        )
         if prepared:
             source_language = selection.source_language
             try:
@@ -231,32 +242,39 @@ class TranslateRegions:
             for (index, region, protected), adapter_item in zip(
                 prepared, translated, strict=True
             ):
+                members = paragraph_members.get(index) or ((index, None),)
                 detected_source = (
                     adapter_item.source_language or region.language_code
                 )
                 if adapter_item.error_code is not None:
-                    units[index] = TranslationUnit(
-                        region.region_id,
-                        region.text,
-                        detected_source,
-                        selection.target_language,
-                        region.text,
-                        TranslationStatus.FAILED,
-                        protected.spans,
-                        adapter_item.error_code,
-                        adapter_item.error_message,
-                    )
+                    for member_index, group_id in members:
+                        member_region, member_protected = prepared_info[member_index]
+                        units[member_index] = TranslationUnit(
+                            member_region.region_id,
+                            member_region.text,
+                            detected_source,
+                            selection.target_language,
+                            member_region.text,
+                            TranslationStatus.FAILED,
+                            member_protected.spans,
+                            adapter_item.error_code,
+                            adapter_item.error_message,
+                            group_id,
+                        )
                     continue
                 if (
                     selection.source_language is None
                     and detected_source == selection.target_language
                 ):
-                    units[index] = self._skipped_unit(
-                        region,
-                        selection.target_language,
-                        TranslationStatus.SKIPPED_LANGUAGE,
-                        detected_source,
-                    )
+                    for member_index, group_id in members:
+                        member_region = prepared_info[member_index][0]
+                        units[member_index] = self._skipped_unit(
+                            member_region,
+                            selection.target_language,
+                            TranslationStatus.SKIPPED_LANGUAGE,
+                            detected_source,
+                            group_id,
+                        )
                     continue
                 try:
                     restored = protected.restore(adapter_item.translated_text or "")
@@ -268,19 +286,35 @@ class TranslateRegions:
                         protected,
                     )
                     if retried is not None:
-                        units[index] = retried
+                        for member_index, group_id in members:
+                            member_region, member_protected = prepared_info[
+                                member_index
+                            ]
+                            units[member_index] = TranslationUnit(
+                                member_region.region_id,
+                                member_region.text,
+                                retried.source_language,
+                                selection.target_language,
+                                retried.translated_text,
+                                TranslationStatus.TRANSLATED,
+                                member_protected.spans,
+                                paragraph_group_id=group_id,
+                            )
                         continue
-                    units[index] = TranslationUnit(
-                        region.region_id,
-                        region.text,
-                        detected_source,
-                        selection.target_language,
-                        region.text,
-                        TranslationStatus.FAILED,
-                        protected.spans,
-                        "placeholder_damaged",
-                        str(error),
-                    )
+                    for member_index, group_id in members:
+                        member_region, member_protected = prepared_info[member_index]
+                        units[member_index] = TranslationUnit(
+                            member_region.region_id,
+                            member_region.text,
+                            detected_source,
+                            selection.target_language,
+                            member_region.text,
+                            TranslationStatus.FAILED,
+                            member_protected.spans,
+                            "placeholder_damaged",
+                            str(error),
+                            group_id,
+                        )
                     continue
                 if (
                     ocr_result.mode is OcrMode.HIGH_RECALL
@@ -295,15 +329,18 @@ class TranslateRegions:
                         (index, region, protected)
                     )
                     continue
-                units[index] = TranslationUnit(
-                    region.region_id,
-                    region.text,
-                    detected_source,
-                    selection.target_language,
-                    restored,
-                    TranslationStatus.TRANSLATED,
-                    protected.spans,
-                )
+                for member_index, group_id in members:
+                    member_region, member_protected = prepared_info[member_index]
+                    units[member_index] = TranslationUnit(
+                        member_region.region_id,
+                        member_region.text,
+                        detected_source,
+                        selection.target_language,
+                        restored,
+                        TranslationStatus.TRANSLATED,
+                        member_protected.spans,
+                        paragraph_group_id=group_id,
+                    )
         _recover_repeated_high_recall_regions(
             ocr_result,
             selection,
@@ -415,6 +452,7 @@ class TranslateRegions:
         target_language: str,
         status: TranslationStatus,
         source_language: str | None = None,
+        paragraph_group_id: str | None = None,
     ) -> TranslationUnit:
         return TranslationUnit(
             region.region_id,
@@ -423,7 +461,115 @@ class TranslateRegions:
             target_language,
             region.text,
             status,
+            paragraph_group_id=paragraph_group_id,
         )
+
+    def _combine_paragraph_groups(
+        self,
+        ocr_result: OcrResult,
+        prepared: list[tuple[int, TextRegion, ProtectedText]],
+        prepared_info: dict[int, tuple[TextRegion, ProtectedText]],
+        selection: TranslationSelection,
+        brand_terms: tuple[str, ...],
+        preserve_numbers: bool,
+        units: list[TranslationUnit | None],
+    ) -> tuple[
+        list[tuple[int, TextRegion, ProtectedText]],
+        dict[int, tuple[tuple[int, str], ...]],
+    ]:
+        """把同一自然段的相邻文本行合并为一个整段翻译条目。
+
+        逐行独立翻译会把句子从中间切断（如「…我」「们支持…」），译文质量差
+        且各行译文长度伸缩导致排版碎片化。合并后整段一次翻译，布局阶段再按
+        段落并集框重排为连续文本块。
+
+        返回新的 prepared 列表（合并条目占据首行位置）以及
+        「首行索引 → ((成员行索引, 段落ID), …)」映射。
+        """
+        if ocr_result.mode is not OcrMode.STANDARD or len(prepared) < 2:
+            return prepared, {}
+        groups: list[tuple[int, ...]] = []
+        current: list[int] = []
+        for index, _, _ in prepared:
+            if current and _lines_form_paragraph(
+                ocr_result.regions[current[-1]],
+                ocr_result.regions[index],
+            ):
+                current.append(index)
+            else:
+                if len(current) >= 2:
+                    groups.append(tuple(current))
+                current = [index]
+        if len(current) >= 2:
+            groups.append(tuple(current))
+        if not groups:
+            return prepared, {}
+
+        member_indexes: set[int] = set()
+        head_to_group: dict[int, tuple[int, ...]] = {}
+        for group in groups:
+            head_to_group[group[0]] = group
+            member_indexes.update(group[1:])
+
+        rebuilt: list[tuple[int, TextRegion, ProtectedText]] = []
+        combined: dict[int, tuple[tuple[int, str], ...]] = {}
+        for index, region, protected in prepared:
+            group = head_to_group.get(index)
+            if group is None:
+                if index in member_indexes:
+                    continue
+                rebuilt.append((index, region, protected))
+                continue
+            group_id = f"paragraph-{index}"
+            members: list[tuple[int, str]] = []
+            texts: list[str] = []
+            for member_index in group:
+                members.append((member_index, group_id))
+                texts.append(prepared_info[member_index][0].text)
+            combined_text = join_paragraph_text(tuple(texts))
+            combined_protected = self._protection.protect(
+                combined_text,
+                brand_terms,
+                preserve_numbers,
+            )
+            if combined_protected.fully_protected:
+                for member_index, _group_id in members:
+                    member_region, member_protected = prepared_info[member_index]
+                    units[member_index] = TranslationUnit(
+                        member_region.region_id,
+                        member_region.text,
+                        member_region.language_code,
+                        selection.target_language,
+                        member_region.text,
+                        TranslationStatus.SKIPPED_PROTECTED,
+                        member_protected.spans,
+                        paragraph_group_id=group_id,
+                    )
+                continue
+            head_language = prepared_info[index][0].language_code
+            terminology_text = self._terminology_catalog.lookup(
+                selection.source_language or head_language,
+                selection.target_language,
+                combined_text,
+            )
+            if terminology_text is not None:
+                for member_index, _group_id in members:
+                    member_region, member_protected = prepared_info[member_index]
+                    units[member_index] = TranslationUnit(
+                        member_region.region_id,
+                        member_region.text,
+                        selection.source_language or head_language,
+                        selection.target_language,
+                        terminology_text,
+                        TranslationStatus.TRANSLATED,
+                        member_protected.spans,
+                        paragraph_group_id=group_id,
+                    )
+                continue
+            synthetic = replace(prepared_info[index][0], text=combined_text)
+            combined[index] = tuple(members)
+            rebuilt.append((index, synthetic, combined_protected))
+        return rebuilt, combined
 
 
 def _obvious_script_language(text: str, fallback: str) -> str | None:
@@ -912,3 +1058,89 @@ def _region_geometry(region: TextRegion) -> tuple[float, float, float]:
     while angle < -90:
         angle += 180
     return width, height, angle
+
+
+@dataclass(frozen=True, slots=True)
+class _RegionBox:
+    left: float
+    right: float
+    top: float
+    bottom: float
+    angle: float
+
+    @property
+    def width(self) -> float:
+        return max(self.right - self.left, 0.01)
+
+    @property
+    def height(self) -> float:
+        return max(self.bottom - self.top, 0.01)
+
+
+def _region_box(region: TextRegion) -> _RegionBox:
+    xs = tuple(point.x for point in region.polygon)
+    ys = tuple(point.y for point in region.polygon)
+    first, second = region.polygon[0], region.polygon[1]
+    angle = degrees(atan2(second.y - first.y, second.x - first.x))
+    while angle > 90:
+        angle -= 180
+    while angle < -90:
+        angle += 180
+    return _RegionBox(min(xs), max(xs), min(ys), max(ys), angle)
+
+
+def _contains_cjk_text(text: str) -> bool:
+    return any(_is_cjk_char(character) for character in text)
+
+
+def _is_cjk_char(character: str) -> bool:
+    return (
+        "\u3400" <= character <= "\u9fff"
+        or "\uf900" <= character <= "\ufaff"
+    ) if character else False
+
+
+def join_paragraph_text(texts: tuple[str, ...]) -> str:
+    """拼接段落各行原文；相邻行之间仅在两侧都不是 CJK 时补空格。"""
+    parts: list[str] = []
+    for position, text in enumerate(texts):
+        if (
+            position
+            and not _is_cjk_char(texts[position - 1][-1:])
+            and not _is_cjk_char(text[:1])
+        ):
+            parts.append(" ")
+        parts.append(text)
+    return "".join(parts)
+
+
+def _lines_form_paragraph(first: TextRegion, second: TextRegion) -> bool:
+    """判断上下相邻两行是否属于同一自然段（字号相近、左缘对齐、行距合理、水平重叠）。"""
+    if (
+        not _contains_cjk_text(first.text)
+        or not _contains_cjk_text(second.text)
+        or len(first.text.strip()) < 6
+        or len(second.text.strip()) < 6
+    ):
+        return False
+    first_box = _region_box(first)
+    second_box = _region_box(second)
+    max_height = max(first_box.height, second_box.height)
+    min_height = min(first_box.height, second_box.height)
+    if (
+        abs(first_box.angle) > 3
+        or abs(second_box.angle) > 3
+        or max_height > min_height * 1.35
+    ):
+        return False
+    gap = second_box.top - first_box.bottom
+    overlap = (
+        min(first_box.right, second_box.right)
+        - max(first_box.left, second_box.left)
+    )
+    return (
+        gap >= -0.25 * min_height
+        and gap <= 0.8 * max_height
+        and abs(first_box.left - second_box.left) <= 0.35 * max_height
+        and overlap >= 0.5 * min(first_box.width, second_box.width)
+    )
