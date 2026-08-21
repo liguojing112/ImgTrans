@@ -2012,6 +2012,13 @@ QLineEdit#brandTerms, QTreeWidget#ocrResults, QTreeWidget#translationResults {
     border-radius: 6px;
     padding: 6px;
 }
+/* 按键区用浅绿色：白色与面板背景重叠，下拉入口不可辨 */
+QComboBox::drop-down {
+    border: none;
+    background: #bbf7d0;
+    border-radius: 0 6px 6px 0;
+    width: 20px;
+}
 /* === 功能按钮统一：蓝色渐变 primary，禁用灰色，与提示文案区分 === */
 QPushButton {
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,

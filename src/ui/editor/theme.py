@@ -231,9 +231,10 @@ QDoubleSpinBox:focus, QSpinBox:focus, QComboBox:focus, QPlainTextEdit:focus,
 QLineEdit:focus {
     border-color: #3973db;
 }
+/* 按键区用浅绿色：白色与面板背景重叠，下拉入口不可辨 */
 QComboBox::drop-down {
     border: none;
-    background: #ffffff;
+    background: #bbf7d0;
     border-radius: 0 6px 6px 0;
     width: 20px;
 }

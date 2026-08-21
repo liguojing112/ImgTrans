@@ -18,20 +18,65 @@ _MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 TokenSource = str | Callable[[], str | None]
 
 
-_DEFAULT_ECOMMERCE_PROMPT = (
-    "请将以下中文商品图片文字翻译成美国电商图片风格的英文。\n"
+_LANGUAGE_NAMES = {
+    "en": "英文",
+    "zh": "中文",
+    "ru": "俄语",
+    "ja": "日语",
+    "ko": "韩语",
+    "th": "泰语",
+    "ar": "阿拉伯文",
+    "de": "德语",
+    "fr": "法语",
+    "es": "西班牙语",
+    "pt": "葡萄牙语",
+    "it": "意大利语",
+    "vi": "越南语",
+    "id": "印尼语",
+    "ms": "马来语",
+    "hi": "印地语",
+    "tr": "土耳其语",
+    "uk": "乌克兰语",
+    "pl": "波兰语",
+    "nl": "荷兰语",
+    "cs": "捷克语",
+}
+
+# 模板占位符：{target} 目标语言名，{english_style}/{examples} 仅英语目标时注入
+_DEFAULT_ECOMMERCE_PROMPT_TEMPLATE = (
+    "请将以下中文商品图片文字翻译成{target}电商图片风格的{target}。\n"
     "要求：\n"
     "1. 保留商品含义\n"
-    "2. 不直译中文，用美国电商图片标题风格：短促名词短语、标题式大写"
-    "（Title Case）、营销语调。少用机械的直译，例如用 No Additives 而"
-    "不是 Additive-free，用 Dry & Wet Use 而不是 For dry & wet use；"
-    "其它示例：零添加→No Additives，柔软细腻→Soft & Smooth，"
-    "干湿两用→Dry & Wet Use\n"
-    "3. 简洁，适合图片上的短文本，尽量简短，每条控制在 2~5 个英文单词，"
+    "2. 不直译，用{target}电商图片标题风格：短促名词短语{english_style}、"
+    "营销语调。少用机械的直译{examples}\n"
+    "3. 简洁，适合图片上的短文本，尽量简短，每条控制在 2~5 个单词，"
     "不要超过 8 个单词\n"
-    "4. 严格按编号逐行输出，每行格式：编号. 译文（例如：1. Soft & Smooth），"
-    "编号与输入一一对应，不要输出任何编号以外的说明"
+    "4. 严格按编号逐行输出，每行格式：编号. 译文，编号与输入一一对应，"
+    "不要输出任何编号以外的说明"
 )
+
+
+def _ecommerce_prompt_for(target_language: str) -> str:
+    """按目标语言生成电商翻译提示词。
+
+    默认提示词必须随目标语言变化——此前写死「翻译成英文」，选俄语等
+    语言时 LLM 仍被要求输出英语，译文全是英文。
+    """
+    target = _LANGUAGE_NAMES.get(target_language, target_language or "目标语言")
+    if target_language == "en":
+        return _DEFAULT_ECOMMERCE_PROMPT_TEMPLATE.format(
+            target="英文",
+            english_style="、标题式大写（Title Case）",
+            examples="，例如用 No Additives 而不是 Additive-free，"
+            "用 Dry & Wet Use 而不是 For dry & wet use；其它示例："
+            "零添加→No Additives，柔软细腻→Soft & Smooth，"
+            "干湿两用→Dry & Wet Use",
+        )
+    return _DEFAULT_ECOMMERCE_PROMPT_TEMPLATE.format(
+        target=target,
+        english_style="",
+        examples="",
+    )
 
 
 class ServerTranslationAdapter:
@@ -236,7 +281,7 @@ class ServerTranslationAdapter:
             f"{index + 1}. {text}" for index, text in enumerate(texts)
         )
         prompt = (
-            self._ecommerce_prompt or _DEFAULT_ECOMMERCE_PROMPT
+            self._ecommerce_prompt or _ecommerce_prompt_for(target_language)
         )
         raw = self._llm.chat(
             [{"role": "user", "content": f"{prompt}\n\n待翻译：\n{items_text}"}],

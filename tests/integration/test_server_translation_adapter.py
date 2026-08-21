@@ -362,3 +362,67 @@ def test_server_detection_filters_mixed_language_regions_after_ocr(monkeypatch) 
     assert result.units[1].status is TranslationStatus.SKIPPED_LANGUAGE
     assert result.units[1].translated_text == "Existing English"
     assert not result.units[1].should_erase_source
+
+
+def test_ecommerce_prompt_embeds_target_language() -> None:
+    """目标语言非英语时，提示词必须指向目标语言而非写死英文。"""
+    captured = {}
+
+    class _LLM:
+        def chat(self, messages, max_tokens=None):
+            del max_tokens
+            captured["prompt"] = messages[0]["content"]
+            return "1. Новинка"
+
+    adapter = ServerTranslationAdapter(
+        "https://imgtrans.example.test",
+        "fixture-client-token-123456",
+        llm_adapter=_LLM(),
+        ecommerce=True,
+    )
+    result = adapter.translate(("新品上市",), None, "ru")
+    assert result[0].translated_text == "Новинка"
+    assert "俄语" in captured["prompt"]
+    assert "英文" not in captured["prompt"]
+    assert "2~5 个单词" in captured["prompt"]
+
+
+def test_ecommerce_prompt_english_keeps_title_case_style() -> None:
+    """英语目标时保留美国电商标题风格（Title Case 示例）。"""
+    captured = {}
+
+    class _LLM:
+        def chat(self, messages, max_tokens=None):
+            del max_tokens
+            captured["prompt"] = messages[0]["content"]
+            return "1. Soft & Smooth"
+
+    adapter = ServerTranslationAdapter(
+        "https://imgtrans.example.test",
+        "fixture-client-token-123456",
+        llm_adapter=_LLM(),
+        ecommerce=True,
+    )
+    adapter.translate(("新品上市",), None, "en")
+    assert "Title Case" in captured["prompt"]
+    assert "Soft & Smooth" in captured["prompt"]
+    assert "英文" in captured["prompt"]
+
+
+def test_ecommerce_prompt_unknown_language_falls_back_to_code() -> None:
+    captured = {}
+
+    class _LLM:
+        def chat(self, messages, max_tokens=None):
+            del max_tokens
+            captured["prompt"] = messages[0]["content"]
+            return "1. Translation"
+
+    adapter = ServerTranslationAdapter(
+        "https://imgtrans.example.test",
+        "fixture-client-token-123456",
+        llm_adapter=_LLM(),
+        ecommerce=True,
+    )
+    adapter.translate(("新品上市",), None, "xx")
+    assert "xx" in captured["prompt"]

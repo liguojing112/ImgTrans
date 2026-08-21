@@ -10,7 +10,7 @@ from math import atan2, degrees, hypot
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtGui import QAction, QDragEnterEvent, QDropEvent, QUndoStack
+from PySide6.QtGui import QAction, QDragEnterEvent, QDropEvent, QShowEvent, QUndoStack
 from PySide6.QtWidgets import (
     QFileDialog,
     QMainWindow,
@@ -27,12 +27,13 @@ from src.application.batch_export import (
     BatchWatermarkOptions,
     ExportBatchSelection,
 )
+from src.application.translation import join_paragraph_text
 from src.application.translate_image import TranslateImage, TranslateImageResult
 from src.domain.image import ImageDocument
 from src.domain.image import ImageLimits
 from src.domain.language import SUPPORTED_LANGUAGE_CODES
 from src.domain.job import ImageStage
-from src.domain.batch import BatchSnapshot, BatchStatus
+from src.domain.batch import BatchItemStatus, BatchSnapshot, BatchStatus
 from src.domain.inpainting import EraseMask, InpaintingResult
 from src.domain.composition import ImageTransform
 from src.domain.layout import CircularTextPath, TextBox, TextLayout, TextStyle
@@ -157,6 +158,7 @@ class EditorMainWindow(QMainWindow):
         self._activation_dialog = None
         self._product_window_instance: object | None = None
         self._quick_save_path: Path | None = None
+        self._splitter_sized = False
         self._source_undo: list[ImageDocument] = []
         self._source_redo: list[ImageDocument] = []
         self._last_non_original_preview = "translated"
@@ -435,6 +437,22 @@ class EditorMainWindow(QMainWindow):
     def _release_activation_dialog(self, dialog) -> None:
         if self._activation_dialog is dialog:
             self._activation_dialog = None
+
+    def showEvent(self, event: QShowEvent) -> None:
+        super().showEvent(event)
+        if self._splitter_sized:
+            return
+        self._splitter_sized = True
+        # 构造期的 setSizes([0, 820, 380]) 在 show 前总宽超出实际可用宽度，
+        # QSplitter 会均分重排，右侧面板被 380 最小宽度撑出分配区、向左覆盖
+        # 画布（属性面板标签列被遮挡，需手动拖分隔条恢复）。show 后按实际
+        # 宽度重新分配。
+        QTimer.singleShot(
+            0,
+            lambda: self._editor_page.set_split_view(
+                self._editor_page.is_split_view()
+            ),
+        )
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:
         urls = event.mimeData().urls()
@@ -1082,7 +1100,11 @@ class EditorMainWindow(QMainWindow):
     # —— 批量图片进入工作台 ——
 
     def _on_send_batch_to_editor(self) -> None:
-        """将批量面板中的图片逐张送入工作台编辑（无需先翻译）。"""
+        """将批量面板中的图片逐张送入工作台编辑。
+
+        批量翻译已完成的图片送入译文成品（原图保留为对比图）；
+        未翻译或失败的图片送入原图。
+        """
         batch = self._editor_page.batch_panel
         sources = batch.sources
         if not sources:
@@ -1095,6 +1117,16 @@ class EditorMainWindow(QMainWindow):
         if self._task_runner is None:
             return
 
+        result_refs: dict[Path, str] = {}
+        snapshot = self._batch_snapshot
+        if snapshot is not None and self._batch_result_store is not None:
+            for item in snapshot.items:
+                if (
+                    item.status is BatchItemStatus.COMPLETED
+                    and item.result_ref is not None
+                ):
+                    result_refs[item.source] = item.result_ref
+
         self.statusBar().showMessage(
             f"正在加载 {len(sources)} 张图片到工作台...")
 
@@ -1103,7 +1135,16 @@ class EditorMainWindow(QMainWindow):
             for source in sources:
                 try:
                     doc = self._import_usecase.execute(source)
-                    loaded.append((source, doc))
+                    rendered = None
+                    result_ref = result_refs.get(source)
+                    if result_ref is not None:
+                        try:
+                            rendered = self._batch_result_store.load(result_ref)
+                        except Exception as exc:
+                            print(
+                                f"[BatchToEditor] 加载译文失败 {source.name}: {exc}"
+                            )
+                    loaded.append((source, doc, rendered))
                 except Exception as exc:
                     print(f"[BatchToEditor] 加载失败 {source.name}: {exc}")
             return loaded
@@ -1113,12 +1154,17 @@ class EditorMainWindow(QMainWindow):
                 from PySide6.QtWidgets import QMessageBox
                 QMessageBox.warning(self, "发送到工作台", "图片加载失败，请检查文件。")
                 return
-            for source, doc in loaded:
-                self._model.add_document(source, doc, name=source.name)
+            for source, doc, rendered in loaded:
+                self._model.add_document(
+                    source, doc, name=source.name, rendered_document=rendered
+                )
             # 切换到第一张
             first = self._model.documents()[0].doc_id
             self._model.set_active_document(first)
             self._load_active_document()
+            active = self._model.active_document()
+            if active is not None and active.rendered_document is not None:
+                self._editor_page.top_bar.set_has_result(True)
             self._editor_page.batch_dialog.hide()
             self.statusBar().showMessage(
                 f"已发送 {len(loaded)} 张图片到工作台，可点击左侧列表切换编辑")
@@ -3235,6 +3281,27 @@ class EditorMainWindow(QMainWindow):
         self.statusBar().showMessage("正在应用译文…")
         self._on_edit(region_id, "text", replace(layer, text=text), layer)
 
+    def _paragraph_group_for_region(self, region_id: str) -> tuple[str, ...] | None:
+        """返回与给定区域共享同一段落译文的行区域 ID（阅读顺序）；非段落返回 None。"""
+        result = self._model.translation_result
+        if not isinstance(result, TranslateImageResult):
+            return None
+        group_id = next(
+            (
+                unit.paragraph_group_id
+                for unit in result.translation.units
+                if unit.region_id == region_id and unit.paragraph_group_id is not None
+            ),
+            None,
+        )
+        if group_id is None:
+            return None
+        return tuple(
+            unit.region_id
+            for unit in result.translation.units
+            if unit.paragraph_group_id == group_id
+        )
+
     def _on_retranslate_region(self, region_id: str) -> None:
         if (
             self._manual_translation_adapter is None
@@ -3256,7 +3323,24 @@ class EditorMainWindow(QMainWindow):
         target = self._editor_page.property_panel.selected_retranslate_target()
         editor = self._model.composition_editor
         adapter = self._manual_translation_adapter
-        source_text = region.text.strip()
+        group = self._paragraph_group_for_region(region_id)
+        if group is not None:
+            # 段落内某行：整段重译并替换首行图层，只译单行会打断段落排版。
+            layer_id = group[0]
+            group_regions = tuple(
+                item
+                for item in (
+                    self._find_ocr_region(group_region_id)
+                    for group_region_id in group
+                )
+                if item is not None
+            )
+            source_text = join_paragraph_text(
+                tuple(item.text for item in group_regions)
+            )
+        else:
+            layer_id = region_id
+            source_text = region.text.strip()
 
         def operation():
             result = adapter.translate(
@@ -3275,7 +3359,7 @@ class EditorMainWindow(QMainWindow):
             if not isinstance(translated, str) or not translated.strip():
                 raise RuntimeError("翻译服务返回了空译文")
             # 直接替换译文文字渲染：背景已干净，无需擦除修复，避免灰色修补痕迹
-            edit = editor.replace_text(region_id, translated.strip())
+            edit = editor.replace_text(layer_id, translated.strip())
             return translated.strip(), edit, target
 
         self.statusBar().showMessage("正在重新翻译选中区域…")
@@ -3292,20 +3376,33 @@ class EditorMainWindow(QMainWindow):
         result = self._model.translation_result
         region = self._find_ocr_region(region_id)
         if isinstance(result, TranslateImageResult) and region is not None:
-            replacement = TranslationUnit(
-                region_id,
-                region.text,
-                region.language_code,
-                target,
-                translated,
-                TranslationStatus.TRANSLATED,
-            )
+            group = self._paragraph_group_for_region(region_id) or (region_id,)
+            group_ids = set(group)
             units = tuple(
-                replacement if unit.region_id == region_id else unit
+                replace(
+                    unit,
+                    translated_text=translated,
+                    target_language=target,
+                    status=TranslationStatus.TRANSLATED,
+                    error_code=None,
+                    error_message=None,
+                )
+                if unit.region_id in group_ids
+                else unit
                 for unit in result.translation.units
             )
             if all(unit.region_id != region_id for unit in result.translation.units):
-                units = (*units, replacement)
+                units = (
+                    *units,
+                    TranslationUnit(
+                        region_id,
+                        region.text,
+                        region.language_code,
+                        target,
+                        translated,
+                        TranslationStatus.TRANSLATED,
+                    ),
+                )
             result = replace(
                 result,
                 document=edit.document,
@@ -3320,7 +3417,8 @@ class EditorMainWindow(QMainWindow):
         self._apply_preview_mode("translated")
         self._sync_history_actions(edit.can_undo, edit.can_redo)
         self._model.text_layout = edit.layout
-        self._model.selected_layer_id = region_id
+        group = self._paragraph_group_for_region(region_id)
+        self._model.selected_layer_id = group[0] if group else region_id
         self.statusBar().showMessage("选中区域已重新翻译")
 
     def _on_keep_original_region(self, region_id: str) -> None:
@@ -3336,15 +3434,27 @@ class EditorMainWindow(QMainWindow):
         if region is None:
             return
         source = self._model.source_document
+        # 段落内某行：恢复整段原文并移除段落图层（首行），避免残留译文块。
+        group = self._paragraph_group_for_region(region_id)
+        group_region_ids = group if group is not None else (region_id,)
+        polygons = tuple(
+            tuple((point.x, point.y) for point in item.polygon)
+            for item in (
+                self._find_ocr_region(group_region_id)
+                for group_region_id in group_region_ids
+            )
+            if item is not None
+        )
         mask = self._mask_rasterizer.rasterize(
             source.asset.width,
             source.asset.height,
-            (tuple((point.x, point.y) for point in region.polygon),),
+            polygons,
             0,
         )
         editor = self._model.composition_editor
+        restore_id = group_region_ids[0]
         self._task_runner.submit(
-            lambda: editor.restore_original_region(region_id, source, mask),
+            lambda: editor.restore_original_region(restore_id, source, mask),
             lambda edit: self._on_original_region_restored(region_id, edit),
             lambda error: self.statusBar().showMessage(
                 f"保留原文失败：{error}", 8000
@@ -3354,6 +3464,8 @@ class EditorMainWindow(QMainWindow):
     def _on_original_region_restored(self, region_id: str, edit: object) -> None:
         result = self._model.translation_result
         if isinstance(result, TranslateImageResult):
+            group = self._paragraph_group_for_region(region_id) or (region_id,)
+            group_ids = set(group)
             units = tuple(
                 replace(
                     unit,
@@ -3362,7 +3474,7 @@ class EditorMainWindow(QMainWindow):
                     error_code=None,
                     error_message=None,
                 )
-                if unit.region_id == region_id
+                if unit.region_id in group_ids
                 else unit
                 for unit in result.translation.units
             )

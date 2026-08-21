@@ -10,9 +10,12 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 
-from PySide6.QtCore import QTimer, Qt, Signal
-from PySide6.QtGui import QUndoStack
+from PySide6.QtCore import QObject, QTimer, Qt, Signal
+from PySide6.QtGui import QUndoStack, QWheelEvent
 from PySide6.QtWidgets import (
+    QAbstractSpinBox,
+    QApplication,
+    QComboBox,
     QDialog,
     QFileDialog,
     QFrame,
@@ -57,6 +60,31 @@ from src.ui.editor.widgets.tool_dialogs import (
 )
 from src.ui.manual_region_panel import ManualRegionPanel
 from src.ui.batch_panel import BatchPanel
+
+
+class _WheelValueGuard(QObject):
+    """拦截数值控件的滚轮事件，防止误改值，并转发给父容器保留页面滚动。"""
+
+    def eventFilter(self, obj, event) -> bool:
+        if isinstance(event, QWheelEvent):
+            parent = obj.parentWidget()
+            if parent is not None:
+                QApplication.sendEvent(parent, event)
+            return True
+        return super().eventFilter(obj, event)
+
+
+def _disable_wheel_value_changes(container: QWidget) -> None:
+    """禁用面板内数值控件的滚轮改值。
+
+    鼠标在面板上滚动时，滚轮会直接改动光标下的数值框/下拉框/滑杆，
+    极易误改不相关的设置。PySide6 未封装 setWheelEnabled，统一用事件
+    过滤器拦截滚轮事件并转发给父容器（保留可滚动页面的滚动）。
+    """
+    guard = _WheelValueGuard(container)
+    for cls in (QAbstractSpinBox, QComboBox, QSlider):
+        for widget in container.findChildren(cls):
+            widget.installEventFilter(guard)
 
 
 class EditorPage(QWidget):
@@ -209,6 +237,7 @@ class EditorPage(QWidget):
         self.right_tabs.addTab(self.layer_tools_stack, "图层状态")
         self.right_tabs.addTab(self.export_settings, "导出设置")
         right_layout.addWidget(self.right_tabs)
+        _disable_wheel_value_changes(self.right_panel)
 
         # 中央区域
         center_widget = QWidget()
@@ -617,25 +646,37 @@ class EditorPage(QWidget):
             )
 
     def set_split_view(self, enabled: bool) -> None:
-        """启用/禁用左右分屏。"""
+        """启用/禁用左右分屏。
+
+        setVisible 会触发 splitter 重排并覆盖同步 setSizes，因此尺寸
+        计算延迟到下一个事件循环（_apply_split_sizes）。
+        """
         self._sidebar_visible = enabled
+        self.original_view.setVisible(enabled)
+        QTimer.singleShot(0, self._apply_split_sizes)
+
+    def _apply_split_sizes(self) -> None:
         total = max(1, self.main_splitter.width())
         handle_space = self.main_splitter.handleWidth() * 2
         available = max(1, total - handle_space)
         right_w = min(480, max(380, self.right_panel.width()))
-        if enabled:
-            self.original_view.setVisible(True)
-            canvas_w = max(440, available - right_w)
-            first = canvas_w // 2
+        if self._sidebar_visible:
+            # 画布填满剩余空间；窄屏时画布变窄而非总宽溢出，
+            # 否则右侧面板被最小宽度撑出分配区、覆盖画布
+            canvas_w = max(240, available - right_w)
+            if canvas_w + right_w > available:
+                canvas_w = available - right_w
+            first = max(1, canvas_w // 2)
             self.main_splitter.setSizes(
-                [first, canvas_w - first, right_w]
+                [first, max(1, canvas_w - first), right_w]
             )
-            QTimer.singleShot(0, self._fit_split_views)
+            self._fit_split_views()
         else:
-            self.original_view.setVisible(False)
             canvas_w = max(220, available - right_w)
+            if canvas_w + right_w > available:
+                canvas_w = available - right_w
             self.main_splitter.setSizes([0, canvas_w, right_w])
-            QTimer.singleShot(0, self.view.fit_to_window)
+            self.view.fit_to_window()
 
     def set_slider_compare(self, enabled: bool) -> None:
         self._slider_compare = enabled

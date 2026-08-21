@@ -2647,3 +2647,72 @@ def test_product_window_back_closes_child_and_restores_main(monkeypatch):
         if product is not None:
             product.close()
         window.close()
+
+
+# ============================================================
+# 批量发送到工作台 — 已完成的图片送译文成品
+# ============================================================
+
+def test_send_batch_to_editor_uses_translated_result_for_completed_items():
+    """批量翻译成功后发送到工作台应是译文成品；失败项仍送原图。"""
+    QApplication.instance() or QApplication(["send-batch-translated-test"])
+    from src.domain.batch import (
+        BatchItemSnapshot,
+        BatchItemStatus,
+        BatchSnapshot,
+        BatchStatus,
+    )
+
+    source_a = Path("a.png").resolve()
+    source_b = Path("b.png").resolve()
+    original_a = _document()
+    original_b = _document(w=200, h=80)
+    rendered_b = _document(w=200, h=80)
+
+    class _Import:
+        def execute(self, source):
+            return original_a if Path(source).name == "a.png" else original_b
+
+    class _Store:
+        def load(self, ref):
+            assert ref == "cache/b.png"
+            return rendered_b
+
+    window = EditorMainWindow(
+        import_image=_Import(),
+        task_runner=ImmediateTaskRunner(),
+        batch_result_store=_Store(),
+    )
+    try:
+        window._editor_page.batch_panel.add_sources((source_a, source_b))
+        window._batch_snapshot = BatchSnapshot(
+            batch_id="batch-test1234",
+            status=BatchStatus.COMPLETED,
+            items=(
+                BatchItemSnapshot(
+                    "item-0", source_a, BatchItemStatus.FAILED, error="boom"
+                ),
+                BatchItemSnapshot(
+                    "item-1",
+                    source_b,
+                    BatchItemStatus.COMPLETED,
+                    result_ref="cache/b.png",
+                ),
+            ),
+            max_active_items=1,
+        )
+        window._on_send_batch_to_editor()
+
+        by_name = {ref.name: ref for ref in window._model.documents()}
+        assert set(by_name) == {"a.png", "b.png"}
+        assert by_name["a.png"].rendered_document is None
+        assert by_name["b.png"].rendered_document is rendered_b
+        # 第一张（失败项）无译文，显示原图
+        assert window._model.document is original_a
+        # 切到第二张，显示译文成品、原图保留为对比图
+        window._model.set_active_document(by_name["b.png"].doc_id)
+        window._load_active_document()
+        assert window._model.document is rendered_b
+        assert window._model.source_document is original_b
+    finally:
+        window.close()

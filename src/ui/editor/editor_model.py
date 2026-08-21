@@ -87,10 +87,13 @@ class EditorModel(QObject):
         source_path: Path,
         source_document: ImageDocument,
         name: str | None = None,
+        rendered_document: ImageDocument | None = None,
     ) -> str:
         """把一张图片加入工作台文档列表，返回 doc_id。
 
         加入前先保存当前活动文档的编辑状态；新文档以干净状态激活。
+        传入 rendered_document（如已完成的批量翻译成品）时，画布直接
+        显示译文图，原图保留为对比图。
         """
         self._snapshot_active()
         doc_id = str(uuid4())
@@ -99,6 +102,7 @@ class EditorModel(QObject):
             name=name or source_path.name,
             source_path=source_path,
             source_document=source_document,
+            rendered_document=rendered_document,
         )
         self._documents.append(ref)
         self._active_document_id = doc_id
