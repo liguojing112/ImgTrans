@@ -5,10 +5,12 @@ import re
 from datetime import datetime, timezone
 
 import httpx
+from sqlalchemy import update
 
 from server.admin.security import SESSION_COOKIE, hash_admin_password, verify_password
 from server.app import create_app
 from server.config import ServerSettings
+from server.infrastructure.activation_repository import ActivationCodeRecord
 from server.infrastructure.database import Base, Database
 from server.infrastructure.payment_repository import SqlAlchemyPaymentRepository
 from server.domain.activation import ActivationPlanValues
@@ -474,6 +476,57 @@ def test_audit_page_formats_utc_events_as_beijing_time() -> None:
             assert page.status_code == 200
             assert "时间（北京时间）" in page.text
             assert "2026-08-08 11:04:05" in page.text
+            assert "2026-08-08 03:04:05" not in page.text
+
+    try:
+        _run(scenario)
+    finally:
+        app.state.database.close()
+
+
+def test_activation_page_formats_binding_times_as_beijing_time() -> None:
+    app = _app()
+
+    async def scenario():
+        transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+            csrf = await _login(client)
+            await client.post(
+                "/admin/activation/plans",
+                data={
+                    "csrf_token": csrf,
+                    "name": "时区校验套餐",
+                    "amount_minor": "10",
+                    "currency": "CNY",
+                    "duration_hours": "24",
+                    "enabled": "true",
+                },
+                follow_redirects=False,
+            )
+            page = await client.get("/admin/activation")
+            csrf = _csrf(page.text)
+            issued = await client.post(
+                "/admin/activation/codes",
+                data={"csrf_token": csrf, "plan_id": "1", "count": "1"},
+            )
+            match = re.search(r"IT-(?:[A-HJ-NP-Z2-9]{4}-){7}[A-HJ-NP-Z2-9]{4}", issued.text)
+            assert match is not None
+            code = app.state.manage_activation_codes.list_all(match.group(0))[0]
+            with app.state.database.session() as session:
+                session.execute(
+                    update(ActivationCodeRecord)
+                    .where(ActivationCodeRecord.code_id == code.code_id)
+                    .values(
+                        device_digest="timezone-test-device",
+                        activated_at=datetime(2026, 8, 8, 3, 4, 5, tzinfo=timezone.utc),
+                        expires_at=datetime(2026, 8, 9, 3, 4, 5, tzinfo=timezone.utc),
+                    )
+                )
+            page = await client.get("/admin/activation")
+            assert page.status_code == 200
+            # UTC 03:04:05 应显示为北京时间 11:04:05
+            assert "2026-08-08 11:04:05" in page.text
+            assert "2026-08-09 11:04:05" in page.text
             assert "2026-08-08 03:04:05" not in page.text
 
     try:
