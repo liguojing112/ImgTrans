@@ -2,7 +2,7 @@ import os
 import zipfile
 
 src = r"C:\Workspace\PythonProjects\ImgTrans-desktop-v1"
-out = os.path.join(src, "ImgTrans-source-v1.1.5.zip")
+out = os.path.join(src, "ImgTrans-source-v1.1.6.zip")
 
 EXCLUDE_DIRS = {
     ".git", ".claude", ".idea", ".vscode", ".pytest_cache",
