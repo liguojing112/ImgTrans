@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 import os
+from unittest import mock
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QMessageBox
 
 from src.domain.activation import ActivationSession
 from src.application.bootstrap import StartupSnapshot
@@ -69,6 +70,58 @@ def test_activation_dialog_runs_operation_through_task_runner_and_hides_token() 
     assert "已激活" in dialog.status_label.text()
     assert "itd_dialog" not in dialog.status_label.text()
     assert dialog.code_edit.text() == ""
+    dialog.close()
+
+
+def test_unbind_success_clears_local_session_and_emits_cleared() -> None:
+    application = QApplication.instance() or QApplication(["imgtrans-test"])
+    runner = _ImmediateRunner()
+    cleared = []
+
+    dialog = ActivationDialog(
+        lambda code: _session(),
+        lambda: _session(),
+        lambda: cleared.append(True),
+        runner,
+        unbind=lambda code: True,
+    )
+    cleared_events = []
+    dialog.activation_cleared.connect(lambda: cleared_events.append(True))
+    dialog.code_edit.setText("IT-ABCD")
+    with mock.patch.object(
+        QMessageBox, "question", return_value=QMessageBox.StandardButton.Yes
+    ):
+        dialog.request_unbind()
+    application.processEvents()
+
+    assert cleared, "解绑成功后必须清除本机激活凭据，否则本机仍显示已激活"
+    assert cleared_events == [True]
+    assert "解绑成功" in dialog.status_label.text()
+    assert dialog.code_edit.text() == ""
+    dialog.close()
+
+
+def test_unbind_false_reports_failure_and_keeps_local_session() -> None:
+    application = QApplication.instance() or QApplication(["imgtrans-test"])
+    runner = _ImmediateRunner()
+    cleared = []
+
+    dialog = ActivationDialog(
+        lambda code: _session(),
+        lambda: _session(),
+        lambda: cleared.append(True),
+        runner,
+        unbind=lambda code: False,
+    )
+    dialog.code_edit.setText("IT-ABCD")
+    with mock.patch.object(
+        QMessageBox, "question", return_value=QMessageBox.StandardButton.Yes
+    ):
+        dialog.request_unbind()
+    application.processEvents()
+
+    assert cleared == []
+    assert "失败" in dialog.status_label.text()
     dialog.close()
 
 

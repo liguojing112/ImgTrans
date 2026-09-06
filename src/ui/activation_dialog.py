@@ -229,9 +229,29 @@ class ActivationDialog(QDialog):
         self.status_label.setText("正在解绑…")
         self._task_runner.submit(
             lambda: self._unbind(code),
-            lambda _ok: (self.code_edit.clear(), self.status_label.setText("解绑成功，可换机重新激活")),
+            self._unbind_succeeded,
             self._operation_failed,
         )
+
+    def _unbind_succeeded(self, ok: object) -> None:
+        if not ok:
+            self._operation_failed(RuntimeError("解绑失败，激活码无效或已停用"))
+            return
+        self.code_edit.clear()
+        try:
+            # 服务端已解绑，必须同步清掉本机凭据，否则本机仍显示"已激活"，
+            # 用户遇到 401 后重新输入激活码会把该码再次绑回本机，新机器就无法激活
+            self._clear_activation()
+        except Exception as error:
+            self._set_busy(False)
+            self.status_label.setText(
+                f"服务端已解绑，但本机激活凭据清除失败：{error}\n"
+                "请再点一次「清除本机激活」"
+            )
+            return
+        self._set_session_status(None)
+        self.activation_cleared.emit()
+        self.status_label.setText("解绑成功，本机已退出激活，可换机重新激活")
 
     def request_activation(self) -> None:
         code = self.code_edit.text().strip()
