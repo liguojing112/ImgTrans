@@ -389,6 +389,26 @@ def test_plans_api_includes_promotion() -> None:
     _run(scenario)
 
 
+def test_plans_api_excludes_hidden_plans() -> None:
+    app = _app()
+    app.state.manage_activation_plans.create(
+        ActivationPlanValues(name="显示方案", amount_minor=1000, currency="CNY", duration_hours=1)
+    )
+    app.state.manage_activation_plans.create(
+        ActivationPlanValues(name="隐藏方案", amount_minor=2000, currency="CNY", duration_hours=2, hidden=True)
+    )
+
+    async def scenario():
+        transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+            plans = (await client.get("/v1/payments/plans")).json()
+            names = [p["name"] for p in plans]
+            assert "显示方案" in names
+            assert "隐藏方案" not in names
+
+    _run(scenario)
+
+
 def test_selected_date_promotion_uses_beijing_time_window() -> None:
     from datetime import date, datetime, time, timezone
 

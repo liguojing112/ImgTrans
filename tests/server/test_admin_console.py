@@ -714,3 +714,104 @@ def test_translation_connectivity_check_uses_fixed_text_and_exposes_no_result_te
         _run(scenario)
     finally:
         app.state.database.close()
+
+
+def test_plan_hide_toggle_hides_from_client_plan_list() -> None:
+    app = _app()
+    plan = app.state.manage_activation_plans.create(
+        ActivationPlanValues(name="月卡", amount_minor=1990, currency="CNY", duration_hours=720)
+    )
+
+    def _plan_form(page_html: str, hidden: str) -> dict:
+        return {
+            "csrf_token": _csrf(page_html),
+            "name": "月卡",
+            "amount_minor": "19.90",
+            "currency": "CNY",
+            "duration_hours": "720",
+            "plan_type": "duration",
+            "quota": "0",
+            "sale_amount_minor": "0",
+            "sale_dates": "",
+            "sale_start_time": "00:00",
+            "sale_end_time": "23:59",
+            "sale_ends_at": "",
+            "benefits": "",
+            "enabled": "true",
+            "hidden": hidden,
+        }
+
+    async def scenario():
+        transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+            await _login(client)
+            page = await client.get("/admin/activation")
+            assert page.status_code == 200
+
+            # 点击“隐藏”
+            response = await client.post(
+                f"/admin/activation/plans/{plan.plan_id}",
+                data=_plan_form(page.text, "true"),
+                follow_redirects=False,
+            )
+            assert response.status_code == 303
+            assert app.state.manage_activation_plans.list_all()[0].values.hidden is True
+
+            # 状态列显示“已隐藏”，客户端方案列表不再包含该方案
+            page = await client.get("/admin/activation")
+            assert "已隐藏" in page.text
+            assert 'name="hidden" value="false"' in page.text
+            plans = (await client.get("/v1/payments/plans")).json()
+            assert all(p["plan_id"] != plan.plan_id for p in plans)
+
+            # 点击“显示”恢复
+            response = await client.post(
+                f"/admin/activation/plans/{plan.plan_id}",
+                data=_plan_form(page.text, "false"),
+                follow_redirects=False,
+            )
+            assert response.status_code == 303
+            assert app.state.manage_activation_plans.list_all()[0].values.hidden is False
+            plans = (await client.get("/v1/payments/plans")).json()
+            assert any(p["plan_id"] == plan.plan_id for p in plans)
+
+    try:
+        _run(scenario)
+    finally:
+        app.state.database.close()
+
+
+def test_admin_unbind_code_clears_binding_and_keeps_quota() -> None:
+    app = _app()
+    plan = app.state.manage_activation_plans.create(
+        ActivationPlanValues(
+            name="10次包", amount_minor=500, currency="CNY",
+            duration_hours=1, plan_type="quota", quota=10,
+        )
+    )
+    issued = app.state.manage_activation_codes.issue(plan.plan_id, 1)
+    grant = app.state.activate_device.execute(issued[0].plaintext, "device-aaaaaaaaaaaaaaaa")
+    code_id = grant.activation.code_id
+
+    async def scenario():
+        transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+            await _login(client)
+            page = await client.get("/admin/activation")
+            assert "/unbind" in page.text
+            response = await client.post(
+                f"/admin/activation/codes/{code_id}/unbind",
+                data={"csrf_token": _csrf(page.text)},
+                follow_redirects=False,
+            )
+            assert response.status_code == 303
+            # 回到未绑定状态，次数保留，token 失效
+            codes, total = app.state.manage_activation_codes.list_page(1, 50, "unbound", None)
+            assert total == 1 and codes[0].code_id == code_id
+            assert codes[0].quota_total == 10 and codes[0].quota_remaining == 10
+            assert app.state.authorize_device_token.authorize(grant.access_token) is False
+
+    try:
+        _run(scenario)
+    finally:
+        app.state.database.close()

@@ -39,6 +39,7 @@ class ActivationPlanValues:
     sale_start_time: time | None = None
     sale_end_time: time | None = None
     benefits: str = ""
+    hidden: bool = False
 
     def __post_init__(self) -> None:
         normalized_name = self.name.strip()

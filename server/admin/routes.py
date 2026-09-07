@@ -381,6 +381,20 @@ async def enable_activation_code(code_id: str, request: Request) -> Response:
     return _redirect(target if target.startswith("/admin/") else "/admin/activation")
 
 
+@admin_router.post("/activation/codes/{code_id}/unbind")
+async def unbind_activation_code(code_id: str, request: Request) -> Response:
+    session, form = await _protected_form(request)
+    _require_permission(request, session, "activation")
+    unbound = request.app.state.manage_activation_codes.unbind_by_code_id(code_id)
+    if not unbound:
+        return _activation_response(
+            request, session, error="该激活码不存在或已停用，无法解绑"
+        )
+    request.state.audit_action = "unbind_activation_code"
+    target = form.get("next", "")
+    return _redirect(target if target.startswith("/admin/") else "/admin/activation")
+
+
 @admin_router.post("/activation/codes/{code_id}/renew")
 async def renew_activation_code(code_id: str, request: Request) -> Response:
     """给激活码追加时长/次数（后台手动叠加）。"""
@@ -1073,6 +1087,7 @@ def _plan_values(form: dict[str, str]) -> ActivationPlanValues:
         sale_start_time=sale_start_time,
         sale_end_time=sale_end_time,
         benefits=form.get("benefits", ""),
+        hidden=form.get("hidden") == "true",
     )
 
 

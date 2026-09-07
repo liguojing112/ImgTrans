@@ -34,6 +34,7 @@ class ActivationPlanPayload(StrictContract):
     sale_start_time: time | None = None
     sale_end_time: time | None = None
     benefits: str = Field(default="", max_length=500)
+    hidden: bool = False
 
     def to_domain(self) -> ActivationPlanValues:
         return ActivationPlanValues(**self.model_dump())
@@ -313,6 +314,7 @@ def _plan_response(plan: ActivationPlan) -> ActivationPlanResponse:
             "sale_start_time": plan.values.sale_start_time,
             "sale_end_time": plan.values.sale_end_time,
             "benefits": plan.values.benefits,
+            "hidden": plan.values.hidden,
         },
     )
 

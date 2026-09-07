@@ -47,6 +47,7 @@ class ActivationPlanRecord(Base):
     sale_start_time: Mapped[str | None] = mapped_column(String(5), nullable=True)
     sale_end_time: Mapped[str | None] = mapped_column(String(5), nullable=True)
     benefits: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    hidden: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
@@ -118,6 +119,7 @@ class SqlAlchemyActivationRepository:
                 sale_start_time=_serialize_sale_time(values.sale_start_time),
                 sale_end_time=_serialize_sale_time(values.sale_end_time),
                 benefits=values.benefits or None,
+                hidden=values.hidden,
                 created_at=now,
                 updated_at=now,
             )
@@ -145,6 +147,7 @@ class SqlAlchemyActivationRepository:
             record.sale_start_time = _serialize_sale_time(values.sale_start_time)
             record.sale_end_time = _serialize_sale_time(values.sale_end_time)
             record.benefits = values.benefits or None
+            record.hidden = values.hidden
             record.updated_at = _utc_now()
             session.flush()
             return _plan_to_domain(record)
@@ -476,6 +479,17 @@ class SqlAlchemyActivationRepository:
             session.flush()
             return True
 
+    def unbind_by_code_id(self, code_id: str) -> bool:
+        """后台解绑：清设备与 token 绑定，保留次数/时长额度。"""
+        with self._database.session() as session:
+            record = session.get(ActivationCodeRecord, code_id)
+            if record is None or record.disabled:
+                return False
+            record.device_digest = None
+            record.token_digest = None
+            session.flush()
+            return True
+
     def get_usage(self, token_digest: str) -> tuple[int, int]:
         """返回 (quota_total, quota_remaining)。"""
         with self._database.session() as session:
@@ -588,6 +602,7 @@ def _plan_to_domain(record: ActivationPlanRecord) -> ActivationPlan:
             sale_start_time=_deserialize_sale_time(record.sale_start_time),
             sale_end_time=_deserialize_sale_time(record.sale_end_time),
             benefits=record.benefits or "",
+            hidden=bool(record.hidden),
         ),
         created_at=_as_utc(record.created_at) or record.created_at,
         updated_at=_as_utc(record.updated_at) or record.updated_at,

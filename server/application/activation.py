@@ -81,6 +81,8 @@ class ActivationRepository(Protocol):
 
     def unbind(self, code_digest: str) -> bool: ...
 
+    def unbind_by_code_id(self, code_id: str) -> bool: ...
+
     def get_usage(self, token_digest: str) -> tuple[int, int]: ...
 
     def consume_quota(
@@ -263,6 +265,10 @@ class ManageActivationCodes:
         if self._hasher is None:
             raise ActivationConflict("Activation service is not configured")
         return self._repository.unbind(self._hasher.digest_code(activation_code))
+
+    def unbind_by_code_id(self, code_id: str) -> bool:
+        """后台解绑：按激活码 ID 清设备/token 绑定，保留次数与时长额度。"""
+        return self._repository.unbind_by_code_id(code_id)
 
     def _generate_code(self) -> str:
         raw = "".join(self._random_choice(self._ALPHABET) for _ in range(32))

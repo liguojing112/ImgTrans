@@ -49,7 +49,7 @@ def list_payable_plans(request: Request) -> list[dict]:
     plans = request.app.state.manage_activation_plans.list_all()
     result = []
     for item in plans:
-        if not item.values.enabled:
+        if not item.values.enabled or item.values.hidden:
             continue
         active_end = item.values.active_sale_ends_at(now)
         result.append({
