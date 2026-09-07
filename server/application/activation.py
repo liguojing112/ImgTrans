@@ -59,6 +59,10 @@ class ActivationRepository(Protocol):
 
     def get_code_by_digest(self, code_digest: str) -> ActivationCode | None: ...
 
+    def check_binding(
+        self, code_digest: str, device_digest: str, now: datetime
+    ) -> str: ...
+
     def renew_code(
         self,
         code_id: str,
@@ -302,6 +306,25 @@ class ActivateDevice:
                 continue
             return ActivationGrant(activation, access_token)
         raise ActivationConflict("Unable to allocate a unique device token")
+
+
+class ActivationStatusCheck:
+    """只读绑定状态检查：供客户端确认解绑/停用/过期，不产生绑定副作用。"""
+
+    def __init__(
+        self,
+        repository: ActivationRepository,
+        hasher: ActivationSecretHasher,
+    ) -> None:
+        self._repository = repository
+        self._hasher = hasher
+
+    def execute(self, activation_code: str, device_id: str) -> str:
+        return self._repository.check_binding(
+            self._hasher.digest_code(activation_code.strip()),
+            self._hasher.digest_device(device_id),
+            datetime.now(timezone.utc),
+        )
 
 
 class AuthorizeDeviceToken:

@@ -26,6 +26,7 @@ from server.application.image_limits import GetClientConfig, ManageImageLimits
 from server.application.activation import (
     ActivateDevice,
     ActivationSecretHasher,
+    ActivationStatusCheck,
     AuthorizeDeviceToken,
     ManageActivationCodes,
     ManageActivationPlans,
@@ -171,9 +172,14 @@ def create_app(
             activation_repository,
             activation_hasher,
         )
+        app.state.activation_status_check = ActivationStatusCheck(
+            activation_repository,
+            activation_hasher,
+        )
     else:
         app.state.activate_device = None
         app.state.authorize_device_token = UnavailableDeviceTokenAuthorizer()
+        app.state.activation_status_check = None
     payment_repository = SqlAlchemyPaymentRepository(database)
 
     # 第三方服务配置（微信密钥加密存数据库，可运行期切换）

@@ -276,3 +276,69 @@ def test_activation_service_defaults_closed_without_server_secret() -> None:
         assert response.status_code == 503
     finally:
         database.close()
+
+
+def test_status_endpoint_reports_binding_without_rebinding() -> None:
+    """status 只读检查：已绑定 active、解绑后 unbound、其它设备不匹配。"""
+    app = _app()
+    try:
+        plan = _create_plan(app)
+        issued = _issue_code(app, plan["plan_id"])
+        code = issued["activation_code"]
+
+        # 未绑定
+        response = _request(
+            app, "POST", "/v1/activations/status",
+            json={"activation_code": code, "device_id": DEVICE_A},
+        )
+        assert response.status_code == 200
+        assert response.json() == {"active": False}
+
+        # 绑定后
+        _activate(app, code, DEVICE_A)
+        response = _request(
+            app, "POST", "/v1/activations/status",
+            json={"activation_code": code, "device_id": DEVICE_A},
+        )
+        assert response.json() == {"active": True}
+
+        # status 不应产生绑定副作用：另一台设备查询仍不匹配
+        response = _request(
+            app, "POST", "/v1/activations/status",
+            json={"activation_code": code, "device_id": DEVICE_B},
+        )
+        assert response.json() == {"active": False}
+        # 且未把 device_b 绑定成功
+        response = _activate(app, code, DEVICE_B)
+        assert response.status_code == 403  # device_mismatch
+
+        # 后台解绑后 → unbound（仓库级操作等价于后台“解绑”按钮）
+        from server.infrastructure.activation_repository import (
+            SqlAlchemyActivationRepository,
+        )
+        repo = SqlAlchemyActivationRepository(app.state.database)
+        code_id = issued["code_id"]
+        assert repo.unbind_by_code_id(code_id) is True
+        response = _request(
+            app, "POST", "/v1/activations/status",
+            json={"activation_code": code, "device_id": DEVICE_A},
+        )
+        assert response.json() == {"active": False}
+    finally:
+        app.state.database.close()
+
+
+def test_status_endpoint_invalid_code() -> None:
+    app = _app()
+    try:
+        response = _request(
+            app, "POST", "/v1/activations/status",
+            json={
+                "activation_code": "IT-AAAA-BBBB-CCCC-DDDD-EEEE-FFFF-GGGG-HHHH",
+                "device_id": DEVICE_A,
+            },
+        )
+        assert response.status_code == 200
+        assert response.json() == {"active": False}
+    finally:
+        app.state.database.close()

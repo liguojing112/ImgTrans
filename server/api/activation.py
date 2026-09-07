@@ -115,6 +115,25 @@ class UnbindDeviceRequest(StrictContract):
     )
 
 
+class ActivationStatusRequest(StrictContract):
+    activation_code: str = Field(
+        pattern=r"^IT-(?:[A-HJ-NP-Z2-9]{4}-){7}[A-HJ-NP-Z2-9]{4}$"
+    )
+    device_id: str = Field(min_length=16, max_length=256)
+
+    @model_validator(mode="after")
+    def validate_device_id(self) -> "ActivationStatusRequest":
+        if not self.device_id.strip() or any(
+            ord(character) < 32 for character in self.device_id
+        ):
+            raise ValueError("device_id is invalid")
+        return self
+
+
+class ActivationStatusResponse(StrictContract):
+    active: bool
+
+
 activation_router = APIRouter(prefix="/v1/activations", tags=["activation"])
 admin_activation_router = APIRouter(
     prefix="/v1/admin/activation",
@@ -150,6 +169,30 @@ def activate_device(
         quota_total=grant.activation.quota_total,
         quota_remaining=grant.activation.quota_remaining,
     )
+
+
+@activation_router.post("/status", response_model=ActivationStatusResponse)
+def activation_status(
+    payload: ActivationStatusRequest,
+    request: Request,
+    response: Response,
+) -> ActivationStatusResponse:
+    """只读检查激活码最近一次绑定状态（不重新绑定本机设备）。
+
+    客户端启动/恢复时调用：若管理员已解绑、码停用或激活过期，
+    客户端据此清除本地凭据。validate 会重新绑定当前设备，不能用作检查。
+    """
+    enforce_rate_limit(request, "activation-status", limit=30, window_seconds=60)
+    _require_activation_enabled(request)
+    try:
+        status = request.app.state.activation_status_check.execute(
+            payload.activation_code,
+            payload.device_id,
+        )
+    except ActivationError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    response.headers["Cache-Control"] = "no-store"
+    return ActivationStatusResponse(active=status == "active")
 
 
 @activation_router.post("/unbind")

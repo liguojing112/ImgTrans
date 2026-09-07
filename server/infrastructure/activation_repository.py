@@ -490,6 +490,32 @@ class SqlAlchemyActivationRepository:
             session.flush()
             return True
 
+    def check_binding(
+        self, code_digest: str, device_digest: str, now: datetime
+    ) -> str:
+        """只读检查激活码与设备绑定的状态（不产生任何副作用）。
+
+        返回: active | unbound | device_mismatch | expired | disabled | not_found
+        """
+        with self._database.session() as session:
+            record = session.scalar(
+                select(ActivationCodeRecord).where(
+                    ActivationCodeRecord.code_digest == code_digest
+                )
+            )
+            if record is None:
+                return "not_found"
+            if record.disabled:
+                return "disabled"
+            expires_at = _as_utc(record.expires_at)
+            if expires_at is None or expires_at <= now:
+                return "expired"
+            if record.device_digest is None:
+                return "unbound"
+            if record.device_digest != device_digest:
+                return "device_mismatch"
+            return "active"
+
     def get_usage(self, token_digest: str) -> tuple[int, int]:
         """返回 (quota_total, quota_remaining)。"""
         with self._database.session() as session:
