@@ -27,6 +27,8 @@ class CredentialStore(Protocol):
 class ActivationClient(Protocol):
     def activate(self, activation_code: str, device_id: str) -> ActivationSession: ...
 
+    def status(self, activation_code: str, device_id: str) -> bool: ...
+
 
 class ActivationCoordinator:
     def __init__(
@@ -96,6 +98,28 @@ class ActivationCoordinator:
     def access_token(self) -> str | None:
         session = self.current_session()
         return session.access_token if session is not None else None
+
+    def verify(self) -> bool:
+        """向服务端确认本机激活仍有效。
+
+        后台解绑/停用/过期时清除本机凭据（返回 False，客户端应显示未激活）；
+        网络异常时保留凭据（返回 True，避免离线时误踢用户）。
+        """
+        with self._lock:
+            session = self.current_session()
+            if session is None or not session.code:
+                return False
+            try:
+                active = self._client.status(session.code, self._device_id())
+            except ActivationError:
+                return True
+            if not active:
+                try:
+                    self._credentials.delete(self._session_key)
+                except CredentialStoreError:
+                    pass
+                return False
+            return True
 
     def clear(self) -> None:
         with self._lock:

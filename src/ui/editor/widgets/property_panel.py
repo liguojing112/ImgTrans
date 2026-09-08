@@ -8,9 +8,10 @@ from __future__ import annotations
 
 from math import cos, radians, sin
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QEvent, Qt, Signal
 from PySide6.QtGui import QColor, QFont
 from PySide6.QtWidgets import (
+    QApplication,
     QAbstractSpinBox,
     QCheckBox,
     QColorDialog,
@@ -63,6 +64,8 @@ class PropertyPanel(QFrame):
     # OCR 尚未生成文字图层时，仍允许编辑几何和文字样式；由 EditorPage 暂存，
     # 后续翻译生成图层时应用这些设置。
     ocr_property_changed = Signal(str, str, object)
+    # 格式刷：(目标 region_id, 来源 region_id, 样式快照 dict)
+    style_brush_applied = Signal(str, str, dict)
 
     add_layer_requested = Signal(str)  # default text
 
@@ -70,7 +73,8 @@ class PropertyPanel(QFrame):
         super().__init__()
         self.setObjectName("propertyPanel")
         self.setMinimumWidth(300)
-        self.setMaximumWidth(480)
+        # 字段行最小宽约 580px；上限放至面板允许的 540 以减少横向截断
+        self.setMaximumWidth(540)
 
         self._region_id: str | None = None
         self._ocr_editing = False
@@ -85,6 +89,9 @@ class PropertyPanel(QFrame):
         self._image_h = 99999
         self._current_box: TextBox | None = None
         self._last_path_mode = "straight"
+        self._brush_armed = False
+        self._brush_source_id: str | None = None
+        self._brush_snapshot: dict[str, object] = {}
 
         from PySide6.QtCore import QTimer
         self._debounce = QTimer(self)
@@ -94,7 +101,8 @@ class PropertyPanel(QFrame):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        # 面板窄于表单最小宽时显示横向滚动条，避免右侧内容被无声截断
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
 
         content = QWidget()
         layout = QVBoxLayout(content)
@@ -385,7 +393,24 @@ class PropertyPanel(QFrame):
         layout.addWidget(style_title)
         form.addRow("文字内容", self.text_edit)
         form.addRow(_lbl("字体"), self.font_family)
-        form.addRow(_lbl("字号"), _wrap_spin(self.font_size_spin, label="字号"))
+        self.format_brush_btn = QToolButton()
+        self.format_brush_btn.setObjectName("formatBrushButton")
+        self.format_brush_btn.setCheckable(True)
+        self.format_brush_btn.setText("格式刷")
+        self.format_brush_btn.setToolTip(
+            "捕获当前图层的文字样式；之后选中其他文字图层自动应用。"
+            "按 Esc 或再次点击取消"
+        )
+        self.format_brush_btn.toggled.connect(self._on_format_brush_toggled)
+        font_size_container = QWidget()
+        font_size_row = QHBoxLayout(font_size_container)
+        font_size_row.setContentsMargins(0, 0, 0, 0)
+        font_size_row.setSpacing(4)
+        font_size_row.addWidget(_wrap_spin(self.font_size_spin, label="字号"))
+        font_size_row.addSpacing(24)
+        font_size_row.addWidget(self.format_brush_btn)
+        font_size_row.addStretch()
+        form.addRow(_lbl("字号"), font_size_container)
         form.addRow("", self.auto_fit_check)
         form.addRow(_lbl("字重"), self.font_weight_combo)
         form.addRow(_lbl("艺术字"), self.artistic_preset)
@@ -477,6 +502,94 @@ class PropertyPanel(QFrame):
 
         self._set_fields_enabled(False)
         self._update_path_control_visibility("straight")
+
+    # —— 格式刷 ——
+
+    def _on_format_brush_toggled(self, checked: bool) -> None:
+        if checked:
+            if self._region_id is None or self._ocr_editing:
+                # 没有可捕获的文字图层 → 回弹取消
+                self.format_brush_btn.blockSignals(True)
+                self.format_brush_btn.setChecked(False)
+                self.format_brush_btn.blockSignals(False)
+                return
+            self._brush_armed = True
+            self._brush_source_id = self._region_id
+            self._brush_snapshot = self._capture_brush_snapshot()
+            self._set_app_event_filter(True)
+        else:
+            self._brush_armed = False
+            self._brush_source_id = None
+            self._brush_snapshot = {}
+            self._set_app_event_filter(False)
+
+    def _set_app_event_filter(self, enabled: bool) -> None:
+        """armed 期间挂应用级事件过滤器：点选画布后焦点不在面板上，
+        只有应用级过滤器才能在任何焦点位置捕获 Esc。"""
+        app = QApplication.instance()
+        if app is None:
+            return
+        if enabled:
+            app.installEventFilter(self)
+        else:
+            app.removeEventFilter(self)
+
+    def _capture_brush_snapshot(self) -> dict[str, object]:
+        """抓取当前图层的全部文字样式（不含位置/旋转/文字内容/路径）。
+
+        应用顺序有讲究：effect_preset 会联动改描边/阴影，先应用；
+        auto_fit 最后应用，覆盖 font_size 的 auto_fit=False 副作用。
+        """
+        return {
+            "effect_preset": self.artistic_preset.currentData(),
+            "font_family": self.font_family.currentFont().family(),
+            "font_size": self.font_size_spin.value(),
+            "font_weight": self.font_weight_combo.currentData(),
+            "font_stretch": self.font_stretch_spin.value(),
+            "line_height": self.line_height_spin.value(),
+            "letter_spacing": self.letter_spacing_spin.value(),
+            "box_padding": self.box_padding_spin.value(),
+            "wrap": self.wrap_check.isChecked(),
+            "alignment": self.alignment_combo.currentData(),
+            "vertical_alignment": self.vertical_alignment_combo.currentData(),
+            "fill_rgb": self._fill_rgb,
+            "text_opacity": self.text_opacity_spin.value(),
+            "background_rgb": self._background_rgb,
+            "background_opacity": self.background_opacity_spin.value(),
+            "stroke_width": self.stroke_width_spin.value(),
+            "stroke_rgb": self._stroke_rgb,
+            "shadow_enabled": self.shadow_check.isChecked(),
+            "shadow_offset_x": self.shadow_x_spin.value(),
+            "shadow_offset_y": self.shadow_y_spin.value(),
+            "shadow_opacity": self.shadow_opacity_spin.value(),
+            "auto_fit": self.auto_fit_check.isChecked(),
+        }
+
+    def _maybe_apply_brush_to(self, region_id: str) -> None:
+        if (
+            self._brush_armed
+            and region_id != self._brush_source_id
+            and self._brush_snapshot
+        ):
+            self.style_brush_applied.emit(
+                region_id,
+                self._brush_source_id or "",
+                dict(self._brush_snapshot),
+            )
+
+    def eventFilter(self, obj: object, event: object) -> bool:
+        if (
+            self._brush_armed
+            and event is not None
+            and event.type() == QEvent.Type.KeyPress
+            and event.key() == Qt.Key.Key_Escape  # type: ignore[union-attr]
+        ):
+            # 有模态对话框（如颜色选择器）打开时不拦截，Esc 仍用于关对话框
+            app = QApplication.instance()
+            if app is None or app.activeModalWidget() is None:
+                self.format_brush_btn.setChecked(False)
+                return True
+        return super().eventFilter(obj, event)
 
     # —— 操作槽 ——
 
@@ -796,6 +909,10 @@ class PropertyPanel(QFrame):
         finally:
             self._suppress_signals = False
 
+        # 格式刷：选中新的图层时自动应用已捕获的样式（同一图层重入不重复刷）
+        if prev_id != layer.region_id:
+            self._maybe_apply_brush_to(layer.region_id)
+
     def set_ocr_region(
         self,
         ocr_region: object,
@@ -1056,7 +1173,7 @@ class PropertyPanel(QFrame):
         for w in (
             self.text_edit, self.x_spin, self.y_spin, self.width_spin, self.height_spin,
             self.rotation_spin, self.font_family, self.font_size_spin, self.font_weight_combo,
-            self.auto_fit_check,
+            self.auto_fit_check, self.format_brush_btn,
             self.path_mode, self.arc_bend, self.path_reverse, self.circle_center_x,
             self.circle_center_y, self.circle_radius, self.circle_start, self.circle_end,
             self.artistic_preset,

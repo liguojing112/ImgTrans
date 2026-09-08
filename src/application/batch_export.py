@@ -146,12 +146,6 @@ class ExportBatchSelection:
                     )
                 )
                 continue
-            target = _unique_target(
-                export_directory,
-                f"{item.source.stem}-translated",
-                suffix,
-                reserved,
-            )
             try:
                 document = self._result_store.load(item.result_ref)
                 output = _resize_document(document, selected_options)
@@ -159,6 +153,12 @@ class ExportBatchSelection:
                     output = apply_watermark_template(
                         output, selected_options.watermark
                     )
+                target = _unique_target(
+                    export_directory,
+                    f"{item.source.stem}-translated",
+                    suffix,
+                    reserved,
+                )
                 self._export_image.execute(
                     output,
                     target,

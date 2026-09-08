@@ -286,6 +286,7 @@ def create_main_window() -> MainWindow:
         activation_status=(
             activation.current_session if activation is not None else None
         ),
+        verify_activation=activation.verify if activation is not None else None,
         clear_activation=activation.clear if activation is not None else None,
         payment_client=_create_payment_client(backend_url),
         codec=codec,
@@ -541,6 +542,7 @@ def _create_editor_window() -> EditorMainWindow:
         activation_status=(
             activation.current_session if activation is not None else None
         ),
+        verify_activation=activation.verify if activation is not None else None,
         clear_activation=activation.clear if activation is not None else None,
         payment_client=_create_payment_client(backend_url),
         quota_client=_create_quota_client(backend_url),

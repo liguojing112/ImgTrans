@@ -40,6 +40,7 @@ class TopBar(QFrame):
     fit_requested = Signal()
     save_requested = Signal()
     export_requested = Signal()
+    batch_export_requested = Signal()
     back_requested = Signal()
 
     def __init__(self) -> None:
@@ -210,7 +211,16 @@ class TopBar(QFrame):
         )
         self.export_btn.clicked.connect(self.export_requested.emit)
 
+        # 16. 批量导出（工作台全部图片）
+        self.batch_export_btn = _make_tool_button(
+            QStyle.StandardPixmap.SP_DirOpenIcon,
+            "批量导出工作台中所有图片到所选文件夹",
+            "批量导出",
+        )
+        self.batch_export_btn.clicked.connect(self.batch_export_requested.emit)
+
         layout.addWidget(self.export_btn)
+        layout.addWidget(self.batch_export_btn)
         layout.addStretch()
 
         # 初始状态
@@ -230,6 +240,7 @@ class TopBar(QFrame):
         self.import_btn.setEnabled(not self._translating)
         self.ocr_btn.setEnabled(has and not self._translating)
         self.translate_btn.setEnabled(has and not self._translating)
+        self.batch_export_btn.setEnabled(has)
         self.zoom_in_btn.setEnabled(has)
         self.zoom_out_btn.setEnabled(has)
         self.fit_btn.setEnabled(has)
@@ -327,6 +338,7 @@ class TopBar(QFrame):
         self.fit_btn.setEnabled(False)
         self.export_btn.setEnabled(False)
         self.save_btn.setEnabled(False)
+        self.batch_export_btn.setEnabled(False)
 
 
 def _make_tool_button(

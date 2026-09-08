@@ -9,7 +9,7 @@ from dataclasses import replace
 from math import atan2, degrees, hypot
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QDragEnterEvent, QDropEvent, QShowEvent, QUndoStack
 from PySide6.QtWidgets import (
     QFileDialog,
@@ -101,6 +101,7 @@ class EditorMainWindow(QMainWindow):
         manual_translation_adapter: object | None = None,
         activate_device=None,
         activation_status=None,
+        verify_activation=None,
         clear_activation=None,
         payment_client=None,
         quota_client=None,
@@ -147,6 +148,7 @@ class EditorMainWindow(QMainWindow):
         self._manual_translation_adapter = manual_translation_adapter
         self._activate_device = activate_device
         self._activation_status = activation_status
+        self._verify_activation = verify_activation
         self._clear_activation = clear_activation
         self._payment_client = payment_client
         self._quota_client = quota_client
@@ -203,6 +205,9 @@ class EditorMainWindow(QMainWindow):
 
     def _build_menus(self) -> None:
         menu = self.menuBar()
+        # 主题中菜单栏规则带 [editorStyle="true"] 选择器；不设该属性时规则不匹配，
+        # 系统深色模式下文字会跟随调色板变白（浅底白字看不清）
+        menu.setProperty("editorStyle", True)
 
         # 首页：菜单栏按钮形式，点击即跳转（无下拉）
         home_action = QAction("首页", self)
@@ -440,6 +445,7 @@ class EditorMainWindow(QMainWindow):
 
     def showEvent(self, event: QShowEvent) -> None:
         super().showEvent(event)
+        self.request_activation_check()
         if self._splitter_sized:
             return
         self._splitter_sized = True
@@ -453,6 +459,49 @@ class EditorMainWindow(QMainWindow):
                 self._editor_page.is_split_view()
             ),
         )
+
+    def request_activation_check(self) -> None:
+        """向服务端校验激活状态：解绑/停用/过期时清除本机凭据。"""
+        if (
+            self._task_runner is None
+            or self._verify_activation is None
+            or getattr(self, "_activation_check_running", False)
+        ):
+            return
+        self._activation_check_running = True
+        self._task_runner.submit(
+            self._verify_activation,
+            self._activation_check_finished,
+            self._activation_check_failed,
+        )
+
+    def changeEvent(self, event) -> None:
+        super().changeEvent(event)
+        # 客户端已打开时后台可能解绑/停用：窗口激活（切回前台）时补校验，
+        # 30 秒节流避免频繁网络请求
+        if event.type() == QEvent.Type.WindowActivate:
+            now = QTimer.currentTime()
+            if getattr(self, "_last_activation_check_at", None) is None:
+                self.request_activation_check()
+            else:
+                elapsed = self._last_activation_check_at.msecsTo(now)
+                if elapsed >= 30_000:
+                    self.request_activation_check()
+            self._last_activation_check_at = now
+
+    def _activation_check_finished(self, result: object) -> None:
+        self._activation_check_running = False
+        if result is False:
+            from PySide6.QtWidgets import QMessageBox
+
+            QMessageBox.warning(
+                self,
+                "提示",
+                "本机激活已失效（可能已被客服解绑或已到期），请重新激活。",
+            )
+
+    def _activation_check_failed(self, error: Exception) -> None:
+        self._activation_check_running = False
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:
         urls = event.mimeData().urls()
@@ -513,6 +562,9 @@ class EditorMainWindow(QMainWindow):
         self._editor_page.import_requested.connect(self._on_import)
         self._editor_page.translate_requested.connect(self._on_translate)
         self._editor_page.export_requested.connect(self._on_export)
+        self._editor_page.batch_export_requested.connect(
+            self._on_export_batch_documents
+        )
         self._editor_page.save_requested.connect(self._on_quick_save)
         self._editor_page.feature_requested.connect(self._on_feature_requested)
         self._editor_page.tool_changed.connect(self._on_editor_tool_changed)
@@ -937,12 +989,15 @@ class EditorMainWindow(QMainWindow):
             or self._task_runner is None
         ):
             return
-        directory = QFileDialog.getExistingDirectory(self, "选择批量导出目录")
-        if not directory:
-            return
         panel = self._editor_page.batch_panel
         selected = panel.selected_result_ids
         suffix = panel.selected_output_suffix
+        directory_value = QFileDialog.getExistingDirectory(
+            self, "选择批量导出目录"
+        )
+        if not directory_value:
+            return
+        directory = Path(directory_value)
         config = panel.batch_export_config
 
         def build_options() -> BatchExportOptions:
@@ -3571,12 +3626,83 @@ class EditorMainWindow(QMainWindow):
                 self,
                 "保存译图",
                 str(default),
-                "PNG (*.png);;JPEG (*.jpg *.jpeg);;WebP (*.webp);;GIF (*.gif);;TIFF (*.tif *.tiff)",
+                "PNG (*.png);;JPEG (*.jpg *.jpeg);;WebP (*.webp);;GIF (*.gif);;TIFF (*.tif *.tiff);;PDF (*.pdf)",
             )
             if not value:
                 return
             self._quick_save_path = Path(value)
         self._on_export(self._quick_save_path)
+
+    def _on_export_batch_documents(self, directory: Path, suffix: str) -> None:
+        """批量导出工作台中所有图片到所选文件夹（按所选格式，逐图一个文件）。"""
+        if self._task_runner is None:
+            return
+        # 先快照当前活动文档，确保最新编辑状态进入其文档条目
+        self._model._snapshot_active()
+        docs: list[tuple[object, ImageDocument]] = []
+        for ref in self._model.documents():
+            document = None
+            if ref.composition_editor is not None:
+                document = ref.composition_editor._document
+            if document is None:
+                document = ref.rendered_document or ref.source_document
+            if document is not None:
+                docs.append((ref, document))
+        if not docs:
+            self.statusBar().showMessage("工作台中没有可导出的图片")
+            return
+
+        options = self._editor_page.export_settings.options
+        total = len(docs)
+
+        def _run() -> tuple[list[str], list[str]]:
+            directory.mkdir(parents=True, exist_ok=True)
+            exported: list[str] = []
+            failed: list[str] = []
+            used_names: set[str] = set()
+            for ref, document in docs:
+                stem = Path(document.asset.source_path).stem
+                if not stem:
+                    stem = ref.name.rsplit(".", 1)[0]
+                name = f"{stem}_translated{suffix}"
+                index = 2
+                while name in used_names or (directory / name).exists():
+                    name = f"{stem}_translated-{index}{suffix}"
+                    index += 1
+                used_names.add(name)
+                try:
+                    export_document(
+                        document,
+                        directory / name,
+                        self._export_usecase,
+                        self._codec,
+                        options,
+                    )
+                    exported.append(name)
+                except Exception as error:
+                    failed.append(f"{ref.name}: {error}")
+            return exported, failed
+
+        def _on_success(result: tuple[list[str], list[str]]) -> None:
+            exported, failed = result
+            summary = f"成功导出 {len(exported)}/{total} 张图片\n\n保存位置：{directory}"
+            if failed:
+                summary += "\n\n以下图片导出失败：\n" + "\n".join(failed)
+            self.statusBar().showMessage(
+                f"批量导出完成：成功 {len(exported)}，失败 {len(failed)}", 8000
+            )
+            if failed:
+                QMessageBox.warning(self, "批量导出部分完成", summary)
+            else:
+                QMessageBox.information(self, "批量导出成功", summary)
+
+        self._task_runner.submit(
+            _run,
+            _on_success,
+            lambda error: self.statusBar().showMessage(
+                f"批量导出失败：{error}", 8000
+            ),
+        )
 
     def request_runtime_recovery(self, reason: str = "runtime") -> None:
         self.statusBar().showMessage("运行时已恢复", 5000)

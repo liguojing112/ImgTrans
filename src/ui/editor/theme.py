@@ -253,6 +253,32 @@ QPushButton#colorButton {
     min-height: 24px;
 }
 
+/* 格式刷：未捕获=浅灰，已捕获（armed）=品牌蓝高亮 */
+QToolButton#formatBrushButton {
+    background: #eef0f4;
+    color: #212733;
+    border: 1px solid #d5d9e0;
+    border-radius: 6px;
+    padding: 5px 10px;
+    font-size: 13px;
+}
+QToolButton#formatBrushButton:hover {
+    background: #e3e7ee;
+    border-color: #b9c1cd;
+}
+QToolButton#formatBrushButton:checked {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                stop:0 #4a8af4, stop:1 #3973db);
+    color: #ffffff;
+    border-color: #5a9af4;
+    font-weight: 600;
+}
+QToolButton#formatBrushButton:disabled {
+    background: #f5f6f8;
+    color: #9aa3b0;
+    border-color: #e3e6eb;
+}
+
 /* 操作按钮 - 现代渐变风格 */
 QPushButton#applyPropertyButton {
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
@@ -314,16 +340,21 @@ QPushButton#backButton:hover {
     color: #212733;
 }
 
-/* 菜单栏 */
+/* 菜单栏（文字颜色显式固定为深色，避免系统深色模式下跟随调色板变白） */
 QMenuBar[editorStyle="true"] {
     background: #faf7f1;
     color: #212733;
     border-bottom: 1px solid #d5d9e0;
     padding: 4px;
 }
+QMenuBar[editorStyle="true"]::item {
+    color: #212733;
+    background: transparent;
+}
 QMenuBar[editorStyle="true"]::item:selected {
     background: #eef0f4;
     border-radius: 4px;
+    color: #212733;
 }
 QMenu {
     background: #ffffff;
@@ -448,9 +479,31 @@ QScrollArea {
 QScrollArea > QWidget > QWidget {
     background: #ffffff;
 }
-QTreeWidget, QListWidget, QTableView, QTextEdit, QTextBrowser {
+QTreeWidget, QListWidget, QTreeView, QListView, QTableView, QTextEdit, QTextBrowser {
     background: #ffffff;
     color: #212733;
+}
+/* 顶层弹窗（QMessageBox/QFileDialog/自定义 QDialog 无 editorStyle 属性，
+   根背景规则不匹配 → 系统深色模式下跟随调色板深底 + 深字；一律强制浅底深字 */
+QDialog {
+    background: #faf7f1;
+    color: #212733;
+}
+QDialog QLabel {
+    color: #212733;
+    background: transparent;
+}
+/* 表格表头：系统深色模式下默认表头跟随调色板（深底 + 深字）不可读 */
+QHeaderView {
+    background: #eef0f4;
+}
+QHeaderView::section {
+    background: #eef0f4;
+    color: #212733;
+    border: none;
+    border-right: 1px solid #d5d9e0;
+    border-bottom: 1px solid #d5d9e0;
+    padding: 6px;
 }
 QTabWidget::pane {
     background: #ffffff;

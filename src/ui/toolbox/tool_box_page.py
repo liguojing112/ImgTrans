@@ -257,14 +257,15 @@ class ToolBoxPage(QFrame):
             self._status_label.setText("请先选择要导出的图片")
             return
 
-        target_dir.mkdir(parents=True, exist_ok=True)
         # Read the current controls at export time.  Previously this used the
         # last apply-operation snapshot, so changing the format afterwards
         # still exported with the old suffix (often the source JPG).
         params = self._operation_panel._build_params()
+
+        target_dir.mkdir(parents=True, exist_ok=True)
         from src.application.toolbox_operations import export_image
 
-        fmt = params.output_format
+        fmt = self._preview_panel.export_format
         quality = params.quality
         suffix = self._preview_panel._suffix_spin.value()
 

@@ -123,6 +123,7 @@ class MainWindow(QMainWindow):
         refresh_image_limits: Callable[[], ImageLimitsRefreshResult] | None = None,
         activate_device: Callable[[str], ActivationSession] | None = None,
         activation_status: Callable[[], ActivationSession | None] | None = None,
+        verify_activation: Callable[[], bool] | None = None,
         clear_activation: Callable[[], None] | None = None,
         payment_client=None,
         codec=None,
@@ -157,6 +158,7 @@ class MainWindow(QMainWindow):
         self._refresh_image_limits = refresh_image_limits
         self._activate_device = activate_device
         self._activation_status = activation_status
+        self._verify_activation = verify_activation
         self._clear_activation = clear_activation
         self._payment_client = payment_client
         self._codec = codec
@@ -433,18 +435,46 @@ class MainWindow(QMainWindow):
         ):
             return
         self._activation_check_running = True
+        operation = (
+            self._verify_activation
+            if self._verify_activation is not None
+            else self._activation_status
+        )
         self._task_runner.submit(
-            self._activation_status,
+            operation,
             self._activation_check_finished,
             self._activation_check_failed,
         )
 
     def _activation_check_finished(self, result: object) -> None:
         self._activation_check_running = False
+        if result is False:
+            from PySide6.QtWidgets import QMessageBox
+
+            QMessageBox.warning(
+                self,
+                "提示",
+                "本机激活已失效（可能已被客服解绑或已到期），请重新激活。",
+            )
 
     def _activation_check_failed(self, error: Exception) -> None:
         self._activation_check_running = False
         self.statusBar().showMessage(f"无法读取本机激活状态：{error}", 7000)
+
+    def changeEvent(self, event) -> None:
+        super().changeEvent(event)
+        # 客户端已打开时后台可能解绑/停用：窗口激活（切回前台）时补校验，30 秒节流
+        from PySide6.QtCore import QEvent, QTimer
+
+        if event.type() == QEvent.Type.WindowActivate:
+            now = QTimer.currentTime()
+            if getattr(self, "_last_activation_check_at", None) is None:
+                self.request_activation_check()
+            else:
+                elapsed = self._last_activation_check_at.msecsTo(now)
+                if elapsed >= 30_000:
+                    self.request_activation_check()
+            self._last_activation_check_at = now
 
     def request_runtime_recovery(self, reason: str = "runtime") -> None:
         del reason
@@ -1259,7 +1289,7 @@ class MainWindow(QMainWindow):
         marker.setAlignment(Qt.AlignmentFlag.AlignCenter)
         empty_title = QLabel("尚未导入图片")
         empty_title.setObjectName("emptyStateTitle")
-        empty_hint = QLabel("支持 JPG、JPEG、PNG、WebP；导出支持 JPG、PNG、WebP、GIF、TIFF")
+        empty_hint = QLabel("支持 JPG、JPEG、PNG、WebP；导出支持 JPG、PNG、WebP、GIF、TIFF、PDF")
         empty_hint.setObjectName("emptyStateHint")
         empty_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.import_button = QPushButton("导入图片")
@@ -1313,7 +1343,7 @@ class MainWindow(QMainWindow):
             self,
             "导出图片",
             str(suggested),
-            "PNG (*.png);;JPEG (*.jpg);;WebP (*.webp);;GIF 静态单帧 (*.gif);;TIFF 单页 (*.tiff)",
+            "PNG (*.png);;JPEG (*.jpg);;WebP (*.webp);;GIF 静态单帧 (*.gif);;TIFF 单页 (*.tiff);;PDF 单页 (*.pdf)",
         )
         if not value:
             return
@@ -1325,6 +1355,7 @@ class MainWindow(QMainWindow):
                 "WebP (*.webp)": ".webp",
                 "GIF 静态单帧 (*.gif)": ".gif",
                 "TIFF 单页 (*.tiff)": ".tiff",
+                "PDF 单页 (*.pdf)": ".pdf",
             }
             target = target.with_suffix(suffixes.get(selected_filter, ".png"))
         self.request_export(target)
@@ -1835,6 +1866,34 @@ QMainWindow, QWidget#workspace {
     background: #f4f6fa;
     color: #172033;
     font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+}
+/* 顶层弹窗：系统深色模式下无属性选择器的弹窗规则不匹配 → 强制浅底深字 */
+QDialog {
+    background: #ffffff;
+    color: #172033;
+}
+QDialog QLabel {
+    color: #172033;
+    background: transparent;
+}
+QDialog QTextBrowser {
+    background: #ffffff;
+    color: #172033;
+    border: 1px solid #e3e8f1;
+    border-radius: 12px;
+}
+QDialog QTableWidget {
+    background: #ffffff;
+    color: #172033;
+}
+QDialog QPlainTextEdit {
+    background: #ffffff;
+    color: #172033;
+    border: 1px solid #e3e8f1;
+    border-radius: 8px;
+}
+QDialog QTabWidget::pane {
+    background: #ffffff;
 }
 QLabel#productTitle {
     color: #172033;

@@ -208,6 +208,7 @@ class BatchPanel(QFrame):
             ("WebP", ".webp"),
             ("GIF（单帧）", ".gif"),
             ("TIFF（单页）", ".tiff"),
+            ("PDF", ".pdf"),
         ):
             self.output_format.addItem(label, suffix)
         self.export_button = QPushButton("导出勾选项")

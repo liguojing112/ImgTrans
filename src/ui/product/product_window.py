@@ -150,6 +150,9 @@ class ProductWindow(QMainWindow):
     def _build_menus(self) -> None:
         menu = self.menuBar()
         menu.setNativeMenuBar(False)
+        # 主题中菜单栏规则带 [editorStyle="true"] 选择器；不设该属性时规则不匹配，
+        # 系统深色模式下文字会跟随调色板变白（浅底白字看不清）
+        menu.setProperty("editorStyle", True)
 
         # 首页：菜单栏按钮形式，点击即跳转（无下拉）
         home_action = QAction("首页", self)
@@ -263,6 +266,8 @@ class ProductWindow(QMainWindow):
             lambda p: self._on_export("json"))
         self._step_copywriting.export_csv_requested.connect(
             lambda p: self._on_export("csv"))
+        self._step_copywriting.export_pdf_requested.connect(
+            lambda p: self._on_export("pdf"))
 
     # —— 步骤导航 ——
 
@@ -474,9 +479,19 @@ class ProductWindow(QMainWindow):
             self._model.copywriting_results = results
             self._step_copywriting.set_results(results)
             self._step_copywriting.set_generating(False)
-            self.statusBar().showMessage(
-                f"文案生成完成（{len(results)} 张图），耗时 {elapsed:.1f}s"
+            missing = sorted(
+                {name for result in results.values()
+                 for name in _empty_section_names(result)}
             )
+            if missing:
+                self.statusBar().showMessage(
+                    "文案生成完成，但以下内容为空（已自动重试，原因见控制台）："
+                    + "、".join(missing)
+                )
+            else:
+                self.statusBar().showMessage(
+                    f"文案生成完成（{len(results)} 张图），耗时 {elapsed:.1f}s"
+                )
             self._model.copywriting_finished.emit(results.get(0))
 
         def _on_error(error: Exception):
@@ -518,7 +533,15 @@ class ProductWindow(QMainWindow):
             if result:
                 self._merge_partial_result(result)
             _finish()
-            self.statusBar().showMessage("重新生成完成")
+            names = _section_names_of(item_type)
+            if result and names and names.issubset(
+                set(_empty_section_names(result))
+            ):
+                self.statusBar().showMessage(
+                    "重新生成完成，但内容仍为空，请查看控制台日志"
+                )
+            else:
+                self.statusBar().showMessage("重新生成完成")
 
         def _on_error(error: Exception):
             _finish()
@@ -527,25 +550,46 @@ class ProductWindow(QMainWindow):
         self._task_runner.submit(_run, on_success=_on_success, on_error=_on_error)
 
     def _merge_partial_result(self, partial: object) -> None:
-        # 单条重新生成只更新当前图片对应的那套文案
+        # 单条重新生成只更新当前图片对应的那套文案；
+        # 空内容不覆盖已有结果，UI 只做局部刷新（避免覆盖其他区块的手动编辑）
         index = self._step_copywriting.current_result_index
         cr = self._model.copywriting_results.get(index)
         if cr is None:
             return
-        if hasattr(partial, "tags") and partial.tags:
+        step = self._step_copywriting
+        if partial.tags:
             cr.tags = partial.tags
-        if hasattr(partial, "keywords") and partial.keywords:
+            step._tag_editor.set_tags(partial.tags)
+        if partial.keywords:
             cr.keywords = partial.keywords
-        if hasattr(partial, "titles") and partial.titles:
+            step._kw_editor.set_keywords(partial.keywords)
+        if partial.titles:
             cr.titles = partial.titles
-        if hasattr(partial, "selling_points") and partial.selling_points:
+            step._title_editor.set_titles(partial.titles)
+        if partial.selling_points:
             cr.selling_points = partial.selling_points
-        if hasattr(partial, "intro") and partial.intro:
-            cr.intro = partial.intro
-        if hasattr(partial, "detail_modules") and partial.detail_modules:
-            cr.detail_modules = partial.detail_modules
+            step._sp_editor.set_selling_points(partial.selling_points)
+        intro = partial.intro
+        if intro and (
+            intro.one_liner or intro.short_description or intro.standard_intro
+        ):
+            cr.intro = intro
+            step._one_liner.setPlainText(intro.one_liner)
+            step._short_desc.setPlainText(intro.short_description)
+            step._standard.setPlainText(intro.standard_intro)
+        for mod in partial.detail_modules or []:
+            if not mod.content:
+                continue
+            for existing in cr.detail_modules or []:
+                if existing.section == mod.section:
+                    existing.content = mod.content
+                    break
+            else:
+                if cr.detail_modules is None:
+                    cr.detail_modules = []
+                cr.detail_modules.append(mod)
+            step.set_detail_section_content(mod.section, mod.content)
         self._model.copywriting_results[index] = cr
-        self._step_copywriting.set_result(cr)
 
     # —— 编辑器交互 ——
 
@@ -614,6 +658,9 @@ class ProductWindow(QMainWindow):
         elif fmt == "csv":
             default_name += ".csv"
             filter_str = "CSV 文件 (*.csv)"
+        elif fmt == "pdf":
+            default_name += ".pdf"
+            filter_str = "PDF 文件 (*.pdf)"
         else:
             default_name += ".json"
             filter_str = "JSON 文件 (*.json)"
@@ -926,3 +973,44 @@ class ProductWindow(QMainWindow):
         if "max_tokens" in msg_lower or "参数非法" in msg:
             return f"模型参数错误，请联系供应商 ({msg})"
         return msg
+
+
+# —— 文案完整性检查 ——
+
+_SECTION_LABELS = {
+    "tags": "图片标签",
+    "keywords": "场景词",
+    "titles": "产品标题",
+    "selling_points": "商品卖点",
+    "intro": "商品简介",
+}
+
+
+def _empty_section_names(result) -> list[str]:
+    """返回结果中内容为空（重试后仍失败）的文案类别名称。"""
+    names: list[str] = []
+    if not getattr(result, "tags", None):
+        names.append("图片标签")
+    if not getattr(result, "keywords", None):
+        names.append("场景词")
+    if not getattr(result, "titles", None):
+        names.append("产品标题")
+    if not getattr(result, "selling_points", None):
+        names.append("商品卖点")
+    intro = getattr(result, "intro", None)
+    if intro is None or not (
+        intro.one_liner or intro.short_description or intro.standard_intro
+    ):
+        names.append("商品简介")
+    modules = getattr(result, "detail_modules", None) or []
+    if not any(mod.content for mod in modules):
+        names.append("详情文案")
+    return names
+
+
+def _section_names_of(item_type: str) -> set[str]:
+    """regenerate_item 的 item_type 对应的文案类别名称。"""
+    if item_type.startswith("detail:"):
+        return {"详情文案"}
+    label = _SECTION_LABELS.get(item_type)
+    return {label} if label else set()

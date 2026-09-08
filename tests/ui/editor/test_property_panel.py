@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QAbstractSpinBox,
     QApplication,
     QStyleOptionGraphicsItem,
+    QWidget,
 )
 
 from src.domain.layout import ArcTextPath, PathPoint, TextBox, TextLayer, TextStyle
@@ -348,3 +349,210 @@ def test_selected_text_box_draws_outline_without_covering_canvas(qtbot) -> None:
     painter.end()
 
     assert image.pixelColor(120, 70).alpha() == 0
+
+
+def _arm_brush(panel: PropertyPanel, source: TextLayer) -> None:
+    panel.set_layer(source)
+    panel.format_brush_btn.click()
+    assert panel.format_brush_btn.isChecked()
+
+
+def _test_font_family() -> str:
+    """offscreen 环境字体库为空，注册一个系统字体保证 family 可解析。"""
+    from PySide6.QtGui import QFont, QFontDatabase
+
+    for candidate in (r"C:\Windows\Fonts\arial.ttf", r"C:\Windows\Fonts\msyh.ttc"):
+        if os.path.exists(candidate):
+            QFontDatabase.addApplicationFont(candidate)
+    for family in ("Arial", "Microsoft YaHei"):
+        if QFont(family).exactMatch():
+            return family
+    return QFont("Arial").family()
+
+
+def test_format_brush_captures_style_and_applies_on_new_selection(qtbot) -> None:
+    family = _test_font_family()
+    panel = PropertyPanel()
+    qtbot.addWidget(panel)
+    panel.show()
+
+    source = _make_layer(
+        region_id="src",
+        style=TextStyle(family, 20, (255, 0, 0), line_height=1.4, letter_spacing=2.0),
+    )
+    _arm_brush(panel, source)
+
+    applied = []
+    panel.style_brush_applied.connect(lambda *a: applied.append(a))
+
+    # 选中其他图层 → 发射快照
+    panel.set_layer(_make_layer(region_id="tgt"))
+    assert len(applied) == 1
+    region_id, source_id, snapshot = applied[0]
+    assert region_id == "tgt"
+    assert source_id == "src"
+    assert snapshot["font_family"] == family
+    assert snapshot["font_size"] == 20.0
+    assert snapshot["fill_rgb"] == (255, 0, 0)
+    assert snapshot["line_height"] == 1.4
+    assert snapshot["letter_spacing"] == 2.0
+    assert "center_x" not in snapshot and "text" not in snapshot
+
+    # 保持 armed：继续刷下一层
+    panel.set_layer(_make_layer(region_id="tgt2"))
+    assert len(applied) == 2
+    assert applied[1][0] == "tgt2"
+
+
+def test_format_brush_does_not_apply_to_source_layer(qtbot) -> None:
+    panel = PropertyPanel()
+    qtbot.addWidget(panel)
+    panel.show()
+
+    _arm_brush(
+        panel,
+        _make_layer(region_id="src", style=TextStyle("Arial", 20, (255, 0, 0))),
+    )
+    applied = []
+    panel.style_brush_applied.connect(lambda *a: applied.append(a))
+
+    # 先选目标层，再切回来源层 → 不重复刷来源
+    panel.set_layer(_make_layer(region_id="tgt"))
+    panel.set_layer(_make_layer(region_id="src"))
+    assert [item[0] for item in applied] == ["tgt"]
+
+
+def _send_esc(receiver) -> None:
+    from PySide6.QtCore import QEvent, Qt
+    from PySide6.QtGui import QKeyEvent
+
+    QApplication.sendEvent(
+        receiver,
+        QKeyEvent(
+            QEvent.Type.KeyPress,
+            Qt.Key.Key_Escape,
+            Qt.KeyboardModifier.NoModifier,
+        ),
+    )
+
+
+def test_format_brush_esc_disarms_from_panel_focus(qtbot) -> None:
+    panel = PropertyPanel()
+    qtbot.addWidget(panel)
+    panel.show()
+
+    _arm_brush(panel, _make_layer(region_id="src"))
+    # 焦点在面板子控件（字号输入框）上按 Esc 应取消
+    panel.font_size_spin.setFocus()
+    _send_esc(panel.font_size_spin)
+    assert not panel.format_brush_btn.isChecked()
+
+
+def test_format_brush_esc_disarms_from_outside_focus(qtbot) -> None:
+    """点选画布后焦点不在面板上，Esc 也应退出格式刷（应用级过滤器）。"""
+    panel = PropertyPanel()
+    qtbot.addWidget(panel)
+    panel.show()
+
+    _arm_brush(panel, _make_layer(region_id="src"))
+    # 模拟焦点在面板外（如画布视图）
+    canvas_like = QWidget()
+    qtbot.addWidget(canvas_like)
+    canvas_like.setFocus()
+    _send_esc(canvas_like)
+    assert not panel.format_brush_btn.isChecked()
+
+    applied = []
+    panel.style_brush_applied.connect(lambda *a: applied.append(a))
+    panel.set_layer(_make_layer(region_id="tgt"))
+    assert applied == []
+
+
+def test_format_brush_reclick_disarms(qtbot) -> None:
+    panel = PropertyPanel()
+    qtbot.addWidget(panel)
+    panel.show()
+
+    _arm_brush(panel, _make_layer(region_id="src"))
+    panel.format_brush_btn.click()
+    assert not panel.format_brush_btn.isChecked()
+
+    applied = []
+    panel.style_brush_applied.connect(lambda *a: applied.append(a))
+    panel.set_layer(_make_layer(region_id="tgt"))
+    assert applied == []
+
+
+def test_format_brush_disabled_without_selection(qtbot) -> None:
+    panel = PropertyPanel()
+    qtbot.addWidget(panel)
+    panel.show()
+
+    assert not panel.format_brush_btn.isEnabled()
+    panel.format_brush_btn.click()
+    assert not panel.format_brush_btn.isChecked()
+
+
+def test_style_brush_snapshot_merges_into_target_layer(qtbot) -> None:
+    """EditorPage 接收 style_brush_applied 后整体合并样式并单次 emit edit_requested。"""
+    from types import SimpleNamespace
+
+    from PySide6.QtGui import QUndoStack
+
+    from src.domain.layout import TextLayout
+    from src.ui.editor.editor_page import EditorPage
+
+    family = _test_font_family()
+    page = EditorPage(QUndoStack())
+    qtbot.addWidget(page)
+    page.show()
+
+    source_style = TextStyle(family, 20, (255, 0, 0), line_height=1.4, letter_spacing=2.0)
+    source = TextLayer("src", "A", TextBox(100, 50, 80, 24), source_style)
+    target = TextLayer(
+        "tgt", "B", TextBox(300, 150, 200, 60), TextStyle("Microsoft YaHei", 14, (24, 32, 51))
+    )
+    page._model = SimpleNamespace(text_layout=TextLayout((source, target)))
+
+    edits = []
+    page.edit_requested.connect(lambda *a: edits.append(a))
+
+    panel = page.property_panel
+    panel.set_layer(source)
+    panel.format_brush_btn.click()
+    panel.set_layer(target)
+
+    assert len(edits) == 1
+    region_id, kind, after, before = edits[0]
+    assert region_id == "tgt"
+    assert kind == "style"
+    assert before is target
+    assert after.style.font_family == family
+    assert after.style.font_size == 20.0
+    assert after.style.fill_rgb == (255, 0, 0)
+    assert after.style.line_height == 1.4
+    assert after.style.letter_spacing == 2.0
+    assert after.box == target.box  # 位置不变
+    assert after.text == "B"
+
+
+def test_property_panel_narrow_allows_horizontal_scroll(qtbot) -> None:
+    """面板窄于表单最小宽时应出现横向滚动条，而不是静默截断右侧内容。"""
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QScrollArea
+
+    app = QApplication.instance() or QApplication(["imgtrans-test"])
+    panel = PropertyPanel()
+    qtbot.addWidget(panel)
+    panel.resize(300, 700)
+    panel.show()
+
+    scroll = panel.findChildren(QScrollArea)[0]
+    assert (
+        scroll.horizontalScrollBarPolicy()
+        == Qt.ScrollBarPolicy.ScrollBarAsNeeded
+    )
+    qtbot.waitUntil(
+        lambda: scroll.horizontalScrollBar().maximum() > 0,
+        timeout=2000,
+    )

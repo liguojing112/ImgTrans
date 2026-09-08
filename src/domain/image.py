@@ -12,6 +12,7 @@ class ImageFileFormat(str, Enum):
     BMP = "BMP"
     GIF = "GIF"
     TIFF = "TIFF"
+    PDF = "PDF"
 
     @classmethod
     def from_input_suffix(cls, suffix: str) -> "ImageFileFormat":
@@ -39,12 +40,13 @@ class ImageFileFormat(str, Enum):
             ".gif": cls.GIF,
             ".tif": cls.TIFF,
             ".tiff": cls.TIFF,
+            ".pdf": cls.PDF,
         }
         try:
             return mapping[suffix.lower()]
         except KeyError as error:
             raise ImageValidationError(
-                "unsupported_output_format", "仅支持 JPG、PNG、WebP、GIF 和 TIFF"
+                "unsupported_output_format", "仅支持 JPG、PNG、WebP、GIF、TIFF 和 PDF"
             ) from error
 
 

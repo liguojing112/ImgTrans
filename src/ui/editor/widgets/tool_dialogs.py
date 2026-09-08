@@ -23,6 +23,17 @@ from PySide6.QtWidgets import (
 
 from src.domain.layout import TextBox
 from src.ui.common import wrap_spin
+from src.ui.editor.theme import EDITOR_DARK_THEME
+
+
+def _apply_editor_theme(dialog: QDialog) -> None:
+    """给顶层工具对话框套用编辑器浅色主题。
+
+    对话框是独立顶层窗口，主窗口的样式表不会级联进来；不套主题时
+    系统深色模式下会出现深底 + 深色文字的不可读组合。
+    """
+    dialog.setProperty("editorStyle", True)
+    dialog.setStyleSheet(EDITOR_DARK_THEME)
 
 
 class EraseToolDialog(QDialog):
@@ -37,6 +48,7 @@ class EraseToolDialog(QDialog):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle("AI 消除")
+        _apply_editor_theme(self)
         self.setModal(False)
         self.setMinimumWidth(340)
         layout = QVBoxLayout(self)
@@ -53,12 +65,26 @@ class EraseToolDialog(QDialog):
         self.rectangle_button = QPushButton("矩形框选")
         self.paint_button = QPushButton("涂抹画笔")
         self.erase_button = QPushButton("蒙版橡皮擦")
+        # 主题通用 QPushButton 规则不分状态，选中/未选中无法区分；
+        # 模式按钮用控件级内联样式保持选中态高亮（控件级优先于窗口级样式表）
         for button in (
             self.rectangle_button,
             self.paint_button,
             self.erase_button,
         ):
             button.setCheckable(True)
+            button.setStyleSheet(
+                "QPushButton {"
+                " background: #ffffff; color: #212733;"
+                " border: 1px solid #d5d9e0; border-radius: 6px;"
+                " padding: 6px 10px;"
+                "}"
+                "QPushButton:checked {"
+                " background: qlineargradient(x1:0, y1:0, x2:0, y2:1,"
+                " stop:0 #4a8af4, stop:1 #3973db);"
+                " color: #ffffff; border: 1px solid #5a9af4;"
+                "}"
+            )
             self.tool_group.addButton(button)
             tools.addWidget(button)
         self.rectangle_button.clicked.connect(
@@ -188,6 +214,7 @@ class CropToolDialog(QDialog):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle("裁剪")
+        _apply_editor_theme(self)
         self.setModal(False)
         self.setMinimumWidth(320)
         self._box: TextBox | None = None
@@ -331,6 +358,7 @@ class WatermarkToolDialog(QDialog):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle("添加水印")
+        _apply_editor_theme(self)
         self.setModal(False)
         self.setMinimumWidth(360)
         layout = QVBoxLayout(self)
@@ -429,3 +457,77 @@ class WatermarkToolDialog(QDialog):
     @property
     def selected_position(self) -> str:
         return str(self.position.currentData())
+
+
+class BatchExportDialog(QDialog):
+    """批量导出：选择导出格式与目标文件夹。
+
+    逐图导出一个文件；PDF 格式为每张图一个单页 PDF。
+    """
+
+    _FORMAT_ITEMS = (
+        ("PNG（推荐，保留透明通道）", ".png"),
+        ("JPG", ".jpg"),
+        ("WebP", ".webp"),
+        ("GIF（静态单帧）", ".gif"),
+        ("TIFF（单页）", ".tiff"),
+        ("PDF（每张图片一个文件）", ".pdf"),
+    )
+
+    def __init__(self, default_suffix: str, parent=None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("批量导出")
+        _apply_editor_theme(self)
+        self.setMinimumWidth(400)
+        layout = QVBoxLayout(self)
+        title = QLabel("批量导出工作台图片")
+        title.setObjectName("propertyTitle")
+        layout.addWidget(title)
+        hint = QLabel("工作台中每张图片导出为一个文件。")
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+        form = QFormLayout()
+        self.format = QComboBox()
+        for label, value in self._FORMAT_ITEMS:
+            self.format.addItem(label, value)
+        index = self.format.findData(default_suffix)
+        self.format.setCurrentIndex(index if index >= 0 else 0)
+        form.addRow("导出格式", self.format)
+        self.directory = QLineEdit()
+        self.directory.setPlaceholderText("选择保存导出的文件夹")
+        dir_row = QHBoxLayout()
+        dir_row.addWidget(self.directory)
+        browse = QPushButton("浏览...")
+        browse.setFixedWidth(70)
+        browse.clicked.connect(self._browse)
+        dir_row.addWidget(browse)
+        form.addRow("目标文件夹", dir_row)
+        layout.addLayout(form)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok
+            | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("导出")
+        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("取消")
+        buttons.accepted.connect(self._accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def _browse(self) -> None:
+        value = QFileDialog.getExistingDirectory(self, "选择批量导出目录")
+        if value:
+            self.directory.setText(value)
+
+    def _accept(self) -> None:
+        if not self.directory.text().strip():
+            self._browse()
+            return
+        self.accept()
+
+    @property
+    def selected_suffix(self) -> str:
+        return str(self.format.currentData())
+
+    @property
+    def selected_directory(self) -> Path:
+        return Path(self.directory.text().strip())

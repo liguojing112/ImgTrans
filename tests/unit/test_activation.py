@@ -106,3 +106,69 @@ def test_backend_scope_rejects_embedded_credentials() -> None:
             "https://user:secret@example.test",
         )
 
+
+
+class _StatusClient:
+    def __init__(self, session: ActivationSession, status: bool = True,
+                 fail: bool = False) -> None:
+        self.session = session
+        self.status_result = status
+        self.fail = fail
+        self.status_calls: list[tuple[str, str]] = []
+
+    def activate(self, activation_code: str, device_id: str) -> ActivationSession:
+        return self.session
+
+    def status(self, activation_code: str, device_id: str) -> bool:
+        self.status_calls.append((activation_code, device_id))
+        if self.fail:
+            raise ActivationError(
+                "activation_service_unavailable", "网络异常"
+            )
+        return self.status_result
+
+
+def _verified_coordinator(**session_kwargs) -> ActivationCoordinator:
+    return ActivationCoordinator(
+        _StatusClient(_session(), status=session_kwargs.pop("status_result", True),
+                      fail=session_kwargs.pop("status_fail", False)),
+        _MemoryCredentials(),
+        "https://api.example.test",
+    )
+
+
+def test_verify_active_keeps_credentials() -> None:
+    credentials = _MemoryCredentials()
+    client = _StatusClient(_session())
+    coordinator = ActivationCoordinator(client, credentials, "https://api.example.test")
+    coordinator.activate("IT-ABCD")
+    assert coordinator.verify() is True
+    assert client.status_calls[0][0] == "IT-ABCD"
+    assert coordinator.current_session() is not None
+
+
+def test_verify_unbound_clears_credentials() -> None:
+    credentials = _MemoryCredentials()
+    client = _StatusClient(_session(), status=False)
+    coordinator = ActivationCoordinator(client, credentials, "https://api.example.test")
+    coordinator.activate("IT-ABCD")
+    assert coordinator.verify() is False
+    assert coordinator.current_session() is None
+    assert not any(key.startswith("activation-session") for key in credentials.values)
+
+
+def test_verify_network_error_keeps_credentials() -> None:
+    credentials = _MemoryCredentials()
+    client = _StatusClient(_session(), fail=True)
+    coordinator = ActivationCoordinator(client, credentials, "https://api.example.test")
+    coordinator.activate("IT-ABCD")
+    assert coordinator.verify() is True
+    assert coordinator.current_session() is not None
+
+
+def test_verify_without_session_returns_false() -> None:
+    credentials = _MemoryCredentials()
+    coordinator = ActivationCoordinator(
+        _StatusClient(_session()), credentials, "https://api.example.test"
+    )
+    assert coordinator.verify() is False

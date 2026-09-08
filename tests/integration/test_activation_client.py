@@ -62,6 +62,37 @@ def test_http_activation_client_sends_only_code_and_device_and_parses_grant(monk
     assert session.quota_remaining == 100
 
 
+def test_http_activation_client_status_parses_active(monkeypatch) -> None:
+    captured = {}
+
+    def open_request(request, timeout):
+        captured["request"] = request
+        captured["timeout"] = timeout
+        return _Response({"active": True})
+
+    monkeypatch.setattr(module, "urlopen", open_request)
+    client = HttpActivationClient("https://api.example.test")
+    assert client.status("IT-ABCD", "imgtrans-device-123456") is True
+
+    request = captured["request"]
+    assert request.full_url == "https://api.example.test/v1/activations/status"
+    assert json.loads(request.data) == {
+        "activation_code": "IT-ABCD",
+        "device_id": "imgtrans-device-123456",
+    }
+
+
+def test_http_activation_client_status_rejects_invalid_payload(monkeypatch) -> None:
+    monkeypatch.setattr(
+        module, "urlopen", lambda request, timeout: _Response({"active": "yes"})
+    )
+    with pytest.raises(ActivationError) as captured:
+        HttpActivationClient("https://api.example.test").status(
+            "IT-ABCD", "imgtrans-device-123456"
+        )
+    assert captured.value.code == "invalid_activation_response"
+
+
 def test_http_activation_client_rejects_unexpected_response(monkeypatch) -> None:
     monkeypatch.setattr(module, "urlopen", lambda request, timeout: _Response({"status": "active"}))
     with pytest.raises(ActivationError) as captured:

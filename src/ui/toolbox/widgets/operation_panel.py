@@ -131,18 +131,11 @@ class OperationPanel(QFrame):
         rot_layout.addStretch()
         form.addRow(rot_group)
 
-        # ─ 格式转换 / 压缩 ──
-        fmt_group = QGroupBox("格式转换 / 压缩")
+        # ─ 压缩 ──
+        fmt_group = QGroupBox("压缩")
         fmt_group.setStyleSheet(crop_group.styleSheet())
         fmt_layout = QFormLayout(fmt_group)
         fmt_layout.setSpacing(6)
-
-        self._format_combo = QComboBox()
-        self._format_combo.addItems(
-            ["保持原格式", "PNG", "JPG", "WebP", "GIF（静态单帧）", "TIFF（单页）"]
-        )
-        self._format_combo.setStyleSheet(self._combo_style())
-        fmt_layout.addRow("输出格式:", self._format_combo)
 
         self._quality_w, self._quality_spin = self._make_spin(1, 100, 95, 70)
         fmt_layout.addRow("质量:", self._quality_w)
@@ -454,10 +447,6 @@ class OperationPanel(QFrame):
         flip_idx = self._flip_combo.currentIndex()
         flip = [None, "horizontal", "vertical"][flip_idx]
 
-        # 格式
-        fmt_idx = self._format_combo.currentIndex()
-        output_format = [None, "png", "jpg", "webp", "gif", "tiff"][fmt_idx]
-
         # 尺寸
         max_w = self._max_w.value()
         max_h = self._max_h.value()
@@ -469,7 +458,6 @@ class OperationPanel(QFrame):
             crop_box=crop_box,
             rotate_deg=rotate_deg,
             flip=flip,
-            output_format=output_format,
             quality=self._quality_spin.value(),
             max_size=max_size,
             watermarks=list(self._watermarks),

@@ -76,6 +76,9 @@ def apply_operations(
     cache_dir.mkdir(parents=True, exist_ok=True)
 
     output_format = params.output_format
+    # PDF 只作用于最终导出；中间文件保持 PNG（预览无法显示 PDF）
+    if output_format == "pdf":
+        output_format = "png"
     suffix = _format_to_suffix(output_format) if output_format else source.suffix.lower()
     if not suffix:
         suffix = ".png"
@@ -299,6 +302,7 @@ def _format_to_suffix(fmt: str) -> str:
         "gif": ".gif",
         "tif": ".tiff",
         "tiff": ".tiff",
+        "pdf": ".pdf",
     }.get(fmt.lower(), ".png")
 
 

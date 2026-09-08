@@ -54,6 +54,7 @@ from src.ui.editor.widgets.toolbar import EditorToolBar
 from src.ui.editor.widgets.layer_state_panel import LayerStatePanel
 from src.ui.editor.widgets.export_settings_panel import ExportSettingsPanel
 from src.ui.editor.widgets.tool_dialogs import (
+    BatchExportDialog,
     CropToolDialog,
     EraseToolDialog,
     WatermarkToolDialog,
@@ -93,6 +94,7 @@ class EditorPage(QWidget):
     import_requested = Signal(object)  # Path
     translate_requested = Signal(str, str)
     export_requested = Signal(object)  # Path
+    batch_export_requested = Signal(object, object)  # Path 目录, str 后缀
     save_requested = Signal()
     back_requested = Signal()
     feature_requested = Signal(str)
@@ -181,6 +183,7 @@ class EditorPage(QWidget):
         self.watermark_dialog = WatermarkToolDialog(self)
         self.manual_region_dialog = QDialog(self)
         self.manual_region_dialog.setWindowTitle("框选翻译")
+        self.manual_region_dialog.setProperty("editorStyle", True)
         self.manual_region_dialog.setModal(False)
         manual_layout = QVBoxLayout(self.manual_region_dialog)
         manual_layout.setContentsMargins(0, 0, 0, 0)
@@ -189,6 +192,9 @@ class EditorPage(QWidget):
         self.manual_region_dialog.resize(430, 720)
         self.batch_dialog = QDialog(self)
         self.batch_dialog.setWindowTitle("多图批量翻译")
+        # 对话框继承编辑器样式表（QSS 沿 QObject 父链传播），但没有 editorStyle
+        # 属性时根背景规则不匹配，系统深色模式下深底 + 深字不可读
+        self.batch_dialog.setProperty("editorStyle", True)
         self.batch_dialog.setModal(False)
         batch_layout = QVBoxLayout(self.batch_dialog)
         batch_layout.setContentsMargins(0, 0, 0, 0)
@@ -211,7 +217,7 @@ class EditorPage(QWidget):
         self.translate_scroll.setWidgetResizable(True)
         self.translate_scroll.setFrameShape(QFrame.Shape.NoFrame)
         self.translate_scroll.setHorizontalScrollBarPolicy(
-            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded
         )
         self.translate_scroll.setWidget(self.translate_controls)
         self.translate_controls.activity_changed.connect(
@@ -328,6 +334,9 @@ class EditorPage(QWidget):
         self.property_panel.ocr_property_changed.connect(
             self._on_ocr_property_changed
         )
+        self.property_panel.style_brush_applied.connect(
+            self._on_style_brush_applied
+        )
         self.property_panel.delete_layer_requested.connect(self.delete_requested.emit)
         self.property_panel.duplicate_layer_requested.connect(self.duplicate_requested.emit)
         self.property_panel.add_layer_requested.connect(self.add_layer_requested.emit)
@@ -428,6 +437,7 @@ class EditorPage(QWidget):
         self.top_bar.redo_requested.connect(self.redo_requested.emit)
 
         self.top_bar.export_requested.connect(self._on_export_clicked)
+        self.top_bar.batch_export_requested.connect(self._on_batch_export_clicked)
         self.export_settings.export_requested.connect(self._on_export_clicked)
         self.view.zoom_changed.connect(self._on_zoom_changed)
         self.manual_region_panel.select_requested.connect(
@@ -805,6 +815,19 @@ class EditorPage(QWidget):
                 target = target.with_suffix(suffix)
             self.export_requested.emit(target)
 
+    def _on_batch_export_clicked(self) -> None:
+        if not (hasattr(self, "_model") and self._model is not None):
+            return
+        if not self._model.documents():
+            return
+        dialog = BatchExportDialog(self.export_settings.selected_suffix, self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        self.batch_export_requested.emit(
+            dialog.selected_directory,
+            dialog.selected_suffix,
+        )
+
     def _on_toolbar_tool_changed(self, tool_id: str) -> None:
         if tool_id != "ai_erase":
             self.scene.set_mask_brush(None)
@@ -1026,6 +1049,24 @@ class EditorPage(QWidget):
             kind = "box"
 
         self.edit_requested.emit(region_id, kind, after, before)
+
+    def _on_style_brush_applied(
+        self, region_id: str, source_id: str, snapshot: dict[str, object]
+    ) -> None:
+        """格式刷：把捕获的样式快照整体应用到目标图层（一次 edit_requested）。"""
+        if not hasattr(self, "_model") or self._model is None:
+            return
+        try:
+            target = self._model.text_layout.layer_by_id(region_id)
+        except KeyError:
+            return
+        after = target
+        for field, value in snapshot.items():
+            candidate = self._apply_field_change(after, field, value)
+            if candidate is not None:
+                after = candidate
+        if after != target:
+            self.edit_requested.emit(region_id, "style", after, target)
 
     def _restore_ocr_regions(self) -> None:
         """从当前 OCR 结果重建识别框（set_document 会清空 _ocr_items）。"""
@@ -1363,6 +1404,7 @@ def _export_filter_for_suffix(suffix: str) -> str:
         ".webp": "WebP (*.webp)",
         ".gif": "GIF (*.gif)",
         ".tiff": "TIFF (*.tif *.tiff)",
+        ".pdf": "PDF (*.pdf)",
     }
     selected = filters.get(suffix, filters[".png"])
     remaining = [value for value in filters.values() if value != selected]

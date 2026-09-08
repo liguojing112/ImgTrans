@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 from PIL import Image, features
@@ -142,6 +143,27 @@ def test_export_options_control_quality_alpha_and_background(tmp_path: Path) -> 
     with Image.open(jpg) as opened:
         color = opened.convert("RGB").getpixel((0, 0))
         assert all(abs(actual - expected) < 8 for actual, expected in zip(color, (12, 34, 56)))
+
+
+def _pdf_page_count(data: bytes) -> int:
+    match = re.search(rb"/Count (\d+)", data)
+    assert match is not None, "PDF 缺少 /Count 页树信息"
+    return int(match.group(1))
+
+
+def test_export_pdf_single_page_flattens_rgba(tmp_path: Path) -> None:
+    source = tmp_path / "alpha-pdf.png"
+    image = Image.new("RGBA", (96, 72), (20, 40, 60, 255))
+    image.putpixel((0, 0), (200, 10, 30, 0))
+    image.save(source)
+    codec = PillowImageCodec()
+    document = codec.load(source, ImageLimits())
+    target = tmp_path / "result.pdf"
+    assert ExportImage(codec).execute(document, target) == target
+    data = target.read_bytes()
+    assert data.startswith(b"%PDF")
+    assert _pdf_page_count(data) == 1
+    assert b"/ColorSpace /DeviceRGB" in data
 
 
 def test_export_options_resize_output_without_changing_document(tmp_path: Path) -> None:

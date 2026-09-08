@@ -98,6 +98,77 @@ def test_finish_allowed_after_generation(monkeypatch) -> None:
         window.close()
 
 
+def _result_with_content():
+    from src.domain.copywriting import (
+        CopywritingResult,
+        DetailModule,
+        ImageTag,
+        ProductIntro,
+    )
+
+    return CopywritingResult(
+        tags=[ImageTag("t1", "tag one")],
+        intro=ProductIntro(one_liner="old", short_description="", standard_intro=""),
+        detail_modules=[
+            DetailModule("overview", "产品概述", "old overview"),
+            DetailModule("advantages", "核心优势", "old advantages"),
+        ],
+    )
+
+
+def test_merge_partial_result_empty_does_not_overwrite() -> None:
+    """重新生成返回空内容时不得覆盖已有文案。"""
+    window = _make_window()
+    try:
+        from src.domain.copywriting import CopywritingResult, DetailModule, ProductIntro
+
+        cr = _result_with_content()
+        window._model.copywriting_results = {0: cr}
+
+        window._merge_partial_result(CopywritingResult(intro=ProductIntro()))
+        assert cr.intro.one_liner == "old"
+
+        window._merge_partial_result(CopywritingResult(
+            detail_modules=[DetailModule("advantages", "核心优势", "")]
+        ))
+        contents = {m.section: m.content for m in cr.detail_modules}
+        assert contents == {
+            "overview": "old overview",
+            "advantages": "old advantages",
+        }
+
+        window._merge_partial_result(CopywritingResult(
+            detail_modules=[DetailModule("advantages", "核心优势", "new advantages")]
+        ))
+        contents = {m.section: m.content for m in cr.detail_modules}
+        assert contents == {
+            "overview": "old overview",
+            "advantages": "new advantages",
+        }
+        assert len(cr.detail_modules) == 2
+    finally:
+        window.close()
+
+
+def test_empty_section_names_reports_missing_content() -> None:
+    from src.ui.product.product_window import _empty_section_names
+    from src.domain.copywriting import CopywritingResult, DetailModule, ProductIntro
+
+    empty = CopywritingResult(detail_modules=[
+        DetailModule("overview", "产品概述", ""),
+    ])
+    assert "商品简介" in _empty_section_names(empty)
+    assert "详情文案" in _empty_section_names(empty)
+    assert "图片标签" in _empty_section_names(empty)
+
+    good = CopywritingResult(
+        tags=["x"], keywords=["y"], titles=["z"], selling_points=["s"],
+        intro=ProductIntro(one_liner="L"),
+        detail_modules=[DetailModule("overview", "产品概述", "有内容")],
+    )
+    assert _empty_section_names(good) == []
+
+
 def test_regeneration_controls_disable_while_request_is_in_flight() -> None:
     window = _make_window()
     try:

@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 from PIL import Image
@@ -210,3 +211,105 @@ def test_batch_export_can_isolate_results_in_named_subdirectory(
 def test_batch_export_rejects_unsafe_subdirectory_names(name: str) -> None:
     with pytest.raises(ValueError, match="subdirectory"):
         BatchExportOptions(subdirectory_name=name)
+
+
+def _pdf_page_count(data: bytes) -> int:
+    match = re.search(rb"/Count (\d+)", data)
+    assert match is not None, "PDF 缺少 /Count 页树信息"
+    return int(match.group(1))
+
+
+def test_batch_export_pdf_writes_one_single_page_file_per_image(
+    tmp_path: Path,
+) -> None:
+    first_source = tmp_path / "one" / "product.png"
+    second_source = tmp_path / "two" / "product.webp"
+    store = _MemoryResultStore(
+        {
+            "r1": _document(first_source, (10, 20, 30)),
+            "r2": _document(second_source, (40, 50, 60)),
+        }
+    )
+    snapshot = BatchSnapshot(
+        "batch-test",
+        BatchStatus.COMPLETED,
+        (
+            BatchItemSnapshot("i1", first_source, BatchItemStatus.COMPLETED, result_ref="r1"),
+            BatchItemSnapshot("i2", second_source, BatchItemStatus.COMPLETED, result_ref="r2"),
+        ),
+        2,
+    )
+    result = ExportBatchSelection(store, ExportImage(PillowImageCodec())).execute(
+        snapshot,
+        ("i1", "i2"),
+        tmp_path,
+        ".pdf",
+    )
+    assert result.succeeded_count == 2
+    assert result.failed_count == 0
+    targets = [item.target for item in result.items]
+    assert all(target is not None for target in targets)
+    assert len(set(targets)) == 2
+    assert [target.name for target in targets] == [
+        "product-translated.pdf",
+        "product-translated-2.pdf",
+    ]
+    for target in targets:
+        data = target.read_bytes()
+        assert data.startswith(b"%PDF")
+        assert _pdf_page_count(data) == 1
+
+
+def test_batch_export_pdf_only_writes_file_for_success_items(tmp_path: Path) -> None:
+    source = tmp_path / "ok.png"
+    store = _MemoryResultStore({"ok": _document(source, (1, 2, 3))})
+    snapshot = BatchSnapshot(
+        "batch-test",
+        BatchStatus.COMPLETED,
+        (
+            BatchItemSnapshot("ok", source, BatchItemStatus.COMPLETED, result_ref="ok"),
+            BatchItemSnapshot("bad", Path("bad.png"), BatchItemStatus.FAILED, error="bad"),
+        ),
+        2,
+    )
+    result = ExportBatchSelection(store, ExportImage(PillowImageCodec())).execute(
+        snapshot,
+        ("ok", "bad"),
+        tmp_path,
+        ".pdf",
+    )
+    assert result.succeeded_count == 1
+    assert result.failed_count == 1
+    assert result.items[0].target.is_file()
+    assert _pdf_page_count(result.items[0].target.read_bytes()) == 1
+    assert result.items[1].target is None
+
+
+def test_batch_export_pdf_respects_subdirectory_option(tmp_path: Path) -> None:
+    source = tmp_path / "product.png"
+    store = _MemoryResultStore({"result": _document(source, (40, 50, 60))})
+    snapshot = BatchSnapshot(
+        "batch-test",
+        BatchStatus.COMPLETED,
+        (
+            BatchItemSnapshot(
+                "item",
+                source,
+                BatchItemStatus.COMPLETED,
+                result_ref="result",
+            ),
+        ),
+        1,
+    )
+    result = ExportBatchSelection(
+        store, ExportImage(PillowImageCodec())
+    ).execute(
+        snapshot,
+        ("item",),
+        tmp_path,
+        ".pdf",
+        BatchExportOptions(subdirectory_name="translated-run"),
+    )
+    assert result.succeeded_count == 1
+    assert result.items[0].target.parent == tmp_path / "translated-run"
+    assert _pdf_page_count(result.items[0].target.read_bytes()) == 1

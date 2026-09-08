@@ -64,6 +64,7 @@ class ExportSettingsPanel(QFrame):
         self.format_combo.addItem("WebP", ".webp")
         self.format_combo.addItem("GIF（静态单帧）", ".gif")
         self.format_combo.addItem("TIFF（单页）", ".tiff")
+        self.format_combo.addItem("PDF（单页）", ".pdf")
         self.format_combo.currentIndexChanged.connect(self._update_estimate)
         form.addRow("输出格式", self.format_combo)
         self.quality = QSpinBox()

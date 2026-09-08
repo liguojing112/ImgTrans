@@ -54,6 +54,7 @@ class StepCopywriting(QFrame):
     export_txt_requested = Signal(str)
     export_json_requested = Signal(str)
     export_csv_requested = Signal(str)
+    export_pdf_requested = Signal(str)
     prev_requested = Signal()
     finish_requested = Signal()
     settings_changed = Signal(object)  # CopywritingSettings
@@ -268,9 +269,13 @@ class StepCopywriting(QFrame):
         json_btn.clicked.connect(lambda: self.export_json_requested.emit(""))
         csv_btn = QPushButton("导出 CSV")
         csv_btn.clicked.connect(lambda: self.export_csv_requested.emit(""))
+        pdf_btn = QPushButton("导出 PDF")
+        pdf_btn.setToolTip("与 TXT 相同内容，排版为 A4 文档，方便打印和发送")
+        pdf_btn.clicked.connect(lambda: self.export_pdf_requested.emit(""))
         export_layout.addWidget(txt_btn)
         export_layout.addWidget(json_btn)
         export_layout.addWidget(csv_btn)
+        export_layout.addWidget(pdf_btn)
         mid_layout.addWidget(export_group)
 
         mid.setWidget(mid_widget)
@@ -448,6 +453,12 @@ class StepCopywriting(QFrame):
         self._detail_editor.setPlainText(
             self._detail_contents.get(self._current_detail_section, "")
         )
+
+    def set_detail_section_content(self, section: str, content: str) -> None:
+        """只刷新单个详情区块（重新生成合并用，避免覆盖其他区块的手动编辑）。"""
+        self._detail_contents[section] = content
+        if section == self._current_detail_section:
+            self._detail_editor.setPlainText(content)
 
     def set_error(self, message: str) -> None:
         pass

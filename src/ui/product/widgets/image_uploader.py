@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
 )
 
 from src.domain.product_info import ProductSourceImage
+from src.ui.editor.theme import EDITOR_DARK_THEME
 
 _PURPOSE_LABELS = {
     "main": "商品主图",
@@ -223,6 +224,9 @@ class ImageUploader(QFrame):
         dialog.setOption(QFileDialog.Option.DontUseNativeDialog, True)
         dialog.setWindowModality(Qt.WindowModality.ApplicationModal)
         dialog.resize(1000, 600)
+        # 顶层弹窗：主题的根背景规则要求 editorStyle 属性，不设则跟随系统深色调色板深底深字
+        dialog.setProperty("editorStyle", True)
+        dialog.setStyleSheet(EDITOR_DARK_THEME)
         # 调整左侧树宽：找到 QSplitter 设置比例
         sp = dialog.findChild(QSplitter)
         if sp:

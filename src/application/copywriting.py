@@ -116,6 +116,28 @@ class GenerateCopywriting:
                 time.sleep(1.0 * (attempt + 1))
         return None
 
+    def _chat_json(self, prompt: str, what: str, max_tokens: int) -> dict | None:
+        """LLM 调用 + JSON 解析；解析失败自动重试并附纠正指令。
+
+        全部失败返回 None（原始返回内容已由 _parse_json_block 打印到控制台），
+        调用方用 or {} 兜底，避免静默吞错导致整段文案为空却提示"生成完成"。
+        """
+        corrective = ""
+        for attempt in range(3):
+            raw = self._llm.chat(
+                [{"role": "user", "content": prompt + corrective}],
+                max_tokens=max_tokens,
+            )
+            try:
+                return _parse_json_block(raw, what)
+            except ValueError:
+                if attempt < 2:
+                    corrective = (
+                        "\n注意：你上一次的返回不是有效 JSON。"
+                        "请只返回一个 JSON 对象，不要输出任何解释或多余文字。"
+                    )
+        return None
+
     def regenerate_item(
         self,
         fact: ProductFact,
@@ -172,16 +194,31 @@ class GenerateCopywriting:
         prompt += (
             f"\n请生成 {settings.tag_count} 个电商图片标签，用于 {settings.target_language} 市场。"
             f"\n标签风格: {settings.style}，语气: {settings.tone}。"
-            f"\n每个标签一行，只返回标签列表，不要编号。"
+            f"\n必须恰好生成 {settings.tag_count} 个标签，每行一个，"
+            "不要编号、不要解释。"
         )
         if settings.banned_words:
             prompt += f"\n不要使用以下词语: {', '.join(settings.banned_words)}"
 
-        raw = self._llm.chat(
-            [{"role": "user", "content": prompt}],
-            max_tokens=1024,
-        )
-        return self._parse_lines(raw, settings, ImageTag)
+        # 数量不足时重试并保留最好的一次结果，避免静默缺项
+        best: list[ImageTag] = []
+        for _attempt in range(3):
+            raw = self._llm.chat(
+                [{"role": "user", "content": prompt}],
+                max_tokens=1024,
+            )
+            results = self._parse_lines(raw, settings, ImageTag)
+            if len(results) > len(best):
+                best = results
+            if len(results) >= settings.tag_count:
+                return results
+        if best:
+            print(
+                f"[Copywriting] 标签数量不足（{len(best)}/{settings.tag_count}），"
+                "重试后仍缺项",
+                flush=True,
+            )
+        return best
 
     # ── 长尾场景词 ──
 
@@ -266,15 +303,7 @@ class GenerateCopywriting:
         prompt += ", ".join(f'"{cat}": ["卖点1", "卖点2"]' for cat, _ in categories)
         prompt += "}\n只返回 JSON。"
 
-        raw = self._llm.chat(
-            [{"role": "user", "content": prompt}],
-            max_tokens=1024,
-        )
-
-        try:
-            data = json.loads(_extract_json(raw))
-        except (json.JSONDecodeError, KeyError):
-            data = {}
+        data = self._chat_json(prompt, "商品卖点", 1024) or {}
 
         results: list[SellingPoint] = []
         for i, (cat, _) in enumerate(categories):
@@ -303,14 +332,7 @@ class GenerateCopywriting:
             f'\n  "standard_intro": "标准简介（100词以内）"'
             f"\n}}\n只返回 JSON。"
         )
-        raw = self._llm.chat(
-            [{"role": "user", "content": prompt}],
-            max_tokens=1024,
-        )
-        try:
-            data = json.loads(_extract_json(raw))
-        except (json.JSONDecodeError, KeyError):
-            data = {}
+        data = self._chat_json(prompt, "商品简介", 1024) or {}
         return ProductIntro(
             one_liner=data.get("one_liner", ""),
             short_description=data.get("short_description", ""),
@@ -334,9 +356,9 @@ class GenerateCopywriting:
         ]
 
         generated: dict[str, DetailModule] = {}
-        # 分批生成：每批 4 个模块（max_tokens 4096 下不会截断），
-        # 全部批次与规格并行，减少请求数、缩短总耗时
-        batch_size = 4
+        # 分批生成：每批 2 个模块（单次响应更短，降低截断/解析失败概率），
+        # 全部批次与规格并行，缩短总耗时
+        batch_size = 2
         non_specs = [item for item in sections if item[0] != "specs"]
         batches = [
             non_specs[start:start + batch_size]
@@ -412,14 +434,7 @@ class GenerateCopywriting:
             prompt += f'\n  "{sec}": "## {label}\\n\\n(内容)",'
         prompt += "\n}}\n只返回 JSON。"
 
-        raw = self._llm.chat(
-            [{"role": "user", "content": prompt}],
-            max_tokens=2048,
-        )
-        try:
-            data = json.loads(_extract_json(raw))
-        except (json.JSONDecodeError, KeyError):
-            data = {}
+        data = self._chat_json(prompt, "详情文案", 2048) or {}
 
         results: list[DetailModule] = []
         for sec, label in batch:
@@ -510,12 +525,36 @@ class GenerateCopywriting:
 
 
 def _extract_json(raw: str) -> str:
-    """从 LLM 返回中提取 JSON 块。"""
+    """从 LLM 返回中提取 JSON 块（优先围栏代码块）。"""
     raw = raw.strip()
     if raw.startswith("{"):
         return raw
     import re
-    match = re.search(r'\{[\s\S]*\}', raw)
+    fence = re.search(r"```(?:json)?\s*([\s\S]*?)```", raw)
+    if fence and fence.group(1).strip().startswith("{"):
+        return fence.group(1).strip()
+    match = re.search(r"\{[\s\S]*\}", raw)
     if match:
         return match.group(0)
     return raw
+
+
+def _parse_json_block(raw: str, what: str) -> dict:
+    """解析 LLM 返回的 JSON 对象。
+
+    失败时把原始返回前 300 字打到控制台再抛 ValueError，
+    由 _chat_json 重试、最终由调用方兜底——不再静默返回空对象。
+    """
+    try:
+        data = json.loads(_extract_json(raw))
+    except ValueError as error:
+        preview = " ".join(raw.split())[:300]
+        print(
+            f"[Copywriting] {what} JSON 解析失败: {error}\n"
+            f"[Copywriting] {what} 原始返回(前300字): {preview}",
+            flush=True,
+        )
+        raise ValueError(f"{what}返回内容不是有效JSON") from error
+    if not isinstance(data, dict):
+        raise ValueError(f"{what}返回的JSON不是对象")
+    return data

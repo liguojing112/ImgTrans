@@ -21,16 +21,28 @@ class HttpActivationClient:
             raise ValueError("Backend URL cannot contain credentials, query or fragment")
         if timeout_seconds <= 0:
             raise ValueError("Activation timeout must be positive")
-        self._url = f"{base_url.rstrip('/')}/v1/activations/validate"
+        self._url = f"{base_url.rstrip('/')}/v1/activations"
         self._timeout_seconds = timeout_seconds
 
+    def status(self, activation_code: str, device_id: str) -> bool:
+        """只读检查激活码在本机的绑定状态（不重新绑定）。"""
+        payload = self._post(
+            "/status", {"activation_code": activation_code, "device_id": device_id}
+        )
+        if not isinstance(payload, dict) or not isinstance(payload.get("active"), bool):
+            raise ActivationError("invalid_activation_response", "激活服务响应无效")
+        return payload["active"]
+
     def activate(self, activation_code: str, device_id: str) -> ActivationSession:
-        encoded = json.dumps(
-            {"activation_code": activation_code, "device_id": device_id},
-            separators=(",", ":"),
-        ).encode("utf-8")
+        payload = self._post(
+            "/validate", {"activation_code": activation_code, "device_id": device_id}
+        )
+        return _parse_response(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
+
+    def _post(self, path: str, body: dict) -> object:
+        encoded = json.dumps(body, separators=(",", ":")).encode("utf-8")
         request = Request(
-            self._url,
+            self._url + path,
             data=encoded,
             headers={
                 "Accept": "application/json",
@@ -54,10 +66,14 @@ class HttpActivationClient:
             ) from error
         if len(payload) > _MAX_RESPONSE_BYTES:
             raise ActivationError(
-                "invalid_activation_response",
-                "激活服务响应无效",
+                "invalid_activation_response", "激活服务响应无效"
             )
-        return _parse_response(payload)
+        try:
+            return json.loads(payload.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise ActivationError(
+                "invalid_activation_response", "激活服务响应无效"
+            ) from error
 
 
 def _parse_response(encoded: bytes) -> ActivationSession:

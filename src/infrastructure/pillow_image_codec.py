@@ -198,4 +198,9 @@ class PillowImageCodec:
             return flattened.convert("P", palette=Image.Palette.ADAPTIVE), {"save_all": False}
         if output_format is ImageFileFormat.TIFF:
             return image, {"compression": "tiff_lzw"}
+        if output_format is ImageFileFormat.PDF:
+            # PDF 无透明通道：RGBA 合成到指定背景色后存 RGB
+            if image.mode == "RGBA":
+                return self._flatten(image, options.background_rgb), {}
+            return image.convert("RGB"), {}
         raise ImageValidationError("unsupported_output_format", "不支持该导出格式")

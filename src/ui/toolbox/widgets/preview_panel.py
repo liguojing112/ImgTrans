@@ -8,6 +8,7 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QAbstractSpinBox,
+    QComboBox,
     QFrame,
     QFormLayout,
     QGroupBox,
@@ -35,6 +36,8 @@ class PreviewPanel(QFrame):
     watermark_selected = Signal(str)
     watermark_moved = Signal(str, float, float)
     watermark_scaled = Signal(str, float)
+
+    _EXPORT_FORMAT_VALUES = [None, "png", "jpg", "webp", "gif", "tiff", "pdf"]
 
     def __init__(self, model: ToolBoxModel) -> None:
         super().__init__()
@@ -84,6 +87,17 @@ class PreviewPanel(QFrame):
         export_form = QFormLayout(export_group)
         export_form.setSpacing(6)
 
+        self._export_format_combo = QComboBox()
+        self._export_format_combo.addItems(
+            ["保持原格式", "PNG", "JPG", "WebP", "GIF（静态单帧）", "TIFF（单页）",
+             "PDF"]
+        )
+        self._export_format_combo.setStyleSheet(
+            "QComboBox { background: #ffffff; color: #212733; border: 1px solid #d5d9e0;"
+            "  padding: 4px 8px; border-radius: 4px; }"
+        )
+        export_form.addRow("导出格式:", self._export_format_combo)
+
         self._target_dir = QLineEdit()
         self._target_dir.setPlaceholderText("选择导出文件夹")
         self._target_dir.setStyleSheet(
@@ -102,13 +116,16 @@ class PreviewPanel(QFrame):
         target_row.addWidget(browse_btn)
         target_widget = QWidget()
         target_widget.setLayout(target_row)
-        export_form.addRow("目标文件夹:", target_widget)
+        self._target_label = QLabel("目标文件夹:")
+        export_form.addRow(self._target_label, target_widget)
 
         # 文件名起始序号
+        self._suffix_label = QLabel("文件名起始序号:")
         suffix_container, self._suffix_spin = self._make_spin(0, 99999, 0, 100)
         self._suffix_spin.setPrefix("IMG_")
         self._suffix_spin.setToolTip("输出文件名前缀序号")
-        export_form.addRow("文件名起始序号:", suffix_container)
+        self._suffix_container = suffix_container
+        export_form.addRow(self._suffix_label, suffix_container)
 
         layout.addWidget(export_group)
 
@@ -130,6 +147,10 @@ class PreviewPanel(QFrame):
 
         self._model.selection_changed.connect(self._update_preview)
         self._model.images_changed.connect(self._update_preview)
+
+    @property
+    def export_format(self) -> str | None:
+        return self._EXPORT_FORMAT_VALUES[self._export_format_combo.currentIndex()]
 
     @staticmethod
     def _make_spin(min_v: int, max_v: int, default: int, width: int = 80) -> tuple:

@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
-from unittest import mock
 
 from src.ui.toolbox.tool_box_model import (
     OperationParams,
@@ -133,3 +133,18 @@ class TestToolBoxOperations:
         from src.application.toolbox_operations import apply_operations, export_image
         assert callable(apply_operations)
         assert callable(export_image)
+
+    def test_export_image_pdf_writes_single_page_pdf(self, tmp_path):
+        from PIL import Image
+        from src.application.toolbox_operations import export_image
+
+        source = tmp_path / "photo.png"
+        Image.new("RGB", (40, 30), (200, 0, 0)).save(source)
+        target_dir = tmp_path / "out"
+        target_dir.mkdir()
+        target = export_image(source, target_dir, index=0, output_format="pdf")
+        assert target == target_dir / "IMG_0000.pdf"
+        assert target.is_file()
+        data = target.read_bytes()
+        assert data.startswith(b"%PDF")
+        assert re.search(rb"/Count (\d+)", data).group(1) == b"1"

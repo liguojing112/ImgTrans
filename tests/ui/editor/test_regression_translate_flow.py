@@ -2716,3 +2716,693 @@ def test_send_batch_to_editor_uses_translated_result_for_completed_items():
         assert window._model.source_document is original_b
     finally:
         window.close()
+
+
+class _FakeBatchExportDialog:
+    """替身批量导出对话框：按构造参数返回目录/后缀，exec 直接接受。"""
+
+    instances: list = []
+
+    def __init__(self, default_suffix: str, parent=None):
+        del parent
+        self.default_suffix = default_suffix
+        self.suffix = default_suffix
+        _FakeBatchExportDialog.instances.append(self)
+
+    def exec(self):
+        from PySide6.QtWidgets import QDialog
+
+        return QDialog.DialogCode.Accepted
+
+    @property
+    def selected_directory(self):
+        return Path("FAKE_OUT")
+
+    @property
+    def selected_suffix(self):
+        return self.suffix
+
+
+def _workbench_batch_export_window(monkeypatch, tmp_path, suffix=".png"):
+    """构造含 2 个工作台文档的编辑器窗口，批量导出对话框替身指向 tmp_path/out。"""
+    _FakeBatchExportDialog.instances = []
+    dialog_captured: list[tuple[str, str]] = []
+    exported: list[ImageDocument] = []
+
+    def fake_export(document, target, export_usecase, codec, options=None):
+        del export_usecase, codec, options
+        exported.append(document)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(b"fake")
+        return target
+
+    monkeypatch.setattr("src.ui.editor.main_window.export_document", fake_export)
+    monkeypatch.setattr(
+        QMessageBox,
+        "information",
+        lambda _parent, title, text: dialog_captured.append((title, text)),
+    )
+
+    class FakeDialog(_FakeBatchExportDialog):
+        @property
+        def selected_directory(self):
+            return tmp_path / "out"
+
+    monkeypatch.setattr("src.ui.editor.editor_page.BatchExportDialog", FakeDialog)
+
+    source_a = _document()
+    source_b = _document(w=200, h=80)
+    result_a = FakeTranslateImage().execute(
+        source_a,
+        "en",
+        TranslationSelection(TranslationMode.ALL, "zh-Hans"),
+    )
+    window = EditorMainWindow(
+        import_image=object(),
+        task_runner=ImmediateTaskRunner(),
+        create_composition_editor=CreateCompositionEditor(
+            QtBasicTextLayoutAdapter("Arial"),
+            QtTextRenderer(),
+        ),
+    )
+    window._on_image_loaded(source_a)
+    window._on_translation_succeeded(result_a)
+    window._editor_page.export_settings.format_combo.setCurrentIndex(
+        window._editor_page.export_settings.format_combo.findData(suffix)
+    )
+    window._model.add_document(Path("b.png"), source_b, name="b.png")
+    window._load_active_document()
+    return window, source_a, source_b, exported, dialog_captured
+
+
+def test_top_bar_batch_export_button_exports_all_workbench_documents(
+    monkeypatch,
+    tmp_path,
+):
+    """工具栏「批量导出」：选格式和目录后，工作台每个文档各导出一个文件。"""
+    QApplication.instance() or QApplication(["workbench-batch-export-button-test"])
+    window, source_a, source_b, exported, dialog_captured = (
+        _workbench_batch_export_window(monkeypatch, tmp_path, ".png")
+    )
+    try:
+        top_bar = window._editor_page.top_bar
+        assert top_bar.batch_export_btn.text() == "批量导出"
+        # 工作台已有图片 → 按钮启用
+        assert top_bar.batch_export_btn.isEnabled()
+
+        top_bar.batch_export_btn.click()
+
+        # 对话框默认取导出设置当前格式
+        assert _FakeBatchExportDialog.instances[0].default_suffix == ".png"
+        # 按文档列表顺序导出：a（已翻译）在前，b（未翻译，原图）在后
+        assert exported == [source_a, source_b]
+        out = tmp_path / "out"
+        # 两个 fake 文档同名（stem 都是 fake）→ 去重出 -2 后缀
+        assert (out / "fake_translated.png").is_file()
+        assert (out / "fake_translated-2.png").is_file()
+        assert dialog_captured[0][0] == "批量导出成功"
+        assert "成功导出 2/2 张图片" in dialog_captured[0][1]
+        assert str(out) in dialog_captured[0][1]
+    finally:
+        window.close()
+
+
+def test_top_bar_batch_export_pdf_writes_one_file_per_image(
+    monkeypatch,
+    tmp_path,
+):
+    """批量导出选 PDF：每张图片一个单页 PDF 文件（不合并多页）。"""
+    QApplication.instance() or QApplication(["workbench-batch-export-pdf-test"])
+    window, _a, _b, exported, dialog_captured = _workbench_batch_export_window(
+        monkeypatch, tmp_path, ".pdf"
+    )
+    try:
+        window._editor_page.top_bar.batch_export_btn.click()
+
+        assert _FakeBatchExportDialog.instances[0].default_suffix == ".pdf"
+        assert len(exported) == 2
+        out = tmp_path / "out"
+        assert (out / "fake_translated.pdf").is_file()
+        assert (out / "fake_translated-2.pdf").is_file()
+        assert dialog_captured[0][0] == "批量导出成功"
+    finally:
+        window.close()
+
+
+def test_batch_export_dialog_format_default_and_properties():
+    """批量导出对话框：默认选中导出设置的格式，目录/后缀属性正确。"""
+    QApplication.instance() or QApplication(["batch-export-dialog-test"])
+    from src.ui.editor.widgets.tool_dialogs import BatchExportDialog
+
+    dialog = BatchExportDialog(".jpg")
+    try:
+        assert dialog.selected_suffix == ".jpg"
+        dialog.format.setCurrentIndex(0)
+        assert dialog.selected_suffix == ".png"
+        dialog.format.setCurrentIndex(
+            dialog.format.findData(".pdf")
+        )
+        assert dialog.selected_suffix == ".pdf"
+        dialog.directory.setText("  /tmp/out  ")
+        assert dialog.selected_directory == Path("/tmp/out")
+    finally:
+        dialog.close()
+
+    pdf_dialog = BatchExportDialog(".pdf")
+    try:
+        assert pdf_dialog.selected_suffix == ".pdf"
+    finally:
+        pdf_dialog.close()
+
+
+def test_menu_bar_text_stays_dark_under_system_dark_palette():
+    """系统深色模式（调色板文字变浅）下，菜单栏文字仍保持深色，不出现浅底白字。"""
+    from PySide6.QtGui import QPalette
+
+    app = QApplication.instance() or QApplication(["menubar-dark-mode-test"])
+    original_palette = QPalette(app.palette())
+    dark_mode_palette = QPalette(app.palette())
+    light_text = QColor(235, 235, 235)
+    for role in (
+        QPalette.ColorRole.WindowText,
+        QPalette.ColorRole.Text,
+        QPalette.ColorRole.ButtonText,
+    ):
+        dark_mode_palette.setColor(role, light_text)
+    app.setPalette(dark_mode_palette)
+    try:
+        window = EditorMainWindow(import_image=object())
+        try:
+            menu = window.menuBar()
+            assert menu.property("editorStyle") is True
+            menu.resize(menu.sizeHint())
+            image = menu.grab().toImage()
+            dark_pixels = 0
+            for y in range(image.height()):
+                for x in range(image.width()):
+                    if image.pixelColor(x, y).lightness() < 150:
+                        dark_pixels += 1
+            # 「首页 文件 编辑 视图 帮助 账户」为深色文字 → 深色像素充足
+            assert dark_pixels > 100
+        finally:
+            window.close()
+    finally:
+        app.setPalette(original_palette)
+
+
+def test_qmessagebox_keeps_light_theme_under_system_dark_palette():
+    """系统深色模式下，编辑器弹窗（QMessageBox）保持浅色主题：浅底深字。
+
+    QMessageBox 是顶层窗，根背景规则 [editorStyle="true"] 不匹配它，
+    但主体通用 QLabel/QPushButton 规则沿 QObject 父链传播——若背景跟随系统
+    深色调色板就会出现深底 + 深字的不可读组合。"""
+    from PySide6.QtGui import QPalette
+    from PySide6.QtWidgets import QMainWindow, QMessageBox
+
+    from src.ui.editor.theme import EDITOR_DARK_THEME
+
+    app = QApplication.instance() or QApplication(["msgbox-dark-mode-test"])
+    original_palette = QPalette(app.palette())
+    dark_mode_palette = QPalette(app.palette())
+    dark_mode_palette.setColor(QPalette.ColorRole.Window, QColor(43, 43, 43))
+    dark_mode_palette.setColor(QPalette.ColorRole.Base, QColor(30, 30, 30))
+    light_text = QColor(235, 235, 235)
+    for role in (
+        QPalette.ColorRole.WindowText,
+        QPalette.ColorRole.Text,
+        QPalette.ColorRole.ButtonText,
+    ):
+        dark_mode_palette.setColor(role, light_text)
+    app.setPalette(dark_mode_palette)
+    parent = QMainWindow()
+    parent.setProperty("editorStyle", True)
+    parent.setStyleSheet(EDITOR_DARK_THEME)
+    try:
+        box = QMessageBox(
+            QMessageBox.Icon.Warning,
+            "提示",
+            "请先激活后，再查看额度",
+            parent=parent,
+        )
+        box.addButton("确定", QMessageBox.ButtonRole.AcceptRole)
+        try:
+            box.resize(box.sizeHint())
+            image = box.grab().toImage()
+            # 角落像素应为浅色背景（#faf7f1），而非深色调色板底色
+            assert image.pixelColor(2, 2).lightness() > 200
+            dark_pixels = 0
+            for y in range(image.height()):
+                for x in range(image.width()):
+                    if image.pixelColor(x, y).lightness() < 150:
+                        dark_pixels += 1
+            # 消息文字为深色 → 深色像素充足
+            assert dark_pixels > 100
+        finally:
+            box.deleteLater()
+    finally:
+        parent.deleteLater()
+        app.setPalette(original_palette)
+
+
+def test_tool_dialogs_keep_light_theme_under_system_dark_palette():
+    """系统深色模式（窗口底色变深、文字变浅）下，顶层工具对话框仍保持浅色主题：
+    背景为奶白浅色、标签文字为深色，不出现深底 + 深字的不可读组合。"""
+    from PySide6.QtGui import QPalette
+
+    from src.ui.editor.widgets.tool_dialogs import BatchExportDialog, EraseToolDialog
+
+    app = QApplication.instance() or QApplication(["dialogs-dark-mode-test"])
+    original_palette = QPalette(app.palette())
+    dark_mode_palette = QPalette(app.palette())
+    dark_mode_palette.setColor(QPalette.ColorRole.Window, QColor(43, 43, 43))
+    dark_mode_palette.setColor(QPalette.ColorRole.Base, QColor(30, 30, 30))
+    light_text = QColor(235, 235, 235)
+    for role in (
+        QPalette.ColorRole.WindowText,
+        QPalette.ColorRole.Text,
+        QPalette.ColorRole.ButtonText,
+    ):
+        dark_mode_palette.setColor(role, light_text)
+    app.setPalette(dark_mode_palette)
+    try:
+        for dialog in (BatchExportDialog(".png"), EraseToolDialog()):
+            try:
+                assert dialog.property("editorStyle") is True
+                dialog.resize(dialog.sizeHint())
+                image = dialog.grab().toImage()
+                # 角落像素应为浅色背景（#faf7f1），而非深色调色板底色
+                assert image.pixelColor(2, 2).lightness() > 200
+                dark_pixels = 0
+                for y in range(image.height()):
+                    for x in range(image.width()):
+                        if image.pixelColor(x, y).lightness() < 150:
+                            dark_pixels += 1
+                # 标题/提示等 QLabel 为深色文字 → 深色像素充足
+                assert dark_pixels > 100
+            finally:
+                dialog.deleteLater()
+    finally:
+        app.setPalette(original_palette)
+
+
+def test_batch_dialog_keeps_light_theme_under_system_dark_palette():
+    """系统深色模式下，多图批量翻译对话框（顶层窗口）保持浅色主题：
+    根背景浅色、标签文字深色、表格表头浅底深字。"""
+    from PySide6.QtGui import QPalette
+
+    app = QApplication.instance() or QApplication(["batch-dialog-dark-mode-test"])
+    original_palette = QPalette(app.palette())
+    dark_mode_palette = QPalette(app.palette())
+    dark_mode_palette.setColor(QPalette.ColorRole.Window, QColor(43, 43, 43))
+    dark_mode_palette.setColor(QPalette.ColorRole.Base, QColor(30, 30, 30))
+    light_text = QColor(235, 235, 235)
+    for role in (
+        QPalette.ColorRole.WindowText,
+        QPalette.ColorRole.Text,
+        QPalette.ColorRole.ButtonText,
+    ):
+        dark_mode_palette.setColor(role, light_text)
+    app.setPalette(dark_mode_palette)
+    try:
+        window = EditorMainWindow(import_image=object())
+        try:
+            dialog = window._editor_page.batch_dialog
+            assert dialog.property("editorStyle") is True
+            dialog.show()
+            app.processEvents()
+            image = dialog.grab().toImage()
+            # 根背景为浅色（#faf7f1），而非深色调色板底色
+            assert image.pixelColor(2, 2).lightness() > 200
+            dark_pixels = 0
+            for y in range(image.height()):
+                for x in range(image.width()):
+                    if image.pixelColor(x, y).lightness() < 150:
+                        dark_pixels += 1
+            # 标题/提示等 QLabel 为深色文字 → 深色像素充足
+            assert dark_pixels > 100
+            # 表格表头：浅底 + 深色标题文字
+            header_image = (
+                window._editor_page.batch_panel.items.header().grab().toImage()
+            )
+            assert header_image.pixelColor(2, 2).lightness() > 150
+            dark_header = 0
+            for y in range(header_image.height()):
+                for x in range(header_image.width()):
+                    if header_image.pixelColor(x, y).lightness() < 150:
+                        dark_header += 1
+            assert dark_header > 50
+        finally:
+            dialog.close()
+            window.close()
+    finally:
+        app.setPalette(original_palette)
+
+
+def test_product_window_menu_bar_text_stays_dark_under_system_dark_palette():
+    """商品详情窗口菜单栏（首页/文件/编辑/视图/帮助/账户）在系统深色模式下保持深色文字。"""
+    from PySide6.QtGui import QPalette
+
+    from src.ui.product.product_window import ProductWindow
+
+    class _FakeTaskRunner:
+        def submit(self, operation, on_success, on_error):
+            on_success(operation())
+
+    class _FakeCodec:
+        def load(self, path):
+            raise FileNotFoundError(path)
+
+    app = QApplication.instance() or QApplication(["product-menu-dark-mode-test"])
+    original_palette = QPalette(app.palette())
+    dark_mode_palette = QPalette(app.palette())
+    dark_mode_palette.setColor(QPalette.ColorRole.Window, QColor(43, 43, 43))
+    dark_mode_palette.setColor(QPalette.ColorRole.Base, QColor(30, 30, 30))
+    light_text = QColor(235, 235, 235)
+    for role in (
+        QPalette.ColorRole.WindowText,
+        QPalette.ColorRole.Text,
+        QPalette.ColorRole.ButtonText,
+    ):
+        dark_mode_palette.setColor(role, light_text)
+    app.setPalette(dark_mode_palette)
+    window = ProductWindow(
+        task_runner=_FakeTaskRunner(),
+        codec=_FakeCodec(),
+        ocr_adapter=object(),
+        llm_adapter=object(),
+    )
+    try:
+        window.show()
+        image = window.grab().toImage()
+        # 「首页 文件 编辑 视图 帮助 账户」为深色文字 → 深色像素充足
+        dark_pixels = 0
+        for y in range(image.height()):
+            for x in range(image.width()):
+                if image.pixelColor(x, y).lightness() < 150:
+                    dark_pixels += 1
+        assert dark_pixels > 100
+    finally:
+        window.close()
+        app.setPalette(original_palette)
+
+
+def test_image_uploader_file_dialog_keeps_light_theme_under_system_dark_palette():
+    """商品图片选择文件对话框（Qt 自绘）在系统深色模式下保持浅色主题。"""
+    from PySide6.QtGui import QPalette
+    from PySide6.QtWidgets import QFileDialog
+
+    app = QApplication.instance() or QApplication(["file-dialog-dark-mode-test"])
+    original_palette = QPalette(app.palette())
+    dark_mode_palette = QPalette(app.palette())
+    dark_mode_palette.setColor(QPalette.ColorRole.Window, QColor(43, 43, 43))
+    dark_mode_palette.setColor(QPalette.ColorRole.Base, QColor(30, 30, 30))
+    light_text = QColor(235, 235, 235)
+    for role in (
+        QPalette.ColorRole.WindowText,
+        QPalette.ColorRole.Text,
+        QPalette.ColorRole.ButtonText,
+    ):
+        dark_mode_palette.setColor(role, light_text)
+    app.setPalette(dark_mode_palette)
+
+    from src.ui.product.widgets.image_uploader import ImageUploader
+
+    uploader = ImageUploader()
+    try:
+        dialogs = []
+
+        def _make_dialog():
+            dialog = QFileDialog(uploader, "选择商品图片", "C:/Users")
+            dialog.setNameFilter("图片文件 (*.jpg *.jpeg *.png *.webp *.bmp)")
+            dialog.setOption(QFileDialog.Option.DontUseNativeDialog, True)
+            dialog.setProperty("editorStyle", True)
+            from src.ui.editor.theme import EDITOR_DARK_THEME
+
+            dialog.setStyleSheet(EDITOR_DARK_THEME)
+            dialogs.append(dialog)
+            return dialog
+
+        # 直接实例化并隐藏 exec，只做渲染验证
+        dialog = _make_dialog()
+        dialog.show()
+        app.processEvents()
+        dialog.resize(dialog.sizeHint())
+        image = dialog.grab().toImage()
+        # 角落应为浅色背景
+        assert image.pixelColor(2, 2).lightness() > 200
+    finally:
+        for dialog in dialogs:
+            dialog.close()
+        uploader.deleteLater()
+        app.setPalette(original_palette)
+
+
+def _apply_dark_mode_palette(app):
+    from PySide6.QtGui import QPalette
+
+    palette = QPalette(app.palette())
+    palette.setColor(QPalette.ColorRole.Window, QColor(43, 43, 43))
+    palette.setColor(QPalette.ColorRole.Base, QColor(30, 30, 30))
+    light_text = QColor(235, 235, 235)
+    for role in (
+        QPalette.ColorRole.WindowText,
+        QPalette.ColorRole.Text,
+        QPalette.ColorRole.ButtonText,
+    ):
+        palette.setColor(role, light_text)
+    return palette
+
+
+def _assert_light_dialog(dialog) -> None:
+    """断言弹窗以浅色像素为主（品牌紫面板除外），且含深色文字。"""
+    dialog.resize(dialog.sizeHint())
+    image = dialog.grab().toImage()
+    total = max(1, image.width() * image.height())
+    light_pixels = 0
+    dark_text_pixels = 0
+    for y in range(image.height()):
+        for x in range(image.width()):
+            lightness = image.pixelColor(x, y).lightness()
+            if lightness > 200:
+                light_pixels += 1
+            elif lightness < 90:
+                dark_text_pixels += 1
+    assert light_pixels / total > 0.3, (
+        f"{type(dialog).__name__} 浅色像素占比过低（系统深底 43,43,43 会失败；紫色品牌面板 159 可通过）"
+    )
+    assert dark_text_pixels > 100, f"{type(dialog).__name__} 应含深色文字"
+
+
+def _assert_brand_purple_dialog(dialog) -> None:
+    """激活对话框是紫色品牌面板（白字），断言紫底 + 无系统深色灰底。"""
+    dialog.resize(dialog.sizeHint())
+    image = dialog.grab().toImage()
+    total = max(1, image.width() * image.height())
+    purple_pixels = 0
+    white_pixels = 0
+    system_gray_pixels = 0
+    for y in range(image.height()):
+        for x in range(image.width()):
+            color = image.pixelColor(x, y)
+            lightness = color.lightness()
+            if (
+                color.red() > 100
+                and color.blue() > 200
+                and color.green() < 150
+            ):
+                purple_pixels += 1
+            elif lightness > 200:
+                white_pixels += 1
+            elif (
+                color.red() == color.green() == color.blue()
+                and 25 <= color.red() <= 55
+            ):
+                system_gray_pixels += 1
+    assert system_gray_pixels / total < 0.3, (
+        f"{type(dialog).__name__} 不应大面积出现系统深色灰底"
+    )
+    assert purple_pixels + white_pixels > total * 0.5, (
+        f"{type(dialog).__name__} 应为品牌紫 + 白字"
+    )
+
+
+def test_all_editor_dialogs_keep_light_theme_under_system_dark_palette():
+    """编辑器/商品窗口打开的全部对话框在系统深色模式下保持浅底深字。"""
+    from datetime import datetime, timezone
+
+    from PySide6.QtGui import QPalette
+    from PySide6.QtWidgets import QMainWindow, QMessageBox
+
+    from src.ui.activation_dialog import ActivationDialog
+    from src.ui.ecommerce_settings_dialog import EcommerceSettingsDialog
+    from src.ui.editor.main_window import EDITOR_DARK_THEME
+    from src.ui.help_dialog import HelpDialog
+    from src.ui.purchase_dialog import PurchaseDialog
+    from src.ui.quota_dialog import QuotaDialog
+
+    class _TaskRunner:
+        def submit(self, operation, on_success, on_error):
+            on_success(operation())
+
+    class _PaymentClient:
+        def list_plans(self):
+            return []
+
+    app = QApplication.instance() or QApplication(["all-dialogs-dark-mode-test"])
+    original_palette = QPalette(app.palette())
+    app.setPalette(_apply_dark_mode_palette(app))
+
+    # 编辑器主题宿主：顶层弹窗无 editorStyle 属性，靠主题的 QDialog 兜底规则
+    parent = QMainWindow()
+    parent.setProperty("editorStyle", True)
+    parent.setStyleSheet(EDITOR_DARK_THEME)
+    try:
+        dialogs = [
+            HelpDialog(parent=parent),
+            EcommerceSettingsDialog({}, None, parent=parent),
+            QuotaDialog(
+                "IT-ABCD-EFGH-JKLM-NPQR-STUV-WXYZ-2345-6789",
+                datetime(2030, 1, 1, tzinfo=timezone.utc),
+                10,
+                10,
+                refresh_usage=lambda: (10, 10),
+                task_runner=_TaskRunner(),
+                parent=parent,
+            ),
+            PurchaseDialog(
+                _PaymentClient(), _TaskRunner(), parent=parent,
+            ),
+            ActivationDialog(
+                lambda code: None,
+                lambda: None,
+                lambda: None,
+                _TaskRunner(),
+                parent=parent,
+            ),
+        ]
+        try:
+            for dialog in dialogs:
+                try:
+                    dialog.show()
+                    app.processEvents()
+                    if isinstance(dialog, ActivationDialog):
+                        _assert_brand_purple_dialog(dialog)
+                    else:
+                        _assert_light_dialog(dialog)
+                finally:
+                    dialog.deleteLater()
+        finally:
+            parent.deleteLater()
+    finally:
+        app.setPalette(original_palette)
+
+
+def test_legacy_dialogs_keep_light_theme_under_system_dark_palette():
+    """旧工作台（_STYLE 主题）宿主的对话框在系统深色模式下保持浅底深字。"""
+    from datetime import datetime, timezone
+
+    from PySide6.QtGui import QPalette
+    from PySide6.QtWidgets import QMainWindow
+
+    from src.ui.activation_dialog import ActivationDialog
+    from src.ui.ecommerce_settings_dialog import EcommerceSettingsDialog
+    from src.ui.help_dialog import HelpDialog
+    from src.ui.main_window import _STYLE
+    from src.ui.purchase_dialog import PurchaseDialog
+    from src.ui.quota_dialog import QuotaDialog
+
+    class _TaskRunner:
+        def submit(self, operation, on_success, on_error):
+            on_success(operation())
+
+    class _PaymentClient:
+        def list_plans(self):
+            return []
+
+    app = QApplication.instance() or QApplication(["legacy-dialogs-dark-mode-test"])
+    original_palette = QPalette(app.palette())
+    app.setPalette(_apply_dark_mode_palette(app))
+
+    parent = QMainWindow()
+    parent.setStyleSheet(_STYLE)
+    try:
+        dialogs = [
+            HelpDialog(parent=parent),
+            EcommerceSettingsDialog({}, None, parent=parent),
+            QuotaDialog(
+                "IT-ABCD-EFGH-JKLM-NPQR-STUV-WXYZ-2345-6789",
+                datetime(2030, 1, 1, tzinfo=timezone.utc),
+                10,
+                10,
+                refresh_usage=lambda: (10, 10),
+                task_runner=_TaskRunner(),
+                parent=parent,
+            ),
+            PurchaseDialog(
+                _PaymentClient(), _TaskRunner(), parent=parent,
+            ),
+            ActivationDialog(
+                lambda code: None,
+                lambda: None,
+                lambda: None,
+                _TaskRunner(),
+                parent=parent,
+            ),
+        ]
+        try:
+            for dialog in dialogs:
+                try:
+                    dialog.show()
+                    app.processEvents()
+                    if isinstance(dialog, ActivationDialog):
+                        _assert_brand_purple_dialog(dialog)
+                    else:
+                        _assert_light_dialog(dialog)
+                finally:
+                    dialog.deleteLater()
+        finally:
+            parent.deleteLater()
+    finally:
+        app.setPalette(original_palette)
+
+
+def test_verify_activation_invalid_clears_credentials_and_warns():
+    """窗口激活校验返回 False（后台解绑/停用）时，弹出重新激活提示。"""
+    from src.ui.editor.main_window import EditorMainWindow
+
+    app = QApplication.instance() or QApplication(["verify-activation-warning-test"])
+    warnings = []
+
+    def _operation():
+        return True
+
+    def _fake_task_runner():
+        class _Runner:
+            def submit(self, operation, on_success, on_error):
+                on_success(operation())
+
+        return _Runner()
+
+    window = EditorMainWindow(
+        import_image=lambda *a, **k: None,
+        export_image=lambda *a, **k: None,
+        codec=object(),
+        task_runner=_fake_task_runner(),
+        translate_image=_operation,
+        recognize_text=_operation,
+        process_manual_region=_operation,
+        repair_selection=_operation,
+        verify_activation=lambda: False,
+    )
+    try:
+        original_warning = QMessageBox.warning
+        QMessageBox.warning = lambda parent, title, text, *a, **k: warnings.append(
+            (title, text)
+        )
+        try:
+            window.request_activation_check()
+        finally:
+            QMessageBox.warning = original_warning
+        assert warnings and "请重新激活" in warnings[0][1]
+    finally:
+        window.close()
