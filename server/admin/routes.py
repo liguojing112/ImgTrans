@@ -334,11 +334,8 @@ async def issue_activation_codes(request: Request) -> Response:
         _integer(form, "count"),
     )
     request.state.audit_action = "issue_activation_codes"
-    response = _activation_response(
-        request,
-        session,
-        issued_codes=tuple(item.plaintext for item in issued),
-    )
+    # PRG：发码结果页若留在浏览器历史里，刷新/后退会再次提交表单，重复发出激活码
+    response = _redirect(f"/admin/activation?issued={len(issued)}")
     response.headers["Cache-Control"] = "no-store"
     return response
 
@@ -886,10 +883,10 @@ def _activation_response(
     request: Request,
     session: AdminSession,
     *,
-    issued_codes: tuple[str, ...] = (),
     error: str | None = None,
 ) -> HTMLResponse:
     page = max(1, _query_int(request, "page", 1))
+    issued_count = max(0, _query_int(request, "issued", 0))
     status = (request.query_params.get("status") or "").strip() or None
     search = (request.query_params.get("q") or "").strip()
     codes, total = request.app.state.manage_activation_codes.list_page(
@@ -906,7 +903,7 @@ def _activation_response(
         plans=plans,
         plan_names={plan.plan_id: plan.values.name for plan in plans},
         codes=codes,
-        issued_codes=issued_codes,
+        issued_count=issued_count,
         activation_configured=request.app.state.device_authorization_enabled,
         search=search,
         status=status or "all",

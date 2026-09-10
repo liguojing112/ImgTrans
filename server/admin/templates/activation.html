@@ -100,9 +100,8 @@
 
 {% if error %}<p class="error" style="margin:12px 0;">{{ error }}</p>{% endif %}
 
-{% if issued_codes %}<section class="card warning"><h2>本次生成的激活码（仅显示一次）</h2>
-<table><tr><th>激活码</th><th>激活日期</th><th>操作</th></tr>{% for value in issued_codes %}<tr><td><code>{{ value }}</code></td><td>未激活</td><td><button data-copy="{{ value }}">复制</button></td></tr>{% endfor %}</table>
-<p>离开本页后无法再次查看。</p></section>{% endif %}
+{% if issued_count %}<section class="card warning"><h2>已生成 {{ issued_count }} 个激活码</h2>
+<p>本次生成的激活码在下方「激活码记录」最上方（按生成时间倒序），可直接复制。</p></section>{% endif %}
 
 <div class="promo-card">
   <form method="post" action="/admin/activation/plans">

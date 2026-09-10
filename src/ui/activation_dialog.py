@@ -19,6 +19,13 @@ from PySide6.QtWidgets import (
 
 from src.domain.activation import ActivationSession
 
+# 激活复核原因（ActivationCoordinator.verify 返回码）→ 用户提示
+ACTIVATION_CHECK_MESSAGES = {
+    "expired": "激活已到期，请续期或重新激活。",
+    "inactive": "本机激活已失效（可能已被解绑或停用），请重新激活。",
+    "missing": "当前设备尚未激活，请输入激活码。",
+}
+
 
 class TaskRunner(Protocol):
     def submit(
@@ -115,14 +122,16 @@ class ActivationDialog(QDialog):
         left_layout.addWidget(self.status_label)
 
         if unbind is not None:
-            self.unbind_button = QPushButton("👉 我已付款，找回我的激活码")
+            self.unbind_button = QPushButton("解绑本机设备（换机 / 找回激活码）")
             self.unbind_button.setObjectName("unbindDeviceButton")
             self.unbind_button.setStyleSheet(
                 "QPushButton { background: transparent; color: #fbbf24;"
                 "  border: none; font-size: 13px; }"
                 "QPushButton:hover { color: #f59e0b; }"
             )
-            self.unbind_button.setToolTip("输入激活码解绑本机，换机后可重新激活该码")
+            self.unbind_button.setToolTip(
+                "输入激活码解除服务器绑定（剩余时长/次数保留），换机后可重新激活该码"
+            )
             self.unbind_button.clicked.connect(self.request_unbind)
             left_layout.addWidget(self.unbind_button, alignment=Qt.AlignmentFlag.AlignCenter)
 
@@ -140,12 +149,16 @@ class ActivationDialog(QDialog):
             left_layout.addWidget(self.purchase_button, alignment=Qt.AlignmentFlag.AlignCenter)
 
         if clear_activation is not None:
-            self.clear_button = QPushButton("清除本机激活")
+            self.clear_button = QPushButton("清除本机激活凭据")
             self.clear_button.setObjectName("clearActivationButton")
             self.clear_button.setStyleSheet(
                 "QPushButton { background: transparent; color: #f87171;"
                 "  border: none; font-size: 12px; }"
                 "QPushButton:hover { color: #ef4444; }"
+            )
+            self.clear_button.setToolTip(
+                "只清除本机保存的激活信息，不解除服务器绑定；"
+                "换机请用「解绑本机设备」"
             )
             self.clear_button.clicked.connect(self.request_clear)
             left_layout.addWidget(self.clear_button, alignment=Qt.AlignmentFlag.AlignCenter)
@@ -212,7 +225,8 @@ class ActivationDialog(QDialog):
     def request_unbind(self) -> None:
         if self._unbind is None:
             return
-        code = self.code_edit.text().strip()
+        # 与激活一致地规范化：服务端按大写校验激活码，小写输入会直接被拒
+        code = self.code_edit.text().strip().upper()
         if not code:
             self.status_label.setText("请输入要解绑的激活码")
             return
@@ -285,6 +299,10 @@ class ActivationDialog(QDialog):
 
     def _clear_succeeded(self, _result: object) -> None:
         self._set_session_status(None)
+        if self._unbind is not None:
+            self.status_label.setText(
+                "本机凭据已清除；服务器仍保留本机绑定，换机请用「解绑本机设备」"
+            )
         self.activation_cleared.emit()
 
     def _operation_failed(self, error: Exception) -> None:

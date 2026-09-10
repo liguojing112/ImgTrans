@@ -408,11 +408,17 @@ def test_all_management_pages_render_and_secrets_are_not_exposed() -> None:
                 "/admin/activation/codes",
                 data={"csrf_token": csrf, "plan_id": "1", "count": "1"},
             )
-            assert issued.status_code == 200
-            match = re.search(r"IT-(?:[A-HJ-NP-Z2-9]{4}-){7}[A-HJ-NP-Z2-9]{4}", issued.text)
+            # PRG：发码后 303 重定向，浏览器刷新/后退不会重复提交表单
+            assert issued.status_code == 303
+            assert issued.headers["location"] == "/admin/activation?issued=1"
+            assert issued.headers["Cache-Control"] == "no-store"
+            issued_page = await client.get(issued.headers["location"])
+            assert "已生成 1 个激活码" in issued_page.text
+            match = re.search(
+                r"IT-(?:[A-HJ-NP-Z2-9]{4}-){7}[A-HJ-NP-Z2-9]{4}", issued_page.text
+            )
             assert match is not None
             plaintext = match.group(0)
-            assert issued.headers["Cache-Control"] == "no-store"
             later = await client.get("/admin/activation")
             audit = await client.get("/admin/audit")
             # 明文加密入库后，激活码记录区持久显示明文（供管理员核对/复制）
@@ -420,6 +426,47 @@ def test_all_management_pages_render_and_secrets_are_not_exposed() -> None:
             assert plaintext not in audit.text
             assert "code_digest" not in later.text
             assert "token_digest" not in later.text
+
+    try:
+        _run(scenario)
+    finally:
+        app.state.database.close()
+
+
+def test_issue_codes_result_page_is_not_replayable() -> None:
+    """PRG 回归：刷新/重访发码结果页不得再发出激活码。"""
+    app = _app()
+
+    async def scenario():
+        transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+            csrf = await _login(client)
+            await client.post(
+                "/admin/activation/plans",
+                data={
+                    "csrf_token": csrf,
+                    "name": "回归套餐",
+                    "amount_minor": "10",
+                    "currency": "CNY",
+                    "duration_hours": "24",
+                    "enabled": "true",
+                },
+                follow_redirects=False,
+            )
+            page = await client.get("/admin/activation")
+            issued = await client.post(
+                "/admin/activation/codes",
+                data={"csrf_token": _csrf(page.text), "plan_id": "1", "count": "2"},
+                follow_redirects=False,
+            )
+            assert issued.status_code == 303
+            assert len(app.state.manage_activation_codes.list_all()) == 2
+            # 用户刷新发码结果页（GET）多次，不得额外发码
+            for _ in range(3):
+                refreshed = await client.get(issued.headers["location"])
+                assert refreshed.status_code == 200
+                assert "已生成 2 个激活码" in refreshed.text
+            assert len(app.state.manage_activation_codes.list_all()) == 2
 
     try:
         _run(scenario)
@@ -508,8 +555,12 @@ def test_activation_page_formats_binding_times_as_beijing_time() -> None:
             issued = await client.post(
                 "/admin/activation/codes",
                 data={"csrf_token": csrf, "plan_id": "1", "count": "1"},
+                follow_redirects=False,
             )
-            match = re.search(r"IT-(?:[A-HJ-NP-Z2-9]{4}-){7}[A-HJ-NP-Z2-9]{4}", issued.text)
+            issued_page = await client.get(issued.headers["location"])
+            match = re.search(
+                r"IT-(?:[A-HJ-NP-Z2-9]{4}-){7}[A-HJ-NP-Z2-9]{4}", issued_page.text
+            )
             assert match is not None
             code = app.state.manage_activation_codes.list_all(match.group(0))[0]
             with app.state.database.session() as session:

@@ -74,7 +74,7 @@ from src.ui.ocr_panel import OcrPanel
 from src.ui.pipeline_panel import PipelinePanel
 from src.ui.translation_panel import TranslationPanel
 from src.ui.text_edit_panel import TextEditPanel
-from src.ui.activation_dialog import ActivationDialog
+from src.ui.activation_dialog import ACTIVATION_CHECK_MESSAGES, ActivationDialog
 
 
 class TaskRunner(Protocol):
@@ -403,6 +403,9 @@ class MainWindow(QMainWindow):
             self._task_runner,
             self,
             purchase_available=self._payment_client is not None,
+            unbind=(
+                self._quota_client.unbind if self._quota_client is not None else None
+            ),
         )
         dialog.activated.connect(self._activation_succeeded)
         dialog.activation_cleared.connect(self._activation_cleared)
@@ -448,14 +451,12 @@ class MainWindow(QMainWindow):
 
     def _activation_check_finished(self, result: object) -> None:
         self._activation_check_running = False
-        if result is False:
-            from PySide6.QtWidgets import QMessageBox
+        if isinstance(result, str):
+            message = ACTIVATION_CHECK_MESSAGES.get(result)
+            if message is not None:
+                from PySide6.QtWidgets import QMessageBox
 
-            QMessageBox.warning(
-                self,
-                "提示",
-                "本机激活已失效（可能已被客服解绑或已到期），请重新激活。",
-            )
+                QMessageBox.warning(self, "提示", message)
 
     def _activation_check_failed(self, error: Exception) -> None:
         self._activation_check_running = False

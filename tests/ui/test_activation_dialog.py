@@ -6,7 +6,7 @@ from unittest import mock
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtWidgets import QApplication, QMessageBox
+from PySide6.QtWidgets import QApplication, QMessageBox, QPushButton
 
 from src.domain.activation import ActivationSession
 from src.application.bootstrap import StartupSnapshot
@@ -144,3 +144,66 @@ def test_main_window_exposes_activation_action_when_backend_callbacks_exist(tmp_
     application.processEvents()
     assert window.findChild(ActivationDialog, "activationDialog") is not None
     window.close()
+
+
+class _UnbindClient:
+    def __init__(self) -> None:
+        self.codes: list[str] = []
+
+    def unbind(self, activation_code: str) -> bool:
+        self.codes.append(activation_code)
+        return True
+
+
+def test_launcher_activation_dialog_offers_unbind_when_quota_client_present(tmp_path) -> None:
+    application = QApplication.instance() or QApplication(["imgtrans-test"])
+    client = _UnbindClient()
+    window = MainWindow(
+        StartupSnapshot(
+            ProductInfo("图片翻译", "0.1.0", "M4"),
+            tmp_path / "data",
+            tmp_path / "cache",
+        ),
+        task_runner=_ImmediateRunner(),
+        activate_device=lambda code: _session(),
+        activation_status=lambda: None,
+        clear_activation=lambda: None,
+        quota_client=client,
+    )
+    window.activation_action.trigger()
+    application.processEvents()
+
+    dialog = window.findChild(ActivationDialog, "activationDialog")
+    assert dialog is not None
+    button = window.findChild(QPushButton, "unbindDeviceButton")
+    assert button is not None, "启动窗口的激活对话框也必须能解绑换机"
+    assert "解绑" in button.text()
+    dialog.close()
+    window.close()
+
+
+def test_unbind_normalizes_code_case_and_clears_local_hint() -> None:
+    application = QApplication.instance() or QApplication(["imgtrans-test"])
+    client = _UnbindClient()
+    dialog = ActivationDialog(
+        lambda code: _session(),
+        lambda: _session(),
+        lambda: None,
+        _ImmediateRunner(),
+        unbind=client.unbind,
+    )
+    dialog.code_edit.setText(" it-abcd ")
+    with mock.patch.object(
+        QMessageBox, "question", return_value=QMessageBox.StandardButton.Yes
+    ):
+        dialog.request_unbind()
+    application.processEvents()
+
+    assert client.codes == ["IT-ABCD"]
+    assert "解绑成功" in dialog.status_label.text()
+
+    dialog.code_edit.setText("IT-ABCD")
+    dialog.request_clear()
+    application.processEvents()
+    assert "服务器仍保留本机绑定" in dialog.status_label.text()
+    dialog.close()
