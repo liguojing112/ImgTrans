@@ -95,6 +95,10 @@ class EditorMainWindow(QMainWindow):
         terminology_catalog: TerminologyCatalog | None = None,
         terminology_preferences: object | None = None,
         ecommerce_preferences: object | None = None,
+        font_preferences: object | None = None,
+        translation_font: str | None = None,
+        paragraph_mode: str | None = None,
+        paragraph_mode_preferences: object | None = None,
         update_ecommerce_translation: object | None = None,
         translation_service_label: str = "翻译服务：可用",
         translation_service_available: bool = True,
@@ -140,6 +144,10 @@ class EditorMainWindow(QMainWindow):
         self._terminology_catalog = terminology_catalog
         self._terminology_preferences = terminology_preferences
         self._ecommerce_preferences = ecommerce_preferences
+        self._font_preferences = font_preferences
+        self._initial_translation_font = translation_font
+        self._paragraph_mode_preferences = paragraph_mode_preferences
+        self._initial_paragraph_mode = paragraph_mode
         self._update_ecommerce_translation = update_ecommerce_translation
         self._terminology_entries: tuple[TerminologyEntry, ...] = ()
         self._updating_terminology = False
@@ -491,14 +499,14 @@ class EditorMainWindow(QMainWindow):
 
     def _activation_check_finished(self, result: object) -> None:
         self._activation_check_running = False
-        if result is False:
-            from PySide6.QtWidgets import QMessageBox
+        if isinstance(result, str):
+            from src.ui.activation_dialog import ACTIVATION_CHECK_MESSAGES
 
-            QMessageBox.warning(
-                self,
-                "提示",
-                "本机激活已失效（可能已被客服解绑或已到期），请重新激活。",
-            )
+            message = ACTIVATION_CHECK_MESSAGES.get(result)
+            if message is not None:
+                from PySide6.QtWidgets import QMessageBox
+
+                QMessageBox.warning(self, "提示", message)
 
     def _activation_check_failed(self, error: Exception) -> None:
         self._activation_check_running = False
@@ -647,6 +655,9 @@ class EditorMainWindow(QMainWindow):
 
         # 属性编辑
         self._editor_page.edit_requested.connect(self._on_edit)
+        self._editor_page.style_brush_batch_requested.connect(
+            self._on_style_brush_batch
+        )
         self._editor_page.ocr_preview_changed.connect(
             self._on_ocr_preview_changed
         )
@@ -681,6 +692,14 @@ class EditorMainWindow(QMainWindow):
             self._persist_protection_terms
         )
         controls = self._editor_page.translate_controls
+        controls.set_translation_font(self._initial_translation_font)
+        controls.translation_font_changed.connect(
+            self._on_translation_font_changed
+        )
+        controls.set_paragraph_mode(self._initial_paragraph_mode or "long")
+        controls.paragraph_mode_changed.connect(
+            self._on_paragraph_mode_changed
+        )
         self._terminology_timer = QTimer(self)
         self._terminology_timer.setSingleShot(True)
         self._terminology_timer.setInterval(400)
@@ -766,6 +785,36 @@ class EditorMainWindow(QMainWindow):
                 self.statusBar().showMessage(f"无法应用电商翻译设置：{error}", 7000)
                 return
         self.statusBar().showMessage("电商翻译设置已保存并生效", 5000)
+
+    def _on_translation_font_changed(self, value: object) -> None:
+        font_family = value if isinstance(value, str) else None
+        adapter = self._text_layout_adapter
+        if adapter is not None and hasattr(adapter, "set_font_family"):
+            adapter.set_font_family(font_family)
+        if self._font_preferences is None:
+            return
+        try:
+            self._font_preferences.save(font_family)
+            self.statusBar().showMessage(
+                "译文字体已保存" if font_family else "译文字体已恢复自动匹配",
+                3000,
+            )
+        except Exception as error:
+            self.statusBar().showMessage(f"无法保存译文字体设置：{error}", 5000)
+
+    def _on_paragraph_mode_changed(self, value: str) -> None:
+        if self._paragraph_mode_preferences is None:
+            return
+        try:
+            self._paragraph_mode_preferences.save(value)
+            self.statusBar().showMessage(
+                "段落模式已保存：短文（逐行独立翻译）"
+                if value == "short"
+                else "段落模式已保存：长文（合并相邻行整段翻译）",
+                3000,
+            )
+        except Exception as error:
+            self.statusBar().showMessage(f"无法保存段落模式设置：{error}", 5000)
 
     def _enter_editor(self) -> None:
         self._stack.setCurrentWidget(self._editor_page)
@@ -1741,6 +1790,7 @@ class EditorMainWindow(QMainWindow):
                 allow_low_confidence=ctrl.should_process_low_confidence,
                 automatic_confidence_threshold=ctrl.automatic_confidence_threshold,
                 preserve_numbers=ctrl.should_preserve_numbers,
+                merge_paragraphs=ctrl.merge_paragraphs,
             ),
             lambda value: self._on_translation_succeeded(
                 value, translating_doc_id
@@ -2102,6 +2152,9 @@ class EditorMainWindow(QMainWindow):
                 controls.selected_ocr_language,
                 controls.selected_target_language,
             )
+            self._editor_page.manual_region_panel.set_paragraph_mode(
+                str(controls.paragraph_mode.currentData())
+            )
             self._editor_page.open_manual_region_dialog()
             self.statusBar().showMessage("请在图片上拖动框选漏翻文字区域")
 
@@ -2208,6 +2261,7 @@ class EditorMainWindow(QMainWindow):
                 selection,
                 brand_terms,
                 preserve_numbers=controls.should_preserve_numbers,
+                merge_paragraphs=panel.merge_paragraphs,
             )
             edit = editor.apply_manual_region(
                 manual.repaired_background.document,
@@ -2817,6 +2871,18 @@ class EditorMainWindow(QMainWindow):
 
         self._task_runner.submit(
             op,
+            self._editor_page.apply_edit_result,
+            lambda e: self.statusBar().showMessage(f"编辑失败：{e}"),
+        )
+
+    def _on_style_brush_batch(self, updates) -> None:
+        """格式刷框选：把捕获样式批量套用到多个区域，单次后台渲染。"""
+        editor = self._model.composition_editor
+        if editor is None or self._task_runner is None or not updates:
+            return
+        self.statusBar().showMessage("正在应用格式刷…")
+        self._task_runner.submit(
+            lambda: editor.replace_style_many(updates),
             self._editor_page.apply_edit_result,
             lambda e: self.statusBar().showMessage(f"编辑失败：{e}"),
         )

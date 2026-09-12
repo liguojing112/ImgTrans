@@ -107,6 +107,41 @@ def test_adapter_normalizes_result_and_caches_profile_engine() -> None:
     assert first.regions[0].polygon[0].x == 10
 
 
+def test_recognize_tags_regions_by_script_language() -> None:
+    """回归：混合语言图片的区域不应统一打 OCR 所选语言标签。
+
+    历史缺陷：所有区域共享 OCR 所选语言，导致「只翻译指定语言」
+    （按 region.language_code 过滤）要么全部通过、要么全部跳过。"""
+    texts = ["你好世界", "COTTON TISSUE", "Привет", "こんにちは"]
+    boxes = np.array(
+        [
+            [[10, 10], [110, 10], [110, 35], [10, 35]],
+            [[10, 40], [110, 40], [110, 65], [10, 65]],
+            [[10, 70], [110, 70], [110, 95], [10, 95]],
+            [[10, 100], [110, 100], [110, 118], [10, 118]],
+        ],
+        dtype=float,
+    )
+
+    class _MixedEngine:
+        def __call__(self, image: np.ndarray, **_options: object) -> SimpleNamespace:
+            return SimpleNamespace(
+                boxes=boxes, txts=list(texts), scores=[0.9] * 4
+            )
+
+    adapter = RapidOcrAdapter(engine_factory=lambda _profile: _MixedEngine())
+    result = adapter.recognize(_document(), "zh-Hans", fast=True)
+
+    assert [region.language_code for region in result.regions] == [
+        "zh-Hans", "en", "ru", "ja",
+    ]
+    # OCR 选英文时，汉字区域仍应修正为中文
+    result_en = adapter.recognize(_document(), "en", fast=True)
+    assert [region.language_code for region in result_en.regions] == [
+        "zh-Hans", "en", "ru", "ja",
+    ]
+
+
 def test_fast_mode_runs_single_pass_without_enhanced_recovery() -> None:
     """fast=True 只做一次标准识别，跳过瓦片恢复/密集修复/逐区域精修。"""
     class _CountingEngine:

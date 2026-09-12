@@ -66,6 +66,7 @@ class TranslateRegions:
         allow_low_confidence: bool = False,
         automatic_confidence_threshold: float | None = None,
         preserve_numbers: bool = True,
+        merge_paragraphs: bool = True,
     ) -> TranslationResult:
         threshold = (
             self._automatic_confidence_threshold
@@ -205,14 +206,18 @@ class TranslateRegions:
                 continue
             prepared.append((index, region, protected))
             prepared_info[index] = (region, protected)
-        prepared, paragraph_members = self._combine_paragraph_groups(
-            ocr_result,
-            prepared,
-            prepared_info,
-            selection,
-            brand_terms,
-            preserve_numbers,
-            units,
+        prepared, paragraph_members = (
+            self._combine_paragraph_groups(
+                ocr_result,
+                prepared,
+                prepared_info,
+                selection,
+                brand_terms,
+                preserve_numbers,
+                units,
+            )
+            if merge_paragraphs
+            else (prepared, {})
         )
         if prepared:
             source_language = selection.source_language

@@ -12,6 +12,12 @@ from uuid import uuid4
 from src.domain.activation import ActivationError, ActivationSession
 
 
+VERIFY_ACTIVE = "active"
+VERIFY_EXPIRED = "expired"
+VERIFY_INACTIVE = "inactive"
+VERIFY_MISSING = "missing"
+
+
 class CredentialStoreError(RuntimeError):
     pass
 
@@ -86,12 +92,9 @@ class ActivationCoordinator:
                 ) from error
             if encoded is None:
                 return None
-            session = _decode_session(encoded)
+            session, _reason = _decode_session(encoded)
             if session is None or not session.active:
-                try:
-                    self._credentials.delete(self._session_key)
-                except CredentialStoreError:
-                    pass
+                self._delete_session_quietly()
                 return None
             return session
 
@@ -99,27 +102,39 @@ class ActivationCoordinator:
         session = self.current_session()
         return session.access_token if session is not None else None
 
-    def verify(self) -> bool:
-        """向服务端确认本机激活仍有效。
+    def verify(self) -> str:
+        """向服务端确认本机激活仍有效，返回失效原因码（供 UI 给出准确提示）。
 
-        后台解绑/停用/过期时清除本机凭据（返回 False，客户端应显示未激活）；
-        网络异常时保留凭据（返回 True，避免离线时误踢用户）。
+        返回值：
+        - VERIFY_ACTIVE：本机激活有效（含网络异常时保留凭据的离线放行）
+        - VERIFY_EXPIRED：本机凭据已过期（已清除）
+        - VERIFY_INACTIVE：服务端确认已失效（解绑/停用/换机绑定等），或凭据损坏/无法校验
+        - VERIFY_MISSING：本机从未激活或凭据缺失
         """
         with self._lock:
-            session = self.current_session()
-            if session is None or not session.code:
-                return False
+            try:
+                encoded = self._credentials.read(self._session_key)
+            except CredentialStoreError as error:
+                raise ActivationError(
+                    "secure_storage_unavailable",
+                    "无法读取系统安全凭据",
+                ) from error
+            if encoded is None:
+                return VERIFY_MISSING
+            session, reason = _decode_session(encoded)
+            if session is None:
+                self._delete_session_quietly()
+                return VERIFY_EXPIRED if reason == "expired" else VERIFY_INACTIVE
+            if not session.code:
+                return VERIFY_INACTIVE
             try:
                 active = self._client.status(session.code, self._device_id())
             except ActivationError:
-                return True
+                return VERIFY_ACTIVE
             if not active:
-                try:
-                    self._credentials.delete(self._session_key)
-                except CredentialStoreError:
-                    pass
-                return False
-            return True
+                self._delete_session_quietly()
+                return VERIFY_INACTIVE
+            return VERIFY_ACTIVE
 
     def clear(self) -> None:
         with self._lock:
@@ -130,6 +145,12 @@ class ActivationCoordinator:
                     "secure_storage_unavailable",
                     "无法清除系统安全凭据",
                 ) from error
+
+    def _delete_session_quietly(self) -> None:
+        try:
+            self._credentials.delete(self._session_key)
+        except CredentialStoreError:
+            pass
 
     def _device_id(self) -> str:
         try:
@@ -158,7 +179,8 @@ def _backend_scope(base_url: str) -> str:
     return sha256(normalized.encode("utf-8")).hexdigest()[:24]
 
 
-def _decode_session(encoded: str) -> ActivationSession | None:
+def _decode_session(encoded: str) -> tuple[ActivationSession | None, str]:
+    """解析本机凭据。返回 (session, reason)；reason 为 "expired"（已过期）或 "invalid"（格式损坏）。"""
     try:
         payload = json.loads(encoded)
         if not isinstance(payload, Mapping) or not {
@@ -168,7 +190,7 @@ def _decode_session(encoded: str) -> ActivationSession | None:
             "expires_at",
             "access_token",
         }.issubset(payload):
-            return None
+            return None, "invalid"
         version = payload["schema_version"]
         if version == 1:
             quota_total = quota_remaining = 0
@@ -176,7 +198,7 @@ def _decode_session(encoded: str) -> ActivationSession | None:
             quota_total = int(payload.get("quota_total", 0))
             quota_remaining = int(payload.get("quota_remaining", 0))
         else:
-            return None
+            return None, "invalid"
         session = ActivationSession(
             plan_id=payload["plan_id"],
             activated_at=datetime.fromisoformat(payload["activated_at"]),
@@ -187,8 +209,8 @@ def _decode_session(encoded: str) -> ActivationSession | None:
             code=payload.get("code"),
         )
         if session.expires_at <= datetime.now(timezone.utc):
-            return None
-        return session
+            return None, "expired"
+        return session, "active"
     except (ValueError, TypeError, KeyError, json.JSONDecodeError):
-        return None
+        return None, "invalid"
 

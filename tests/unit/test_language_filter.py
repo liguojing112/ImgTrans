@@ -1205,6 +1205,35 @@ def test_adjacent_cjk_lines_merge_into_single_paragraph_translation() -> None:
     assert next(iter(group_ids)) is not None
 
 
+def test_merge_paragraphs_false_translates_each_line_independently() -> None:
+    adapter = _RecordingAdapter()
+    result = TranslateRegions(adapter, ProtectionEngine()).execute(
+        OcrResult(
+            (
+                _cjk_line("line-1", "根据新广告法规定所有页面不得出现绝对化用词", 0),
+                _cjk_line("line-2", "我们支持新广告法，为了不影响正常消费者购物", 50),
+                _cjk_line("line-3", "页面明显区域我们会逐步排查和完善修改", 100),
+            ),
+            "zh-Hans",
+            "fixture-model",
+            1,
+        ),
+        TranslationSelection(TranslationMode.ALL, "en"),
+        merge_paragraphs=False,
+    )
+    assert adapter.calls[0][0] == (
+        "根据新广告法规定所有页面不得出现绝对化用词",
+        "我们支持新广告法，为了不影响正常消费者购物",
+        "页面明显区域我们会逐步排查和完善修改",
+    )
+    assert all(unit.paragraph_group_id is None for unit in result.units)
+    assert [unit.translated_text for unit in result.units] == [
+        "translated:根据新广告法规定所有页面不得出现绝对化用词",
+        "translated:我们支持新广告法，为了不影响正常消费者购物",
+        "translated:页面明显区域我们会逐步排查和完善修改",
+    ]
+
+
 def test_widely_spaced_cjk_lines_stay_separate_translations() -> None:
     adapter = _RecordingAdapter()
     result = TranslateRegions(adapter, ProtectionEngine()).execute(

@@ -90,6 +90,23 @@ class ManualRegionPanel(QFrame):
         target_row.addWidget(self.target_language, stretch=1)
         layout.addLayout(target_row)
 
+        self.paragraph_row = QWidget()
+        paragraph_layout = QHBoxLayout(self.paragraph_row)
+        paragraph_layout.setContentsMargins(0, 0, 0, 0)
+        paragraph_label = QLabel("段落模式")
+        paragraph_label.setObjectName("propertyFieldLabel")
+        self.paragraph_mode = QComboBox()
+        self.paragraph_mode.setObjectName("manualParagraphMode")
+        self.paragraph_mode.addItem("长文：合并相邻行整段翻译", "long")
+        self.paragraph_mode.addItem("短文：逐行独立翻译", "short")
+        self.paragraph_mode.setToolTip(
+            "长文：框内多行合并为一段翻译；短文：每行独立翻译、逐行显示，"
+            "适合参数表、属性列表"
+        )
+        paragraph_layout.addWidget(paragraph_label)
+        paragraph_layout.addWidget(self.paragraph_mode, stretch=1)
+        layout.addWidget(self.paragraph_row)
+
         self.select_button = QPushButton("在画布框选区域")
         self.select_button.setObjectName("selectManualRegionButton")
         self.select_button.clicked.connect(self.select_requested.emit)
@@ -181,6 +198,10 @@ class ManualRegionPanel(QFrame):
     def selected_target_language(self) -> str:
         return str(self.target_language.currentData())
 
+    @property
+    def merge_paragraphs(self) -> bool:
+        return self.paragraph_mode.currentData() == "long"
+
     def set_languages(self, ocr_language: str, target_language: str) -> None:
         """打开对话框时同步主翻译设置的语言。"""
         index = self.ocr_language.findData(ocr_language)
@@ -189,6 +210,12 @@ class ManualRegionPanel(QFrame):
         index = self.target_language.findData(target_language)
         if index >= 0:
             self.target_language.setCurrentIndex(index)
+
+    def set_paragraph_mode(self, value: str) -> None:
+        """打开对话框时同步主翻译设置的段落模式。"""
+        index = self.paragraph_mode.findData(value)
+        if index >= 0:
+            self.paragraph_mode.setCurrentIndex(index)
 
     @property
     def spec(self) -> ManualRegionSpec:
@@ -258,6 +285,8 @@ class ManualRegionPanel(QFrame):
         mode = ManualInputMode(self.mode_combo.currentData())
         self.source_text.setVisible(mode is ManualInputMode.SOURCE_TEXT)
         self.translated_text.setVisible(mode is ManualInputMode.TRANSLATED_TEXT)
+        # 直接输入最终译文不经过翻译，段落模式无意义
+        self.paragraph_row.setVisible(mode is not ManualInputMode.TRANSLATED_TEXT)
 
     def _circular_mode_changed(self, enabled: bool) -> None:
         self.circular_fields.setVisible(enabled)

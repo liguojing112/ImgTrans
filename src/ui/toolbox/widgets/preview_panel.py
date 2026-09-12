@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Signal
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QAbstractSpinBox,
@@ -69,6 +69,7 @@ class PreviewPanel(QFrame):
             "  border-radius: 6px; color: #98a0ad; }"
         )
         self._preview_label.setWordWrap(True)
+        self._preview_label.setToolTip("滚轮缩放 · 中键或拖动空白处移动 · 双击复位")
         self._preview_label.crop_box_changed.connect(self.crop_box_selected.emit)
         self._preview_label.crop_mode_exited.connect(self.crop_mode_exited.emit)
         self._preview_label.watermark_selected.connect(self.watermark_selected.emit)
@@ -256,17 +257,13 @@ class PreviewPanel(QFrame):
                 source = self._processed.get(img.id) or img.path
                 try:
                     orig = QPixmap(str(source))
-                    # 保存原始尺寸用于裁剪坐标映射
-                    self._preview_label.set_original_size(
-                        orig.width(), orig.height())
-                    pw = self._preview_label.width()
-                    ph = self._preview_label.height()
-                    pix = orig.scaled(
-                        max(pw - 4, 1), max(ph - 4, 1),
-                        Qt.AspectRatioMode.KeepAspectRatio,
-                        Qt.TransformationMode.SmoothTransformation,
-                    )
-                    self._preview_label.setPixmap(pix)
+                    if orig.isNull():
+                        self._preview_label.setText("无法加载预览")
+                        self._preview_label.setPixmap(None)
+                        self._preview_info.setText("")
+                        return
+                    # 存全分辨率原图，缩放/平移在预览控件内完成
+                    self._preview_label.set_image(orig)
                     self._preview_label.setText("")
                     suffix = " (已处理)" if img.id in self._processed else ""
                     self._preview_info.setText(

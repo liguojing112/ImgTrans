@@ -227,3 +227,124 @@ def test_translate_controls_translating_disables_ocr_only_button(qtbot) -> None:
 
     ctrl.set_translating(False)
     assert ctrl.ocr_only_button.isEnabled()
+
+
+def test_translate_controls_font_defaults_to_auto(qtbot) -> None:
+    """译文字体默认「自动匹配字体」。"""
+    app = QApplication.instance() or QApplication(["imgtrans-font-test"])
+    ctrl = TranslateControls()
+    qtbot.addWidget(ctrl)
+
+    assert ctrl.selected_font_family is None
+    assert ctrl.translation_font.itemData(0) is None
+    assert ctrl.translation_font.itemText(0) == "自动匹配字体"
+
+
+def test_translate_controls_set_translation_font(qtbot) -> None:
+    """set_translation_font 选中字体族；未知字体回退自动且不触发信号。"""
+    app = QApplication.instance() or QApplication(["imgtrans-font-test"])
+    ctrl = TranslateControls()
+    qtbot.addWidget(ctrl)
+    ctrl.translation_font.addItem("TestFamily", "TestFamily")
+
+    emitted = []
+    ctrl.translation_font_changed.connect(lambda value: emitted.append(value))
+    ctrl.set_translation_font("TestFamily")
+    assert ctrl.selected_font_family == "TestFamily"
+    assert ctrl.translation_font.currentIndex() == ctrl.translation_font.findData("TestFamily")
+    assert emitted == []  # 设置时屏蔽信号
+
+    ctrl.set_translation_font("definitely-not-a-real-font")
+    assert ctrl.selected_font_family is None
+
+
+def test_translate_controls_font_change_emits_signal(qtbot) -> None:
+    """用户切换字体时发射所选字体族（自动时为 None）。"""
+    app = QApplication.instance() or QApplication(["imgtrans-font-test"])
+    ctrl = TranslateControls()
+    qtbot.addWidget(ctrl)
+    ctrl.translation_font.addItem("TestFamily", "TestFamily")
+
+    emitted = []
+    ctrl.translation_font_changed.connect(lambda value: emitted.append(value))
+    ctrl.translation_font.setCurrentIndex(ctrl.translation_font.findData("TestFamily"))
+    assert emitted == ["TestFamily"]
+
+    ctrl.translation_font.setCurrentIndex(0)
+    assert emitted == ["TestFamily", None]
+
+
+def test_translate_controls_translating_disables_font(qtbot) -> None:
+    """翻译进行中译文字体下拉禁用。"""
+    app = QApplication.instance() or QApplication(["imgtrans-font-test"])
+    ctrl = TranslateControls()
+    qtbot.addWidget(ctrl)
+
+    ctrl.set_translating(True)
+    assert not ctrl.translation_font.isEnabled()
+
+    ctrl.set_translating(False)
+    assert ctrl.translation_font.isEnabled()
+
+
+def test_translate_controls_paragraph_mode_defaults_to_long(qtbot) -> None:
+    """段落模式默认「长文」（合并相邻行整段翻译）。"""
+    app = QApplication.instance() or QApplication(["imgtrans-paragraph-test"])
+    ctrl = TranslateControls()
+    qtbot.addWidget(ctrl)
+
+    assert ctrl.merge_paragraphs is True
+    assert ctrl.paragraph_mode.itemData(0) == "long"
+    assert ctrl.paragraph_mode.itemData(1) == "short"
+
+
+def test_translate_controls_set_paragraph_mode(qtbot) -> None:
+    """set_paragraph_mode 选中模式；未知模式回退默认且不触发信号。"""
+    app = QApplication.instance() or QApplication(["imgtrans-paragraph-test"])
+    ctrl = TranslateControls()
+    qtbot.addWidget(ctrl)
+
+    emitted = []
+    ctrl.paragraph_mode_changed.connect(lambda value: emitted.append(value))
+    ctrl.set_paragraph_mode("short")
+    assert ctrl.merge_paragraphs is False
+    assert emitted == []  # 设置时屏蔽信号
+
+    ctrl.set_paragraph_mode("definitely-not-a-mode")
+    assert ctrl.merge_paragraphs is True
+
+
+def test_translate_controls_paragraph_mode_change_emits_signal(qtbot) -> None:
+    """用户切换段落模式时发射所选模式。"""
+    app = QApplication.instance() or QApplication(["imgtrans-paragraph-test"])
+    ctrl = TranslateControls()
+    qtbot.addWidget(ctrl)
+
+    emitted = []
+    ctrl.paragraph_mode_changed.connect(lambda value: emitted.append(value))
+    ctrl.paragraph_mode.setCurrentIndex(ctrl.paragraph_mode.findData("short"))
+    assert emitted == ["short"]
+
+    ctrl.paragraph_mode.setCurrentIndex(0)
+    assert emitted == ["short", "long"]
+
+
+def test_translate_controls_translating_disables_paragraph_mode(qtbot) -> None:
+    """翻译进行中段落模式下拉禁用。"""
+    app = QApplication.instance() or QApplication(["imgtrans-paragraph-test"])
+    ctrl = TranslateControls()
+    qtbot.addWidget(ctrl)
+
+    ctrl.set_translating(True)
+    assert not ctrl.paragraph_mode.isEnabled()
+
+    ctrl.set_translating(False)
+    assert ctrl.paragraph_mode.isEnabled()
+
+
+def test_theme_keeps_checked_radio_indicator_visible() -> None:
+    """回归：QRadioButton 带样式表后原生选中圆点丢失（选中行不画圈，
+    看起来像选中项“反着”）。主题必须显式定义 indicator:checked。"""
+    from src.ui.editor.theme import EDITOR_DARK_THEME
+
+    assert "QRadioButton::indicator:checked" in EDITOR_DARK_THEME

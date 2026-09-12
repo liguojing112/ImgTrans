@@ -21,6 +21,8 @@ _KNOWN_FIELDS = {
     "copywriting_settings",
     "ecommerce_terms",
     "ecommerce_llm_prompt",
+    "translation_font",
+    "translation_paragraph_mode",
 }
 
 
@@ -286,4 +288,46 @@ class JsonEcommercePreferences:
         payload = self._file.load()
         payload["ecommerce_terms"] = normalized
         payload["ecommerce_llm_prompt"] = normalized_prompt
+        self._file.save(payload)
+
+
+class JsonFontPreferences:
+    """译文字体偏好：保存用户选定的字体族；None 表示按目标语言自动匹配。"""
+
+    def __init__(self, path: Path) -> None:
+        self._file = _JsonPreferencesFile(path)
+
+    def load(self) -> str | None:
+        value = self._file.load().get("translation_font")
+        if not isinstance(value, str) or not value.strip():
+            return None
+        return value.strip()
+
+    def save(self, value: str | None) -> None:
+        payload = self._file.load()
+        if value is None or not value.strip():
+            payload.pop("translation_font", None)
+        else:
+            payload["translation_font"] = value.strip()
+        self._file.save(payload)
+
+
+class JsonParagraphModePreferences:
+    """译文段落模式偏好："long"=合并相邻行整段翻译，"short"=逐行独立翻译。"""
+
+    _ALLOWED = ("long", "short")
+    _DEFAULT = "long"
+
+    def __init__(self, path: Path) -> None:
+        self._file = _JsonPreferencesFile(path)
+
+    def load(self) -> str:
+        value = self._file.load().get("translation_paragraph_mode")
+        return value if value in self._ALLOWED else self._DEFAULT
+
+    def save(self, value: str) -> None:
+        payload = self._file.load()
+        payload["translation_paragraph_mode"] = (
+            value if value in self._ALLOWED else self._DEFAULT
+        )
         self._file.save(payload)

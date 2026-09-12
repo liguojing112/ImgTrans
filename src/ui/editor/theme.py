@@ -469,6 +469,33 @@ QCheckBox, QRadioButton {
     color: #212733;
     background: transparent;
 }
+/* QRadioButton 一旦带样式表（上面 background: transparent）就切到 CSS 渲染，
+   原生选中圆点丢失：选中行不画任何圆圈，看起来像选中项“反着”。
+   显式定义 indicator 三态：选中=蓝环+中心点，未选=灰环，禁用=浅灰。
+   实际盒子约 18px（内容 14 + 边框 2×2），border-radius 取 9 才圆。 */
+QRadioButton::indicator {
+    width: 14px;
+    height: 14px;
+    border-radius: 9px;
+    border: 2px solid #8a94a3;
+    background: #ffffff;
+}
+QRadioButton::indicator:checked {
+    border: 2px solid #3973db;
+    background: qradialgradient(cx:0.5, cy:0.5, radius:0.5, fx:0.5, fy:0.5,
+        stop:0 #3973db, stop:0.5 #3973db,
+        stop:0.55 #ffffff, stop:1 #ffffff);
+}
+QRadioButton::indicator:disabled {
+    border-color: #c5cbd4;
+    background: #f0f2f5;
+}
+QRadioButton::indicator:checked:disabled {
+    border-color: #a8c4f0;
+    background: qradialgradient(cx:0.5, cy:0.5, radius:0.5, fx:0.5, fy:0.5,
+        stop:0 #a8c4f0, stop:0.5 #a8c4f0,
+        stop:0.55 #f0f2f5, stop:1 #f0f2f5);
+}
 QToolButton {
     color: #000000;
     background: transparent;

@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QElapsedTimer, QTimer, Qt, Signal
+from PySide6.QtCore import QElapsedTimer, QSignalBlocker, QTimer, Qt, Signal
+from PySide6.QtGui import QFontDatabase
 from PySide6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
@@ -64,6 +65,8 @@ class TranslateControls(QFrame):
     cancel_requested = Signal()
     activity_changed = Signal(bool)
     ecommerce_settings_requested = Signal()
+    translation_font_changed = Signal(object)
+    paragraph_mode_changed = Signal(str)
 
     def __init__(self) -> None:
         super().__init__()
@@ -196,6 +199,25 @@ class TranslateControls(QFrame):
             self._update_ocr_mode_hint
         )
 
+        # 译文字体
+        self.translation_font = QComboBox()
+        self.translation_font.setMinimumWidth(180)
+        self.translation_font.addItem("自动匹配字体", None)
+        for family in sorted(set(QFontDatabase.families()), key=str.casefold):
+            self.translation_font.addItem(family, family)
+        self.translation_font.currentIndexChanged.connect(
+            self._translation_font_changed
+        )
+
+        # 段落模式
+        self.paragraph_mode = QComboBox()
+        self.paragraph_mode.setMinimumWidth(180)
+        self.paragraph_mode.addItem("长文：合并相邻行整段翻译", "long")
+        self.paragraph_mode.addItem("短文：逐行独立翻译", "short")
+        self.paragraph_mode.currentIndexChanged.connect(
+            self._paragraph_mode_changed
+        )
+
         # 品牌词
         brand_row = QHBoxLayout()
         brand_label = QLabel("品牌词")
@@ -298,6 +320,19 @@ class TranslateControls(QFrame):
         layout.addWidget(self.ocr_mode_hint)
         layout.addWidget(self.high_recall_controls)
 
+        # —— 译文字体 ——
+        font_row = QHBoxLayout()
+        font_label = QLabel("译文字体")
+        font_label.setObjectName("propertyFieldLabel")
+        font_row.addWidget(font_label)
+        font_row.addWidget(self.translation_font)
+        font_hint = QLabel("译文渲染字体；选择“自动匹配字体”时按目标语言自动匹配")
+        font_hint.setObjectName("captionLabel")
+        font_hint.setWordWrap(True)
+        layout.addWidget(_group_title("译文字体"))
+        layout.addLayout(font_row)
+        layout.addWidget(font_hint)
+
         # —— 翻译范围 ——
         layout.addWidget(_group_title("翻译范围"))
         layout.addWidget(mode_label)
@@ -306,6 +341,22 @@ class TranslateControls(QFrame):
         layout.addSpacing(2)
         layout.addLayout(src_row)
         layout.addLayout(tgt_row)
+
+        # —— 段落模式 ——
+        paragraph_row = QHBoxLayout()
+        paragraph_label = QLabel("段落模式")
+        paragraph_label.setObjectName("propertyFieldLabel")
+        paragraph_row.addWidget(paragraph_label)
+        paragraph_row.addWidget(self.paragraph_mode)
+        paragraph_hint = QLabel(
+            "长文：相邻行合并为整段翻译，译文连贯，适合广告文案；"
+            "短文：每行独立翻译，适合参数表、属性列表等逐行内容"
+        )
+        paragraph_hint.setObjectName("captionLabel")
+        paragraph_hint.setWordWrap(True)
+        layout.addWidget(_group_title("段落模式"))
+        layout.addLayout(paragraph_row)
+        layout.addWidget(paragraph_hint)
 
         # —— 保护规则 ——
         layout.addWidget(_group_title("保护规则"))
@@ -369,6 +420,26 @@ class TranslateControls(QFrame):
     @property
     def selected_target_language(self) -> str:
         return str(self.target_language.currentData())
+
+    @property
+    def selected_font_family(self) -> str | None:
+        return self.translation_font.currentData()
+
+    def set_translation_font(self, value: str | None) -> None:
+        blocker = QSignalBlocker(self.translation_font)
+        index = self.translation_font.findData(value) if value else -1
+        self.translation_font.setCurrentIndex(index if index >= 0 else 0)
+        del blocker
+
+    @property
+    def merge_paragraphs(self) -> bool:
+        return self.paragraph_mode.currentData() == "long"
+
+    def set_paragraph_mode(self, value: str) -> None:
+        blocker = QSignalBlocker(self.paragraph_mode)
+        index = self.paragraph_mode.findData(value) if value else -1
+        self.paragraph_mode.setCurrentIndex(index if index >= 0 else 0)
+        del blocker
 
     @property
     def selected_source_language(self) -> str | None:
@@ -482,6 +553,8 @@ class TranslateControls(QFrame):
         self.terminology_editor.setEnabled(not translating)
         self.confidence_threshold.setEnabled(not translating)
         self.allow_low_confidence.setEnabled(not translating)
+        self.translation_font.setEnabled(not translating)
+        self.paragraph_mode.setEnabled(not translating)
         if translating:
             self._activity_elapsed.start()
             self._activity_timer.start()
@@ -556,6 +629,12 @@ class TranslateControls(QFrame):
         ocr = self.selected_ocr_language
         target = self.selected_target_language
         self.translate_requested.emit(ocr, target)
+
+    def _translation_font_changed(self, _index: int = 0) -> None:
+        self.translation_font_changed.emit(self.translation_font.currentData())
+
+    def _paragraph_mode_changed(self, _index: int = 0) -> None:
+        self.paragraph_mode_changed.emit(self.paragraph_mode.currentData())
 
     def _update_activity_label(self) -> None:
         if not self._activity_name:

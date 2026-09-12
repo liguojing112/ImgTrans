@@ -55,9 +55,10 @@ class HttpActivationClient:
             with urlopen(request, timeout=self._timeout_seconds) as response:
                 payload = response.read(_MAX_RESPONSE_BYTES + 1)
         except HTTPError as error:
+            detail = _http_error_detail(error)
             raise ActivationError(
                 _http_error_code(error.code),
-                _http_error_message(error.code),
+                _DETAIL_MESSAGES.get(detail, _http_error_message(error.code)),
             ) from error
         except (URLError, TimeoutError, OSError) as error:
             raise ActivationError(
@@ -105,6 +106,24 @@ def _parse_response(encoded: bytes) -> ActivationSession:
             "invalid_activation_response",
             "激活服务响应无效",
         ) from error
+
+
+# 服务端 /validate 拒绝时的 detail（英文）→ 精确中文提示
+_DETAIL_MESSAGES = {
+    "Activation code has expired": "激活码已到期，请续期或更换激活码",
+    "Activation code is disabled": "激活码已停用",
+    "Activation code is already bound to another device": "激活码已绑定其他设备，请先解绑再激活",
+    "Activation code is invalid": "激活码无效",
+}
+
+
+def _http_error_detail(error: HTTPError) -> str | None:
+    try:
+        payload = json.loads(error.read(4096).decode("utf-8"))
+    except (ValueError, UnicodeDecodeError, OSError):
+        return None
+    detail = payload.get("detail") if isinstance(payload, dict) else None
+    return detail if isinstance(detail, str) else None
 
 
 def _http_error_code(status: int) -> str:

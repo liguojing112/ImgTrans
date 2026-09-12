@@ -3366,12 +3366,8 @@ def test_legacy_dialogs_keep_light_theme_under_system_dark_palette():
         app.setPalette(original_palette)
 
 
-def test_verify_activation_invalid_clears_credentials_and_warns():
-    """窗口激活校验返回 False（后台解绑/停用）时，弹出重新激活提示。"""
+def _window_with_verify(verify_result):
     from src.ui.editor.main_window import EditorMainWindow
-
-    app = QApplication.instance() or QApplication(["verify-activation-warning-test"])
-    warnings = []
 
     def _operation():
         return True
@@ -3383,7 +3379,7 @@ def test_verify_activation_invalid_clears_credentials_and_warns():
 
         return _Runner()
 
-    window = EditorMainWindow(
+    return EditorMainWindow(
         import_image=lambda *a, **k: None,
         export_image=lambda *a, **k: None,
         codec=object(),
@@ -3392,8 +3388,15 @@ def test_verify_activation_invalid_clears_credentials_and_warns():
         recognize_text=_operation,
         process_manual_region=_operation,
         repair_selection=_operation,
-        verify_activation=lambda: False,
+        verify_activation=lambda: verify_result,
     )
+
+
+def test_verify_activation_inactive_warns_with_unbound_message():
+    """窗口激活校验返回 inactive（后台解绑/停用）时，弹出对应提示。"""
+    app = QApplication.instance() or QApplication(["verify-activation-warning-test"])
+    warnings = []
+    window = _window_with_verify("inactive")
     try:
         original_warning = QMessageBox.warning
         QMessageBox.warning = lambda parent, title, text, *a, **k: warnings.append(
@@ -3403,6 +3406,25 @@ def test_verify_activation_invalid_clears_credentials_and_warns():
             window.request_activation_check()
         finally:
             QMessageBox.warning = original_warning
-        assert warnings and "请重新激活" in warnings[0][1]
+        assert warnings and "可能已被解绑或停用" in warnings[0][1]
+    finally:
+        window.close()
+
+
+def test_verify_activation_expired_warns_with_expiry_message():
+    """窗口激活校验返回 expired（激活码到期）时，提示到期而非误导为解绑。"""
+    app = QApplication.instance() or QApplication(["verify-activation-expired-test"])
+    warnings = []
+    window = _window_with_verify("expired")
+    try:
+        original_warning = QMessageBox.warning
+        QMessageBox.warning = lambda parent, title, text, *a, **k: warnings.append(
+            (title, text)
+        )
+        try:
+            window.request_activation_check()
+        finally:
+            QMessageBox.warning = original_warning
+        assert warnings and "激活已到期" in warnings[0][1]
     finally:
         window.close()

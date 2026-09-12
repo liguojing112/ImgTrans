@@ -48,6 +48,9 @@ class QtBasicTextLayoutAdapter:
     def __init__(self, font_family: str | None = None) -> None:
         self._font_family = font_family
 
+    def set_font_family(self, font_family: str | None) -> None:
+        self._font_family = font_family
+
     def layout(
         self,
         source: ImageDocument,

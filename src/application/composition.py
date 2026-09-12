@@ -272,6 +272,45 @@ class EditComposition:
             self._document = candidate_document
             return self._result(region_id)
 
+    def replace_style_many(
+        self,
+        region_styles: list[tuple[str, TextStyle, float]],
+    ) -> CompositionEditResult:
+        """批量套用文字样式：一次加锁、逐层 reflow、一次渲染、一条撤销记录。
+
+        region_styles 为 (region_id, 新样式, 目标自身旋转角) 三元组，供格式刷
+        框选多区域时合并为单次后台任务，避免并发 re-render 竞争。
+        """
+        with self._lock:
+            before_state = self._session.state
+            mapping = {rid: (style, rot) for rid, style, rot in region_styles}
+            if not mapping:
+                return self._result()
+            changed = False
+            after_layers: list[TextLayer] = []
+            for layer in before_state.layout.layers:
+                if layer.region_id in mapping:
+                    if layer.locked:
+                        raise ValueError("Locked text layer cannot be edited")
+                    style, rotation = mapping[layer.region_id]
+                    candidate = replace(
+                        layer,
+                        style=style,
+                        box=replace(layer.box, rotation_degrees=rotation),
+                    )
+                    after = self._layout_adapter.reflow(candidate, layer.text)
+                    if after != layer:
+                        changed = True
+                        after_layers.append(after)
+                        continue
+                after_layers.append(layer)
+            if not changed:
+                return self._result()
+            after_state = replace(
+                before_state, layout=TextLayout(tuple(after_layers))
+            )
+            return self._commit_state(before_state, after_state)
+
     def add_layer(self, text: str = "新译文") -> CompositionEditResult:
         with self._lock:
             region_id = f"manual-{uuid4().hex}"

@@ -147,7 +147,7 @@ class RapidOcrAdapter:
                     polygon=polygon,
                     text=text,
                     confidence=confidence,
-                    language_code=language_code,
+                    language_code=_detect_region_language(text, language_code),
                     model_id=profile.profile_id,
                     status=status,
                 )
@@ -858,7 +858,7 @@ def _merge_high_recall_regions(
                 polygon,
                 representative.text,
                 confidence,
-                language_code,
+                _detect_region_language(representative.text, language_code),
                 model_id,
                 (
                     TextRegionStatus.OK
@@ -2018,6 +2018,41 @@ def _is_cjk_character(character: str) -> bool:
         "\u3400" <= character <= "\u9fff"
         or "\uf900" <= character <= "\ufaff"
     )
+
+
+# 各书写的支持语言（脚本无法唯一确定语言时回退用）
+_LATIN_SCRIPT_LANGUAGES = frozenset(
+    {"en", "fr", "de", "es", "it", "pt-PT", "pt-BR", "pl", "tr", "id", "ms", "fil", "vi", "sw"}
+)
+_ARABIC_SCRIPT_LANGUAGES = frozenset({"ar", "fa", "ur"})
+_CJK_LANGUAGES = frozenset({"zh-Hans", "zh-Hant", "ja", "ko"})
+
+
+def _detect_region_language(text: str, ocr_language: str) -> str:
+    """按 Unicode 书写字形推断区域语言，修正 OCR 所选语言的统一打标。
+
+    RapidOCR 每次只跑单一语言模型，所有区域都会被打上所选语言；
+    但商品图常混合多语言（如中文主体 + 英文参数），「只翻译指定语言」
+    依赖 region.language_code 过滤，必须逐区域修正。
+    纯拉丁文本无法区分具体语言时：OCR 所选为拉丁语言则沿用，否则按 en。
+    """
+    if any("\u3040" <= c <= "\u30ff" or "\u31f0" <= c <= "\u31ff" for c in text):
+        return "ja"
+    if any("\uac00" <= c <= "\ud7a3" or "\u1100" <= c <= "\u11ff" for c in text):
+        return "ko"
+    if any(_is_cjk_character(c) or "\u3000" <= c <= "\u303f" for c in text):
+        return ocr_language if ocr_language in _CJK_LANGUAGES else "zh-Hans"
+    if any("\u0400" <= c <= "\u04ff" for c in text):
+        return "ru"
+    if any("\u0e00" <= c <= "\u0e7f" for c in text):
+        return "th"
+    if any("\u0600" <= c <= "\u06ff" for c in text):
+        return ocr_language if ocr_language in _ARABIC_SCRIPT_LANGUAGES else "ar"
+    if any("\u0900" <= c <= "\u097f" for c in text):
+        return "hi"
+    if any("\u0980" <= c <= "\u09ff" for c in text):
+        return "bn"
+    return ocr_language if ocr_language in _LATIN_SCRIPT_LANGUAGES else "en"
 
 
 def _refine_region(

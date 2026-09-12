@@ -543,7 +543,9 @@ class EditorScene(QGraphicsScene):
                 if self._selection_mode == "crop":
                     self._crop_selection_rect = QRectF(rect)
                 self.area_selected.emit(self._selection_mode or "", box)
-            if self._selection_mode != "crop":
+            # format_brush 与 crop 一样保持框选模式，直到面板显式退出
+            # （否则一次拖拽后自动退出会与属性面板「格式刷」按钮状态不同步）
+            if self._selection_mode not in {"crop", "format_brush"}:
                 self._manual_selection_enabled = False
             self.update()
             event.accept()

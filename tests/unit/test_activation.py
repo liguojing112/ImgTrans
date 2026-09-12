@@ -142,7 +142,7 @@ def test_verify_active_keeps_credentials() -> None:
     client = _StatusClient(_session())
     coordinator = ActivationCoordinator(client, credentials, "https://api.example.test")
     coordinator.activate("IT-ABCD")
-    assert coordinator.verify() is True
+    assert coordinator.verify() == "active"
     assert client.status_calls[0][0] == "IT-ABCD"
     assert coordinator.current_session() is not None
 
@@ -152,7 +152,7 @@ def test_verify_unbound_clears_credentials() -> None:
     client = _StatusClient(_session(), status=False)
     coordinator = ActivationCoordinator(client, credentials, "https://api.example.test")
     coordinator.activate("IT-ABCD")
-    assert coordinator.verify() is False
+    assert coordinator.verify() == "inactive"
     assert coordinator.current_session() is None
     assert not any(key.startswith("activation-session") for key in credentials.values)
 
@@ -162,13 +162,47 @@ def test_verify_network_error_keeps_credentials() -> None:
     client = _StatusClient(_session(), fail=True)
     coordinator = ActivationCoordinator(client, credentials, "https://api.example.test")
     coordinator.activate("IT-ABCD")
-    assert coordinator.verify() is True
+    assert coordinator.verify() == "active"
     assert coordinator.current_session() is not None
 
 
-def test_verify_without_session_returns_false() -> None:
+def test_verify_without_session_returns_missing() -> None:
     credentials = _MemoryCredentials()
     coordinator = ActivationCoordinator(
         _StatusClient(_session()), credentials, "https://api.example.test"
     )
-    assert coordinator.verify() is False
+    assert coordinator.verify() == "missing"
+
+
+def test_verify_expired_session_reports_expired_and_clears() -> None:
+    credentials = _MemoryCredentials()
+    client = _StatusClient(_expired_session())
+    coordinator = ActivationCoordinator(client, credentials, "https://api.example.test")
+    coordinator.activate("IT-ABCD")
+
+    assert coordinator.verify() == "expired"
+    assert coordinator.current_session() is None
+    # 本地已过期时直接判定，不再打扰服务端
+    assert client.status_calls == []
+
+
+def test_verify_invalid_session_reports_inactive_and_clears() -> None:
+    credentials = _MemoryCredentials()
+    coordinator = ActivationCoordinator(
+        _StatusClient(_session()), credentials, "https://api.example.test"
+    )
+    coordinator.activate("IT-ABCD")
+    session_key = next(
+        key for key in credentials.values if key.startswith("activation-session")
+    )
+    credentials.values[session_key] = "not-json"
+
+    assert coordinator.verify() == "inactive"
+    assert session_key not in credentials.values
+
+
+def _expired_session() -> ActivationSession:
+    now = datetime.now(timezone.utc)
+    return ActivationSession(
+        7, now - timedelta(hours=2), now - timedelta(hours=1), "itd_fixture_device_token_123456"
+    )

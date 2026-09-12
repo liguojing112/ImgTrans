@@ -56,7 +56,9 @@ from src.infrastructure.text_renderer import QtBasicTextLayoutAdapter, QtTextRen
 from src.infrastructure.user_preferences import (
     JsonBrandTermsPreferences,
     JsonEcommercePreferences,
+    JsonFontPreferences,
     JsonModelTermsPreferences,
+    JsonParagraphModePreferences,
     JsonTerminologyPreferences,
 )
 from src.platform.paths import PlatformPaths
@@ -433,6 +435,10 @@ def _create_editor_window() -> EditorMainWindow:
     terminology_prefs = JsonTerminologyPreferences(preferences_path)
     ecommerce_prefs = JsonEcommercePreferences(preferences_path)
     ecommerce_terms, ecommerce_prompt = ecommerce_prefs.load()
+    font_prefs = JsonFontPreferences(preferences_path)
+    saved_font = font_prefs.load()
+    paragraph_mode_prefs = JsonParagraphModePreferences(preferences_path)
+    saved_paragraph_mode = paragraph_mode_prefs.load()
 
     translation_adapter = _create_translation_adapter(
         backend_url,
@@ -462,7 +468,7 @@ def _create_editor_window() -> EditorMainWindow:
     repair = RepairTranslatedRegions(erase_mask_builder, inpainting)
 
     # —— 排版 & 渲染 ——
-    layout_adapter = QtBasicTextLayoutAdapter()
+    layout_adapter = QtBasicTextLayoutAdapter(font_family=saved_font)
     renderer = QtTextRenderer()
 
     # —— 翻译流水线 ——
@@ -526,6 +532,10 @@ def _create_editor_window() -> EditorMainWindow:
         terminology_catalog=terminology_catalog,
         terminology_preferences=terminology_prefs,
         ecommerce_preferences=ecommerce_prefs,
+        font_preferences=font_prefs,
+        translation_font=saved_font,
+        paragraph_mode=saved_paragraph_mode,
+        paragraph_mode_preferences=paragraph_mode_prefs,
         update_ecommerce_translation=getattr(
             translation_adapter,
             "set_ecommerce_override",

@@ -59,6 +59,7 @@ class TranslateImage:
         allow_low_confidence: bool = False,
         automatic_confidence_threshold: float | None = None,
         preserve_numbers: bool = True,
+        merge_paragraphs: bool = True,
     ) -> TranslateImageResult:
         token = CancellationToken()
         with self._token_lock:
@@ -89,6 +90,7 @@ class TranslateImage:
                     allow_low_confidence=allow_low_confidence,
                     automatic_confidence_threshold=automatic_confidence_threshold,
                     preserve_numbers=preserve_numbers,
+                    merge_paragraphs=merge_paragraphs,
                 ),
                 on_stage,
             )

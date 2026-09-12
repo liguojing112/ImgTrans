@@ -12,7 +12,11 @@ from src.application.translation import TranslateRegions
 from src.domain.image import ImageAsset, ImageDocument, ImageFileFormat
 from src.domain.inpainting import InpaintingRequest, InpaintingResult
 from src.domain.layout import CircularTextPath, PathPoint, TextBox
-from src.domain.manual_region import ManualInputMode, ManualRegionSpec
+from src.domain.manual_region import (
+    ManualInputMode,
+    ManualRegionError,
+    ManualRegionSpec,
+)
 from src.domain.ocr import OcrResult, TextRegion, order_quad
 from src.domain.protection import ProtectionEngine
 from src.domain.terminology import TerminologyCatalog, TerminologyEntry
@@ -63,12 +67,34 @@ def _document() -> ImageDocument:
     return ImageDocument(asset, "RGB", bytes([240]) * 120 * 80 * 3)
 
 
+class _FixtureOcrLines:
+    language_codes = ("zh-Hans",)
+
+    def recognize(self, document: ImageDocument, language_code: str, fast: bool = False) -> OcrResult:
+        lines = ("第一行内容", "第二行内容", "第三行内容")
+        regions = tuple(
+            TextRegion(
+                f"crop-{index + 1}",
+                order_quad(
+                    ((1, 1 + index * 14), (30, 1 + index * 14), (30, 12 + index * 14), (1, 12 + index * 14))
+                ),
+                text,
+                0.99,
+                "zh-Hans",
+                "fixture",
+            )
+            for index, text in enumerate(lines)
+        )
+        return OcrResult(regions, "zh-Hans", "fixture", 1)
+
+
 def _processor(
     translation_adapter=None,
     terminology_catalog: TerminologyCatalog | None = None,
+    ocr_adapter=None,
 ) -> ProcessManualRegion:
     return ProcessManualRegion(
-        RecognizeText(_FixtureOcr()),
+        RecognizeText(ocr_adapter or _FixtureOcr()),
         TranslateRegions(
             translation_adapter or MockTranslationAdapter(),
             ProtectionEngine(),
@@ -248,3 +274,106 @@ def test_manual_source_translation_uses_exact_terminology_without_adapter() -> N
     )
 
     assert result.translated_text == "卡箍"
+
+
+class _RecordingAdapter:
+    adapter_id = "recording"
+
+    def __init__(self) -> None:
+        self.calls = []
+
+    def translate(self, texts, source_language, target_language):
+        self.calls.append((texts, source_language, target_language))
+        return tuple(
+            TranslationAdapterItem(translated_text=f"{text} 译") for text in texts
+        )
+
+
+def _line_spec() -> ManualRegionSpec:
+    box = TextBox(30, 20, 45, 40)
+    return ManualRegionSpec(ManualInputMode.AUTO, box, box, box)
+
+
+def test_auto_mode_long_paragraph_joins_lines_before_translation() -> None:
+    QApplication.instance() or QApplication(["manual-long-paragraph-test"])
+    adapter = _RecordingAdapter()
+    document = _document()
+    result = _processor(adapter, ocr_adapter=_FixtureOcrLines()).execute(
+        document,
+        document,
+        _line_spec(),
+        "zh-Hans",
+        TranslationSelection(TranslationMode.ALL, "en"),
+    )
+    assert adapter.calls == [
+        (("第一行内容 第二行内容 第三行内容",), None, "en"),
+    ]
+    assert result.source_text == "第一行内容 第二行内容 第三行内容"
+    assert result.translated_text == "第一行内容 第二行内容 第三行内容 译"
+
+
+def test_auto_mode_short_paragraph_translates_each_line_independently() -> None:
+    QApplication.instance() or QApplication(["manual-short-paragraph-test"])
+    adapter = _RecordingAdapter()
+    document = _document()
+    result = _processor(adapter, ocr_adapter=_FixtureOcrLines()).execute(
+        document,
+        document,
+        _line_spec(),
+        "zh-Hans",
+        TranslationSelection(TranslationMode.ALL, "en"),
+        merge_paragraphs=False,
+    )
+    assert adapter.calls == [
+        (("第一行内容", "第二行内容", "第三行内容"), None, "en"),
+    ]
+    assert result.source_text == "第一行内容 第二行内容 第三行内容"
+    assert result.translated_text == "第一行内容 译\n第二行内容 译\n第三行内容 译"
+    assert result.layer.text == result.translated_text
+
+
+def test_source_text_mode_short_paragraph_splits_input_lines() -> None:
+    QApplication.instance() or QApplication(["manual-short-source-text-test"])
+    adapter = _RecordingAdapter()
+    document = _document()
+    box = TextBox(40, 30, 50, 24)
+    result = _processor(adapter).execute(
+        document,
+        document,
+        ManualRegionSpec(
+            ManualInputMode.SOURCE_TEXT,
+            box,
+            box,
+            box,
+            source_text="第一行内容\n第二行内容",
+        ),
+        "zh-Hans",
+        TranslationSelection(TranslationMode.ALL, "en"),
+        merge_paragraphs=False,
+    )
+    assert adapter.calls == [
+        (("第一行内容", "第二行内容"), None, "en"),
+    ]
+    assert result.translated_text == "第一行内容 译\n第二行内容 译"
+
+
+def test_auto_mode_short_paragraph_rejects_protected_line() -> None:
+    QApplication.instance() or QApplication(["manual-short-protected-test"])
+    document = _document()
+    box = TextBox(40, 30, 50, 24)
+    with pytest.raises(ManualRegionError):
+        _processor(_RecordingAdapter()).execute(
+            document,
+            document,
+            ManualRegionSpec(
+                ManualInputMode.SOURCE_TEXT,
+                box,
+                box,
+                box,
+                source_text="Alpha\nBeta",
+            ),
+            "en",
+            TranslationSelection(TranslationMode.ALL, "zh-Hans"),
+            ("Alpha",),
+            merge_paragraphs=False,
+        )

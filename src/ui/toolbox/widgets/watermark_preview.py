@@ -8,9 +8,17 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, QPoint, QRect, QRectF, Signal
-from PySide6.QtGui import QKeyEvent, QMouseEvent, QPainter, QPen, QColor, QPixmap
-from PySide6.QtWidgets import QLabel
+from PySide6.QtCore import Qt, QPoint, QRect, QRectF, QSize, Signal
+from PySide6.QtGui import (
+    QKeyEvent,
+    QMouseEvent,
+    QPainter,
+    QPen,
+    QColor,
+    QPixmap,
+    QWheelEvent,
+)
+from PySide6.QtWidgets import QApplication, QLabel
 
 from src.ui.toolbox.tool_box_model import WatermarkItem
 
@@ -52,6 +60,15 @@ class InteractivePreview(QLabel):
         self._wm_drag_start: QPoint | None = None
         self._wm_drag_item: str | None = None
         self._wm_orig_custom: tuple[float, float] | None = None
+        # 缩放 / 平移（预览交互与翻译画布一致：滚轮缩放 + 拖拽移动 + 双击复位）
+        self._zoom = 1.0
+        self._pan = QPoint(0, 0)
+        self._panning = False
+        self._pan_start: QPoint | None = None
+        self._left_pan_candidate: QPoint | None = None
+        self._left_pan_active = False
+        self._MIN_ZOOM = 0.2
+        self._MAX_ZOOM = 20.0
 
     # —— 数据 ——
 
@@ -62,6 +79,19 @@ class InteractivePreview(QLabel):
     def set_original_size(self, w: int, h: int) -> None:
         self._orig_width = max(1, w)
         self._orig_height = max(1, h)
+
+    def set_image(self, pixmap: QPixmap) -> None:
+        """设置原始（全分辨率）预览图，并复位缩放/平移。"""
+        self.setPixmap(pixmap)
+        self._orig_width = max(1, pixmap.width())
+        self._orig_height = max(1, pixmap.height())
+        self._zoom = 1.0
+        self._pan = QPoint(0, 0)
+        self._panning = False
+        self._pan_start = None
+        self._left_pan_candidate = None
+        self._left_pan_active = False
+        self.update()
 
     def set_selected(self, wm_id: str | None) -> None:
         self._selected_id = wm_id
@@ -87,8 +117,14 @@ class InteractivePreview(QLabel):
             self._crop_rect = None
             self._crop_drag = None
         else:
-            # 重新框选前恢复原图预览
+            # 重新框选前恢复原图预览；裁剪在适配视图下进行，避免缩放/平移干扰选区
             self._crop_preview_rect = None
+            self._zoom = 1.0
+            self._pan = QPoint(0, 0)
+            self._panning = False
+            self._pan_start = None
+            self._left_pan_candidate = None
+            self._left_pan_active = False
         self.update()
 
     def clear_crop_preview(self) -> None:
@@ -122,9 +158,104 @@ class InteractivePreview(QLabel):
             return
         super().keyPressEvent(event)
 
+    # —— 缩放 / 平移 ——
+
+    def wheelEvent(self, event: QWheelEvent) -> None:
+        if not self.pixmap() or self._crop_mode:
+            super().wheelEvent(event)
+            return
+        delta = event.angleDelta().y()
+        if delta == 0:
+            super().wheelEvent(event)
+            return
+        factor = 1.0 + abs(delta) / 1200.0
+        f = factor if delta > 0 else 1.0 / factor
+        self._zoom_about(event.position().toPoint(), f)
+        event.accept()
+
+    def _zoom_about(self, pos: QPoint, f: float) -> None:
+        """以 pos（Label 坐标）为锚点缩放 f 倍，保持锚点下的像素不动。"""
+        new_zoom = max(self._MIN_ZOOM, min(self._MAX_ZOOM, self._zoom * f))
+        f = new_zoom / self._zoom
+        if abs(f - 1.0) < 1e-4:
+            return
+        cr_center = self.contentsRect().center()
+        center = QPoint(
+            cr_center.x() + self._pan.x(), cr_center.y() + self._pan.y()
+        )
+        nc = QPoint(
+            round(pos.x() * (1 - f) + center.x() * f),
+            round(pos.y() * (1 - f) + center.y() * f),
+        )
+        self._pan = QPoint(nc.x() - cr_center.x(), nc.y() - cr_center.y())
+        self._zoom = new_zoom
+        self._clamp_pan()
+        self.update()
+
+    def reset_view(self) -> None:
+        """复位缩放/平移（回到适配视图）。"""
+        if self._zoom == 1.0 and self._pan == QPoint(0, 0):
+            return
+        self._zoom = 1.0
+        self._pan = QPoint(0, 0)
+        self._clamp_pan()
+        self.update()
+
+    def zoom_factor(self) -> float:
+        return self._zoom
+
+    def _fit_size(self) -> tuple[int, int]:
+        """适配视图（zoom=1）下图片的显示尺寸。"""
+        pix = self.pixmap()
+        if pix is None or pix.isNull():
+            return 0, 0
+        cr = self.contentsRect()
+        avail_w = cr.width() - 4
+        avail_h = cr.height() - 4
+        if avail_w <= 0 or avail_h <= 0:
+            return pix.width(), pix.height()
+        ratio = min(avail_w / max(1, pix.width()), avail_h / max(1, pix.height()))
+        return max(1, round(pix.width() * ratio)), max(1, round(pix.height() * ratio))
+
+    def _clamp_pan(self) -> None:
+        """约束平移量，保证图片始终有一部分可见。"""
+        fw, fh = self._fit_size()
+        cr = self.contentsRect()
+        if fw <= 0 or fh <= 0 or cr.width() <= 0 or cr.height() <= 0:
+            self._pan = QPoint(0, 0)
+            return
+        keep = 40
+        dw = max(1, round(fw * self._zoom))
+        dh = max(1, round(fh * self._zoom))
+        base_x = (cr.width() - dw) // 2
+        base_y = (cr.height() - dh) // 2
+        self._pan = QPoint(
+            self._clamp_axis(self._pan.x(), base_x, dw, cr.width(), keep),
+            self._clamp_axis(self._pan.y(), base_y, dh, cr.height(), keep),
+        )
+
+    @staticmethod
+    def _clamp_axis(pan: int, base: int, disp: int, span: int, keep: int) -> int:
+        # 实际左上角 ax = base + pan；约束 ax ∈ [keep - disp, span - keep]
+        lo = keep - disp - base
+        hi = span - keep - base
+        if lo > hi:
+            lo, hi = hi, lo
+        return max(lo, min(hi, pan))
+
     # —— 鼠标事件 ——
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
+        # 中键拖动 = 平移（非裁剪模式下）
+        if event.button() == Qt.MouseButton.MiddleButton:
+            if self.pixmap() and not self._crop_mode:
+                self._panning = True
+                self._pan_start = event.pos()
+                self._left_pan_candidate = None
+                self._left_pan_active = False
+                self.setCursor(Qt.CursorShape.ClosedHandCursor)
+                event.accept()
+            return
         if not self.pixmap():
             return
         pos = event.pos()
@@ -136,6 +267,7 @@ class InteractivePreview(QLabel):
             self._wm_drag = "scale"
             self._wm_drag_item = self._selected_id
             self._wm_drag_start = pos
+            self._left_pan_candidate = None
             return
         wm_id = self._hit_watermark(pos)
         if wm_id:
@@ -145,16 +277,49 @@ class InteractivePreview(QLabel):
             self._wm_drag_item = wm_id
             self._wm_drag_start = pos
             self._wm_orig_custom = self._get_custom(wm_id)
+            self._left_pan_candidate = None
             self.update()
             return
         self._selected_id = None
         self.watermark_selected.emit("")
+        # 空白处左键按下：可作为平移起点（超过拖拽阈值才生效）
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._left_pan_candidate = pos
         self.update()
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
         if not self.pixmap():
             return
         pos = event.pos()
+        # 中键平移
+        if self._panning and self._pan_start is not None:
+            self._pan += pos - self._pan_start
+            self._pan_start = pos
+            self._clamp_pan()
+            event.accept()
+            self.update()
+            return
+        # 左键空白平移（超过拖拽阈值后）
+        if (
+            self._left_pan_candidate is not None
+            and self._wm_drag is None
+            and not self._crop_mode
+            and (event.buttons() & Qt.MouseButton.LeftButton)
+        ):
+            if not self._left_pan_active:
+                if (
+                    pos - self._left_pan_candidate
+                ).manhattanLength() >= QApplication.startDragDistance():
+                    self._left_pan_active = True
+                    self._pan_start = pos
+                    self.setCursor(Qt.CursorShape.ClosedHandCursor)
+            if self._left_pan_active:
+                self._pan += pos - self._pan_start
+                self._pan_start = pos
+                self._clamp_pan()
+                event.accept()
+                self.update()
+                return
         if self._crop_mode and self._crop_drag:
             self._on_crop_drag(pos)
             return
@@ -165,12 +330,27 @@ class InteractivePreview(QLabel):
         elif self._wm_drag == "scale" and self._wm_drag_start:
             dx = pos.x() - self._wm_drag_start.x()
             self._scale_selected(dx)
-        elif self._crop_mode:
-            self.setCursor(Qt.CursorShape.CrossCursor)
-        elif self.pixmap():
+        else:
             self.setCursor(Qt.CursorShape.CrossCursor)
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+        # 中键平移结束
+        if event.button() == Qt.MouseButton.MiddleButton and self._panning:
+            self._panning = False
+            self._pan_start = None
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+            event.accept()
+            return
+        # 左键平移结束 / 空白单击
+        if event.button() == Qt.MouseButton.LeftButton:
+            if self._left_pan_active:
+                self._left_pan_active = False
+                self._pan_start = None
+                self._left_pan_candidate = None
+                self.setCursor(Qt.CursorShape.ArrowCursor)
+                event.accept()
+                return
+            self._left_pan_candidate = None
         # 裁剪拖拽结束 → 同步选区到参数；新建选区（draw）松开即完成裁剪并退出模式
         if self._crop_mode and self._crop_rect is not None and self._crop_drag:
             rect = self._crop_to_image(self._crop_rect)
@@ -193,20 +373,24 @@ class InteractivePreview(QLabel):
         self.setCursor(Qt.CursorShape.ArrowCursor)
 
     def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:
-        """双击选区 → 确认裁剪。"""
-        if not self._crop_mode or not self._crop_rect:
-            super().mouseDoubleClickEvent(event)
+        """裁剪模式：双击选区确认裁剪；非裁剪模式：双击复位缩放/平移。"""
+        if self._crop_mode:
+            if not self._crop_rect:
+                super().mouseDoubleClickEvent(event)
+                return
+            if self._crop_rect.contains(event.pos()):
+                rect = self._crop_to_image(self._crop_rect)
+                if rect:
+                    self.crop_box_changed.emit(rect.x(), rect.y(),
+                                               rect.width(), rect.height())
+                # 确认后退出裁剪模式
+                self.set_crop_mode(False)
+                self.crop_mode_exited.emit()
+                self.update()
+                event.accept()
             return
-        if self._crop_rect.contains(event.pos()):
-            rect = self._crop_to_image(self._crop_rect)
-            if rect:
-                self.crop_box_changed.emit(rect.x(), rect.y(),
-                                           rect.width(), rect.height())
-            # 确认后退出裁剪模式
-            self.set_crop_mode(False)
-            self.crop_mode_exited.emit()
-            self.update()
-            event.accept()
+        self.reset_view()
+        event.accept()
 
     # —— 裁剪交互 ——
 
@@ -299,14 +483,19 @@ class InteractivePreview(QLabel):
     # —— 绘制 ——
 
     def paintEvent(self, event) -> None:
+        if not self.pixmap():
+            # 无图：显示占位文字（由 QLabel 绘制）
+            super().paintEvent(event)
+            return
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
         if self._transform_deg or self._transform_flip:
             # 旋转/翻转预览：变换后的图片 + 水印跟随旋转
-            painter = QPainter(self)
             self._paint_transformed_pixmap(painter, include_watermarks=True)
             painter.end()
             return
-        super().paintEvent(event)
-        painter = QPainter(self)
+        # 常规：按当前缩放/平移绘制图片
+        self._draw_base_image(painter)
         if self._crop_mode:
             self._paint_crop(painter)
         if self._crop_preview_rect is not None:
@@ -315,6 +504,16 @@ class InteractivePreview(QLabel):
             self._paint_watermarks(painter)
         self._paint_image_watermark(painter)
         painter.end()
+
+    def _draw_base_image(self, painter: QPainter) -> None:
+        img_rect = self._image_draw_rect()
+        pix = self.pixmap()
+        if img_rect is None or pix is None or pix.isNull():
+            return
+        # 目标/源矩形须同为 QRectF（混用 QRect+QRectF 会无匹配重载而抛错）
+        painter.drawPixmap(
+            QRectF(img_rect), pix, QRectF(0, 0, pix.width(), pix.height())
+        )
 
     def _paint_transformed_pixmap(
         self, painter: QPainter, include_watermarks: bool = False
@@ -350,15 +549,17 @@ class InteractivePreview(QLabel):
         """裁剪效果预览：选区内容放大显示（所见即所得）。"""
         pix = self.pixmap()
         img_rect = self._image_draw_rect()
-        if pix is None or img_rect is None or self._crop_preview_rect is None:
+        if pix is None or pix.isNull() or img_rect is None or self._crop_preview_rect is None:
             return
         label_rect = self._crop_preview_rect
-        # Label 坐标 → pixmap 坐标（图片居中显示有偏移）
+        # Label 坐标 → 全分辨率 pixmap 坐标（按显示尺寸缩放）
+        sx = pix.width() / max(1, img_rect.width())
+        sy = pix.height() / max(1, img_rect.height())
         src = QRect(
-            label_rect.x() - img_rect.x(),
-            label_rect.y() - img_rect.y(),
-            label_rect.width(),
-            label_rect.height(),
+            round((label_rect.x() - img_rect.x()) * sx),
+            round((label_rect.y() - img_rect.y()) * sy),
+            round(label_rect.width() * sx),
+            round(label_rect.height() * sy),
         )
         src = src & QRect(0, 0, pix.width(), pix.height())
         if src.width() < 2 or src.height() < 2:
@@ -503,32 +704,27 @@ class InteractivePreview(QLabel):
 
     # —— 几何 ——
 
+    def sizeHint(self) -> QSize:
+        # 与图片尺寸解耦：预览区由布局伸缩填充，避免全分辨率 pixmap 撑爆窗口
+        return QSize(320, 240)
+
+    def minimumSizeHint(self) -> QSize:
+        return QSize(80, 80)
+
     def _image_draw_rect(self) -> QRect | None:
-        """图片在 Label 中的实际绘制区域（考虑对齐方式）。"""
+        """图片在 Label 中的实际绘制区域（适配尺寸 × 缩放 + 平移）。"""
         pix = self.pixmap()
-        if not pix:
+        if pix is None or pix.isNull():
             return None
+        fw, fh = self._fit_size()
+        if fw <= 0 or fh <= 0:
+            return None
+        dw = max(1, round(fw * self._zoom))
+        dh = max(1, round(fh * self._zoom))
         cr = self.contentsRect()
-        area_w = cr.width()
-        area_h = cr.height()
-        pix_w = pix.width()
-        pix_h = pix.height()
-        if pix_w <= 0 or pix_h <= 0:
-            return None
-        draw_w = pix_w
-        draw_h = pix_h
-        alignment = self.alignment()
-        x = cr.x()
-        y = cr.y()
-        if alignment & Qt.AlignmentFlag.AlignHCenter:
-            x = cr.x() + (area_w - draw_w) // 2
-        elif alignment & Qt.AlignmentFlag.AlignRight:
-            x = cr.x() + (area_w - draw_w)
-        if alignment & Qt.AlignmentFlag.AlignVCenter:
-            y = cr.y() + (area_h - draw_h) // 2
-        elif alignment & Qt.AlignmentFlag.AlignBottom:
-            y = cr.y() + (area_h - draw_h)
-        return QRect(x, y, draw_w, draw_h)
+        x = cr.x() + (cr.width() - dw) // 2 + self._pan.x()
+        y = cr.y() + (cr.height() - dh) // 2 + self._pan.y()
+        return QRect(x, y, dw, dh)
 
     def _wm_rect(self, wm: WatermarkItem) -> QRect | None:
         img_rect = self._image_draw_rect()

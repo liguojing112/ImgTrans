@@ -536,6 +536,133 @@ def test_style_brush_snapshot_merges_into_target_layer(qtbot) -> None:
     assert after.text == "B"
 
 
+def test_format_brush_arm_toggles_canvas_rect_mode(qtbot) -> None:
+    """面板格式刷开/关应驱动画布进入/退出框选模式。"""
+    from PySide6.QtGui import QUndoStack
+
+    from src.ui.editor.editor_page import EditorPage
+
+    page = EditorPage(QUndoStack())
+    qtbot.addWidget(page)
+    page.show()
+    page._model = None
+
+    panel = page.property_panel
+    panel.set_layer(_make_layer(region_id="src"))
+
+    events = []
+    panel.style_brush_rect_mode_changed.connect(events.append)
+
+    panel.format_brush_btn.click()  # 捕获
+    assert events == [True]
+    assert page.scene._selection_mode == "format_brush"
+
+    panel.format_brush_btn.click()  # 再点退出
+    assert events == [True, False]
+    assert page.scene._selection_mode is None
+
+
+def test_brush_snapshot_and_source_exposed(qtbot) -> None:
+    """armed 期间对外暴露快照与来源 id，未 armed / disarm 后为 None。"""
+    panel = PropertyPanel()
+    qtbot.addWidget(panel)
+    panel.show()
+
+    assert panel.brush_snapshot() is None
+    assert panel.brush_source_id() is None
+
+    _arm_brush(
+        panel,
+        _make_layer(region_id="src", style=TextStyle("Arial", 20, (255, 0, 0))),
+    )
+    assert panel.brush_source_id() == "src"
+    snap = panel.brush_snapshot()
+    assert snap is not None
+    assert snap["font_size"] == 20.0
+    assert snap["fill_rgb"] == (255, 0, 0)
+
+    panel.disarm_brush()
+    assert not panel.format_brush_btn.isChecked()
+    assert panel.brush_snapshot() is None
+    assert panel.brush_source_id() is None
+
+
+def test_editor_page_format_brush_rect_batch(qtbot) -> None:
+    """框选后，仅与矩形相交且非来源的图层进入批量更新，来源/远处排除，刷保持待用。"""
+    from types import SimpleNamespace
+
+    from PySide6.QtGui import QUndoStack
+
+    from src.domain.layout import TextLayout
+    from src.ui.editor.editor_page import EditorPage
+
+    family = _test_font_family()
+    page = EditorPage(QUndoStack())
+    qtbot.addWidget(page)
+    page.show()
+
+    source = TextLayer("src", "A", TextBox(100, 50, 80, 24), TextStyle(family, 20, (255, 0, 0)))
+    near = TextLayer("near", "B", TextBox(130, 60, 100, 30), TextStyle(family, 12, (10, 20, 30)))
+    far = TextLayer("far", "C", TextBox(600, 400, 100, 30), TextStyle(family, 12, (10, 20, 30)))
+    page._model = SimpleNamespace(text_layout=TextLayout((source, near, far)))
+
+    batches = []
+    page.style_brush_batch_requested.connect(batches.append)
+
+    panel = page.property_panel
+    panel.set_layer(source)
+    panel.format_brush_btn.click()  # arm
+
+    page._on_area_selected("format_brush", TextBox(115, 55, 120, 40))
+
+    assert len(batches) == 1
+    updates = batches[0]
+    assert [u[0] for u in updates] == ["near"]
+    style, rotation = updates[0][1], updates[0][2]
+    assert style.font_size == 20.0
+    assert style.fill_rgb == (255, 0, 0)
+    assert rotation == near.box.rotation_degrees  # 保持目标自身旋转角
+    # 框选套用后仍保持刷状态，可继续框选/点选，由 Esc 或再次点击按钮退出
+    assert panel.format_brush_btn.isChecked()
+    assert panel.brush_snapshot() is not None
+    assert page.scene._selection_mode == "format_brush"
+    # 收尾：刷状态挂着应用级事件过滤器，测试结束前主动解除，避免影响后续用例
+    panel.disarm_brush()
+
+
+def test_editor_page_format_brush_rect_no_hit_emits_nothing(qtbot) -> None:
+    """框选未命中任何目标图层时不发射批量事件，刷仍保持待用。"""
+    from types import SimpleNamespace
+
+    from PySide6.QtGui import QUndoStack
+
+    from src.domain.layout import TextLayout
+    from src.ui.editor.editor_page import EditorPage
+
+    family = _test_font_family()
+    page = EditorPage(QUndoStack())
+    qtbot.addWidget(page)
+    page.show()
+
+    source = TextLayer("src", "A", TextBox(100, 50, 80, 24), TextStyle(family, 20, (255, 0, 0)))
+    far = TextLayer("far", "C", TextBox(600, 400, 100, 30), TextStyle(family, 12, (10, 20, 30)))
+    page._model = SimpleNamespace(text_layout=TextLayout((source, far)))
+
+    batches = []
+    page.style_brush_batch_requested.connect(batches.append)
+
+    panel = page.property_panel
+    panel.set_layer(source)
+    panel.format_brush_btn.click()
+
+    # 框内只有来源自身（被跳过），远处图层不相交
+    page._on_area_selected("format_brush", TextBox(115, 55, 120, 40))
+
+    assert batches == []
+    assert panel.format_brush_btn.isChecked()
+    panel.disarm_brush()  # 收尾：解除应用级事件过滤器
+
+
 def test_property_panel_narrow_allows_horizontal_scroll(qtbot) -> None:
     """面板窄于表单最小宽时应出现横向滚动条，而不是静默截断右侧内容。"""
     from PySide6.QtCore import Qt

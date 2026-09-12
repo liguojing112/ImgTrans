@@ -33,6 +33,42 @@ _PURPOSE_LABELS = {
     "reference": "参考图",
 }
 
+_SUPPORTED_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
+
+
+class _FileDropList(QListWidget):
+    """缩略图列表：保留内部拖拽排序，同时接收外部图片文件拖入。
+
+    默认 InternalMove 模式下，外部文件拖到列表上会被列表吞掉（只认自身条目
+    的重排），导致「拖图片进预览区」无反应。这里对外部 URL 拖拽单独接管并
+    转发给 uploader；非 URL（拖拽已有缩略图重排）仍交给基类处理。
+    """
+
+    files_dropped = Signal(list)  # list[Path]
+
+    def dragEnterEvent(self, event) -> None:
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+            return
+        super().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event) -> None:
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+            return
+        super().dragMoveEvent(event)
+
+    def dropEvent(self, event) -> None:
+        if event.mimeData().hasUrls():
+            paths = [
+                Path(u.toLocalFile()) for u in event.mimeData().urls() if u.isLocalFile()
+            ]
+            if paths:
+                self.files_dropped.emit(paths)
+            event.acceptProposedAction()
+            return
+        super().dropEvent(event)
+
 
 class ImageUploader(QFrame):
     """图片上传组件 — 上传按钮 + 缩略图列表 + 删除/排序/用途设置。"""
@@ -85,12 +121,13 @@ class ImageUploader(QFrame):
         layout.addLayout(btn_layout)
 
         # 缩略图列表
-        self._list = QListWidget()
+        self._list = _FileDropList()
         self._list.setObjectName("thumbnailList")
         self._list.setIconSize(self._list.iconSize().scaled(48, 48, Qt.AspectRatioMode.KeepAspectRatio))
-        self._list.setDragDropMode(self._list.dragDropMode().InternalMove)
+        self._list.setDragDropMode(QListWidget.DragDropMode.InternalMove)
         self._list.model().rowsMoved.connect(self._on_reorder)
         self._list.itemDoubleClicked.connect(self._on_preview)
+        self._list.files_dropped.connect(self._on_files_dropped)
         layout.addWidget(self._list, stretch=1)
 
     def images(self) -> list[ProductSourceImage]:
@@ -244,11 +281,16 @@ class ImageUploader(QFrame):
         if event.mimeData().hasUrls():
             event.acceptProposedAction()
 
-    def dropEvent(self, event: QDropEvent) -> None:
-        supported = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
-        for url in event.mimeData().urls():
-            if not url.isLocalFile():
-                continue
-            path = Path(url.toLocalFile())
-            if path.suffix.lower() in supported:
+    def _on_files_dropped(self, paths: list) -> None:
+        self._accept_paths(paths)
+
+    def _accept_paths(self, paths) -> None:
+        for path in paths:
+            if path.suffix.lower() in _SUPPORTED_SUFFIXES:
                 self.add_image(path)
+
+    def dropEvent(self, event: QDropEvent) -> None:
+        self._accept_paths(
+            Path(u.toLocalFile()) for u in event.mimeData().urls() if u.isLocalFile()
+        )
+        event.acceptProposedAction()

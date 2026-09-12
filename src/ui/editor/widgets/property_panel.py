@@ -66,6 +66,8 @@ class PropertyPanel(QFrame):
     ocr_property_changed = Signal(str, str, object)
     # 格式刷：(目标 region_id, 来源 region_id, 样式快照 dict)
     style_brush_applied = Signal(str, str, dict)
+    # 格式刷框选模式：True 时画布应进入拖拽框选状态，False 时退出
+    style_brush_rect_mode_changed = Signal(bool)
 
     add_layer_requested = Signal(str)  # default text
 
@@ -398,7 +400,8 @@ class PropertyPanel(QFrame):
         self.format_brush_btn.setCheckable(True)
         self.format_brush_btn.setText("格式刷")
         self.format_brush_btn.setToolTip(
-            "捕获当前图层的文字样式；之后选中其他文字图层自动应用。"
+            "捕获当前图层的文字样式；之后在画布上拖拽框选一片区域，"
+            "框内的文字图层会一次性应用该样式（也可点选单个逐个套用）。"
             "按 Esc 或再次点击取消"
         )
         self.format_brush_btn.toggled.connect(self._on_format_brush_toggled)
@@ -517,11 +520,26 @@ class PropertyPanel(QFrame):
             self._brush_source_id = self._region_id
             self._brush_snapshot = self._capture_brush_snapshot()
             self._set_app_event_filter(True)
+            self.style_brush_rect_mode_changed.emit(True)
         else:
             self._brush_armed = False
             self._brush_source_id = None
             self._brush_snapshot = {}
             self._set_app_event_filter(False)
+            self.style_brush_rect_mode_changed.emit(False)
+
+    def brush_snapshot(self) -> dict[str, object] | None:
+        """当前捕获的样式快照；未处于框选/刷状态时返回 None。"""
+        return self._brush_snapshot if self._brush_armed else None
+
+    def brush_source_id(self) -> str | None:
+        """格式刷的来源图层 id（框选套用时应跳过该来源本身）。"""
+        return self._brush_source_id if self._brush_armed else None
+
+    def disarm_brush(self) -> None:
+        """程序化退出刷状态（框选套用完成后调用），复用取消路径。"""
+        if self.format_brush_btn.isChecked():
+            self.format_brush_btn.setChecked(False)
 
     def _set_app_event_filter(self, enabled: bool) -> None:
         """armed 期间挂应用级事件过滤器：点选画布后焦点不在面板上，

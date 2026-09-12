@@ -59,6 +59,8 @@ class ActivationDialog(QDialog):
         self._clear_activation = clear_activation
         self._task_runner = task_runner
         self._has_session = False
+        self._session: ActivationSession | None = None
+        self._unbind_code: str | None = None
         self._purchase_available = purchase_available
         self._unbind = unbind
         self._purchase_client = purchase_client
@@ -119,10 +121,15 @@ class ActivationDialog(QDialog):
         self.status_label.setWordWrap(True)
         self.status_label.setStyleSheet("color: #ffffff; font-size: 13px;")
         self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        # 状态区会显示激活码，允许鼠标选中后 Ctrl+C 复制，方便换电脑时带走
+        self.status_label.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+            | Qt.TextInteractionFlag.TextSelectableByKeyboard
+        )
         left_layout.addWidget(self.status_label)
 
         if unbind is not None:
-            self.unbind_button = QPushButton("解绑本机设备（换机 / 找回激活码）")
+            self.unbind_button = QPushButton("解绑本机设备（换电脑时使用）")
             self.unbind_button.setObjectName("unbindDeviceButton")
             self.unbind_button.setStyleSheet(
                 "QPushButton { background: transparent; color: #fbbf24;"
@@ -208,37 +215,58 @@ class ActivationDialog(QDialog):
         self._set_session_status(result)
 
     def _set_session_status(self, session: ActivationSession | None) -> None:
+        self._session = session
         if session is None:
             self._has_session = False
             self.status_label.setText("当前设备尚未激活")
         else:
             self._has_session = True
             expires = session.expires_at.astimezone().strftime("%Y-%m-%d %H:%M")
+            lines = [f"已激活，有效期至 {expires}"]
             if session.quota_total > 0:
-                self.status_label.setText(
-                    f"已激活，有效期至 {expires}\n商品详情剩余次数：{session.quota_remaining}/{session.quota_total}"
+                lines.append(
+                    f"商品详情剩余次数：{session.quota_remaining}/{session.quota_total}"
                 )
-            else:
-                self.status_label.setText(f"已激活，有效期至 {expires}")
+            if session.code:
+                lines.append(f"激活码：{session.code}（换电脑时需在新电脑输入）")
+            self.status_label.setText("\n".join(lines))
         self._set_busy(False)
+
+    def _confirm_unbind(self, code: str) -> bool:
+        from PySide6.QtWidgets import QMessageBox
+
+        box = QMessageBox(self)
+        box.setWindowTitle("解绑换机")
+        box.setIcon(QMessageBox.Icon.Question)
+        box.setText(
+            f"将解绑本机激活码：\n{code}\n\n"
+            "解绑后本机激活失效，可在其他电脑用该激活码重新激活"
+            "（剩余时长/次数保留）。\n确定要解绑吗？"
+        )
+        # 激活码要能被选中复制，方便用户带到新电脑
+        box.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+            | Qt.TextInteractionFlag.TextSelectableByKeyboard
+        )
+        box.setStandardButtons(
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        return box.exec() == QMessageBox.StandardButton.Yes
 
     def request_unbind(self) -> None:
         if self._unbind is None:
             return
-        # 与激活一致地规范化：服务端按大写校验激活码，小写输入会直接被拒
-        code = self.code_edit.text().strip().upper()
+        # 与激活一致地规范化：服务端按大写校验激活码，小写输入会直接被拒。
+        # 本机已激活时直接用当前激活码，用户换机不需要重新输入。
+        code = self.code_edit.text().strip().upper() or (
+            self._session.code if self._session is not None and self._session.code else ""
+        )
         if not code:
             self.status_label.setText("请输入要解绑的激活码")
             return
-        from PySide6.QtWidgets import QMessageBox
-
-        reply = QMessageBox.question(
-            self,
-            "解绑换机",
-            "解绑后本机激活将失效，该激活码可在其他设备重新激活。\n确定要解绑吗？",
-        )
-        if reply != QMessageBox.StandardButton.Yes:
+        if not self._confirm_unbind(code):
             return
+        self._unbind_code = code
         self._set_busy(True)
         self.status_label.setText("正在解绑…")
         self._task_runner.submit(
@@ -251,6 +279,7 @@ class ActivationDialog(QDialog):
         if not ok:
             self._operation_failed(RuntimeError("解绑失败，激活码无效或已停用"))
             return
+        code = self._unbind_code or self.code_edit.text().strip().upper()
         self.code_edit.clear()
         try:
             # 服务端已解绑，必须同步清掉本机凭据，否则本机仍显示"已激活"，
@@ -265,7 +294,9 @@ class ActivationDialog(QDialog):
             return
         self._set_session_status(None)
         self.activation_cleared.emit()
-        self.status_label.setText("解绑成功，本机已退出激活，可换机重新激活")
+        self.status_label.setText(
+            f"解绑成功，本机已退出激活。\n请在新电脑输入该激活码激活：{code}"
+        )
 
     def request_activation(self) -> None:
         code = self.code_edit.text().strip()

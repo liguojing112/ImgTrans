@@ -8,6 +8,7 @@ EditComposition 重渲染后通过 model.edit_finished 信号回传 CompositionE
 from __future__ import annotations
 
 from dataclasses import replace
+from math import cos, radians, sin
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QTimer, Qt, Signal
@@ -142,6 +143,8 @@ class EditorPage(QWidget):
 
     # 属性编辑信号 — payload: (region_id, field_kind, value, before_layer)
     edit_requested = Signal(str, str, object, object)
+    # 格式刷框选批量套用 — payload: list[(region_id, 新样式, 旋转角)]
+    style_brush_batch_requested = Signal(object)
 
     def __init__(self, undo_stack: QUndoStack) -> None:
         super().__init__()
@@ -336,6 +339,9 @@ class EditorPage(QWidget):
         )
         self.property_panel.style_brush_applied.connect(
             self._on_style_brush_applied
+        )
+        self.property_panel.style_brush_rect_mode_changed.connect(
+            self._on_brush_rect_mode_changed
         )
         self.property_panel.delete_layer_requested.connect(self.delete_requested.emit)
         self.property_panel.duplicate_layer_requested.connect(self.duplicate_requested.emit)
@@ -874,6 +880,8 @@ class EditorPage(QWidget):
             self.scene.set_crop_selection(box)
             self.crop_dialog.set_selection(box)
             self._show_layer_tool("crop")
+        elif mode == "format_brush":
+            self._apply_brush_rect(box)
 
     def _on_area_selection_cleared(self, mode: str) -> None:
         if mode == "crop":
@@ -1067,6 +1075,41 @@ class EditorPage(QWidget):
                 after = candidate
         if after != target:
             self.edit_requested.emit(region_id, "style", after, target)
+
+    def _on_brush_rect_mode_changed(self, enabled: bool) -> None:
+        """面板格式刷开/关 → 切换画布框选模式。"""
+        self.scene.set_area_selection_mode("format_brush" if enabled else None)
+
+    def _apply_brush_rect(self, box: TextBox) -> None:
+        """格式刷框选：把捕获的样式一次性套用到框内所有文字图层。
+
+        只针对已有文字图层（可 reflow）的区域；跳过来源图层自身。
+        结果合并为一条 style_brush_batch_requested，由 MainWindow 后台单次渲染。
+        """
+        snapshot = self.property_panel.brush_snapshot()
+        source_id = self.property_panel.brush_source_id()
+        model = getattr(self, "_model", None)
+        layout = getattr(model, "text_layout", None) if model is not None else None
+        updates: list[tuple[str, object, float]] = []
+        if snapshot and layout is not None:
+            for layer in layout.layers:
+                if layer.region_id == source_id or not _textbox_intersects(
+                    layer.box, box
+                ):
+                    continue
+                after = layer
+                for field, value in snapshot.items():
+                    candidate = self._apply_field_change(after, field, value)
+                    if candidate is not None:
+                        after = candidate
+                if after != layer:
+                    updates.append(
+                        (after.region_id, after.style, after.box.rotation_degrees)
+                    )
+        # 框选套用后保持刷状态：与单个点选一致，可连续框选/点选多个区域，
+        # 由 Esc 或再次点击「格式刷」按钮退出（画布框选模式同样保持）。
+        if updates:
+            self.style_brush_batch_requested.emit(updates)
 
     def _restore_ocr_regions(self) -> None:
         """从当前 OCR 结果重建识别框（set_document 会清空 _ocr_items）。"""
@@ -1409,3 +1452,23 @@ def _export_filter_for_suffix(suffix: str) -> str:
     selected = filters.get(suffix, filters[".png"])
     remaining = [value for value in filters.values() if value != selected]
     return ";;".join((selected, *remaining))
+
+
+def _textbox_intersects(a: TextBox, b: TextBox) -> bool:
+    """两个文字框（含旋转）的轴对齐包围盒是否相交，用于框选命中判断。"""
+
+    def _aabb(box: TextBox):
+        angle = radians(box.rotation_degrees)
+        half_w, half_h = box.width / 2, box.height / 2
+        rx = half_w * abs(cos(angle)) + half_h * abs(sin(angle))
+        ry = half_w * abs(sin(angle)) + half_h * abs(cos(angle))
+        return (
+            box.center_x - rx,
+            box.center_y - ry,
+            box.center_x + rx,
+            box.center_y + ry,
+        )
+
+    ax0, ay0, ax1, ay1 = _aabb(a)
+    bx0, by0, bx1, by1 = _aabb(b)
+    return ax0 < bx1 and ax1 > bx0 and ay0 < by1 and ay1 > by0

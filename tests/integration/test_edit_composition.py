@@ -266,6 +266,82 @@ def test_style_stroke_shadow_and_manual_size_render_and_undo() -> None:
     assert undone.document.pixels == initial.pixels
 
 
+def test_replace_style_many_batches_into_single_undo_step() -> None:
+    QApplication.instance() or QApplication(["style-many-test"])
+    background = _background()
+    base_style = TextStyle(resolve_system_font("en"), 20, (20, 30, 40))
+    r1 = TextLayer("r1", "AAA", TextBox(50, 40, 80, 30), base_style)
+    r2 = TextLayer("r2", "BBB", TextBox(140, 40, 80, 30), base_style)
+    r3 = TextLayer("r3", "CCC", TextBox(95, 62, 80, 30), base_style)
+    renderer = QtTextRenderer()
+    layout = TextLayout((r1, r2, r3))
+    initial = renderer.render(background, layout)
+    editor = CreateCompositionEditor(QtBasicTextLayoutAdapter(), renderer).execute(
+        background, initial, layout
+    )
+    style_a = TextStyle(resolve_system_font("en"), 14, (180, 20, 30), auto_fit=False)
+    style_b = TextStyle(resolve_system_font("en"), 16, (10, 120, 20), auto_fit=False)
+    result = editor.replace_style_many(
+        [("r1", style_a, 15.0), ("r3", style_b, 30.0)]
+    )
+    assert result.layout.layer_by_id("r1").style == style_a
+    assert result.layout.layer_by_id("r1").box.rotation_degrees == 15.0
+    assert result.layout.layer_by_id("r3").style == style_b
+    assert result.layout.layer_by_id("r3").box.rotation_degrees == 30.0
+    assert result.layout.layer_by_id("r2") == r2
+    assert result.document.pixels != initial.pixels
+    assert result.can_undo
+    undone = editor.undo()
+    assert undone.layout.layer_by_id("r1") == r1
+    assert undone.layout.layer_by_id("r2") == r2
+    assert undone.layout.layer_by_id("r3") == r3
+    assert undone.document.pixels == initial.pixels
+    assert not undone.can_undo
+
+
+def test_replace_style_many_empty_list_is_noop() -> None:
+    QApplication.instance() or QApplication(["style-many-noop-test"])
+    background = _background()
+    r1 = TextLayer(
+        "r1",
+        "AAA",
+        TextBox(50, 40, 80, 30),
+        TextStyle(resolve_system_font("en"), 20, (20, 30, 40)),
+    )
+    renderer = QtTextRenderer()
+    layout = TextLayout((r1,))
+    initial = renderer.render(background, layout)
+    editor = CreateCompositionEditor(QtBasicTextLayoutAdapter(), renderer).execute(
+        background, initial, layout
+    )
+    result = editor.replace_style_many([])
+    assert not result.can_undo
+    assert result.document.pixels == initial.pixels
+
+
+def test_replace_style_many_locked_layer_raises() -> None:
+    QApplication.instance() or QApplication(["style-many-locked-test"])
+    background = _background()
+    r1 = TextLayer(
+        "r1",
+        "AAA",
+        TextBox(50, 40, 80, 30),
+        TextStyle(resolve_system_font("en"), 20, (20, 30, 40)),
+        locked=True,
+    )
+    renderer = QtTextRenderer()
+    layout = TextLayout((r1,))
+    initial = renderer.render(background, layout)
+    editor = CreateCompositionEditor(QtBasicTextLayoutAdapter(), renderer).execute(
+        background, initial, layout
+    )
+    with pytest.raises(ValueError):
+        editor.replace_style_many(
+            [("r1", TextStyle(resolve_system_font("en"), 14, (180, 20, 30)), 15.0)]
+        )
+    assert not editor.can_undo
+
+
 def test_add_delete_layers_are_rendered_and_undoable() -> None:
     QApplication.instance() or QApplication(["layer-management-test"])
     background = _background()

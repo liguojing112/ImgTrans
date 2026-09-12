@@ -22,7 +22,7 @@ from src.domain.manual_region import (
     box_to_quad,
 )
 from src.domain.layout import CircularTextPath, TextBox
-from src.domain.ocr import OcrResult, TextRegion
+from src.domain.ocr import OcrResult, Quad, TextRegion
 from src.domain.translation import (
     TranslationResult,
     TranslationSelection,
@@ -59,6 +59,7 @@ class ProcessManualRegion:
         selection: TranslationSelection,
         brand_terms: tuple[str, ...] = (),
         preserve_numbers: bool = True,
+        merge_paragraphs: bool = True,
     ) -> ManualRegionResult:
         _validate_box(source, spec.selection_box)
         _validate_box(source, spec.erase_box)
@@ -66,28 +67,72 @@ class ProcessManualRegion:
         region_id = f"manual-{uuid4().hex}"
         source_text = spec.source_text.strip()
         region_language = selection.source_language or ocr_language
+        line_texts: tuple[str, ...] | None = None
         if spec.mode is ManualInputMode.AUTO:
             crop = self._cropper.crop(source, spec.selection_box)
             recognized = self._recognize.execute(
                 _embed_crop_on_canvas(crop), ocr_language
             )
             region_language = recognized.language_code
-            source_text = " ".join(
+            ocr_lines = tuple(
                 region.text.strip() for region in recognized.regions if region.text.strip()
             )
-            if not source_text:
+            if not ocr_lines:
                 raise ManualRegionError("manual_ocr_empty", "框选区域没有识别到文字")
+            source_text = " ".join(ocr_lines)
+            if not merge_paragraphs:
+                line_texts = ocr_lines
+        elif spec.mode is ManualInputMode.SOURCE_TEXT and not merge_paragraphs:
+            input_lines = tuple(
+                line.strip() for line in source_text.splitlines() if line.strip()
+            )
+            if len(input_lines) > 1:
+                line_texts = input_lines
+        line_translations: tuple[str, ...] | None = (
+            self._translate_lines_independently(
+                region_id,
+                box_to_quad(spec.text_box),
+                line_texts,
+                region_language,
+                selection,
+                brand_terms,
+                preserve_numbers,
+            )
+            if line_texts is not None
+            else None
+        )
         displayed_source = source_text or spec.translated_text.strip()
+        # 短文模式：译文按行拼接（硬换行），渲染时逐行显示，避免挤成一段
+        region_text = (
+            "\n".join(line_texts) if line_texts is not None else displayed_source
+        )
         region = TextRegion(
             region_id,
             box_to_quad(spec.text_box),
-            displayed_source,
+            region_text,
             1,
             region_language,
             "manual-input" if spec.mode is not ManualInputMode.AUTO else "manual-ocr",
         )
         ocr_result = OcrResult((region,), region_language, region.model_id, 0)
-        if spec.mode is ManualInputMode.TRANSLATED_TEXT:
+        if line_translations is not None:
+            translated_text = "\n".join(line_translations)
+            translation = TranslationResult(
+                (
+                    TranslationUnit(
+                        region_id,
+                        region_text,
+                        region_language,
+                        selection.target_language,
+                        translated_text,
+                        TranslationStatus.TRANSLATED,
+                    ),
+                ),
+                selection,
+                "manual-ocr",
+                0,
+            )
+        elif spec.mode is ManualInputMode.TRANSLATED_TEXT:
             translated_text = spec.translated_text.strip()
             translation = TranslationResult(
                 (
@@ -188,6 +233,46 @@ class ProcessManualRegion:
             repaired,
             layer,
         )
+
+    def _translate_lines_independently(
+        self,
+        region_id: str,
+        quad: Quad,
+        lines: tuple[str, ...],
+        region_language: str,
+        selection: TranslationSelection,
+        brand_terms: tuple[str, ...],
+        preserve_numbers: bool,
+    ) -> tuple[str, ...]:
+        """短文模式：逐行独立翻译，保留每行各自的语言筛选与保护规则。"""
+        line_regions = tuple(
+            TextRegion(
+                f"{region_id}-{index}",
+                quad,
+                line,
+                1,
+                region_language,
+                "manual-ocr",
+            )
+            for index, line in enumerate(lines)
+        )
+        line_ocr = OcrResult(line_regions, region_language, "manual-ocr", 0)
+        translation = self._translate.execute(
+            line_ocr,
+            selection,
+            brand_terms,
+            allow_low_confidence=True,
+            preserve_numbers=preserve_numbers,
+            merge_paragraphs=False,
+        )
+        by_id = {unit.region_id: unit for unit in translation.units}
+        ordered = tuple(by_id[f"{region_id}-{index}"] for index in range(len(lines)))
+        if any(not unit.should_erase_source for unit in ordered):
+            raise ManualRegionError(
+                "manual_translation_skipped",
+                "该文本被语言筛选或保护规则跳过；可直接输入译文覆盖",
+            )
+        return tuple(unit.translated_text for unit in ordered)
 
     def cancel(self) -> None:
         cancel = getattr(self._inpainting, "cancel", None)
