@@ -62,18 +62,21 @@
   </form>
 </div>
 <div class="cfg-card">
-  <h3>GLM（商品详情生成）</h3>
-  {% if settings.glm_configured %}<p class="status">✓ GLM 已配置</p>
-  {% else %}<p class="status">未配置 GLM（商品详情生成将不可用）</p>{% endif %}
+  <h3>自定义大模型（商品详情生成）</h3>
+  {% if settings.glm_configured %}<p class="status">✓ 已配置</p>
+  {% else %}<p class="status">未配置（商品详情生成将不可用）</p>{% endif %}
   <form method="post" action="/admin/settings">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <input type="hidden" name="section" value="glm">
     <label>API 密钥</label>
-    <input name="glm_api_key" type="password" placeholder="{{ '已配置（留空保持不变）' if settings.glm_configured else '粘贴 GLM API 密钥' }}">
+    <input name="glm_api_key" type="password" placeholder="{{ '已配置（留空保持不变）' if settings.glm_configured else '粘贴 API 密钥' }}">
     <div class="hint">密钥不回显，留空则保持不变。商品详情生成的文案由该密钥承担费用。</div>
+    <label>接口地址（Base URL）</label>
+    <input name="glm_base_url" type="text" value="{{ settings.glm_base_url }}" placeholder="留空使用智谱 https://open.bigmodel.cn/api/paas/v4">
+    <div class="hint">需为 OpenAI 兼容地址（请求 …/chat/completions）。切换其他大模型（如 DeepSeek、OpenAI、本地 Ollama 等）时填对应接口地址；留空则默认智谱。</div>
     <label>模型</label>
-    <input name="glm_model" type="text" value="{{ settings.glm_model }}" placeholder="如 glm-4.6v">
-    <div class="hint">需使用支持图片的视觉模型，留空使用默认 glm-4.6v</div>
+    <input name="glm_model" type="text" value="{{ settings.glm_model }}" placeholder="如 glm-4.6v / deepseek-chat">
+    <div class="hint">需使用支持图片的视觉模型。留空默认 glm-4.6v（仅智谱适用，换其他模型时请填对应模型名）。</div>
     <button type="submit" class="btn-submit">保存配置</button>
   </form>
 </div>

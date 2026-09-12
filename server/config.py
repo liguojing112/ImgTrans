@@ -45,6 +45,7 @@ class ServerSettings:
     wechat_notify_url: str | None = None
     glm_api_key: str | None = field(default=None, repr=False)
     glm_model: str | None = None
+    glm_base_url: str | None = None
 
     @classmethod
     def from_env(
@@ -242,6 +243,7 @@ class ServerSettings:
             ),
             glm_api_key=_optional_text(values.get("IMGTRANS_GLM_API_KEY")),
             glm_model=_optional_text(values.get("IMGTRANS_GLM_MODEL")),
+            glm_base_url=_optional_text(values.get("IMGTRANS_GLM_BASE_URL")),
         )
 
     def public_summary(self) -> dict[str, str | int | bool]:

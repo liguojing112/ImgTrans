@@ -216,6 +216,7 @@ def create_app(
             return {
                 "api_key": settings.glm_api_key,
                 "model": settings.glm_model or "",
+                "base_url": settings.glm_base_url or "",
             }
         return None
 

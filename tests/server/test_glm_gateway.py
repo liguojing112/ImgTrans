@@ -44,6 +44,43 @@ def test_chat_returns_text() -> None:
     assert text == "你好"
 
 
+def test_chat_uses_configured_base_url() -> None:
+    provider = lambda: {
+        "api_key": "deepseek-key",
+        "model": "deepseek-chat",
+        "base_url": "https://api.deepseek.com/v1",
+    }
+    gateway = GlmGateway(provider)
+    payload = json.dumps({"choices": [{"message": {"content": "ok"}}]}).encode("utf-8")
+    seen: dict = {}
+
+    def _open(request, timeout=None):
+        seen["url"] = request.full_url
+        seen["auth"] = request.get_header("Authorization")
+        return _FakeResponse(payload)
+
+    with mock.patch("server.infrastructure.glm_gateway.urlopen", _open):
+        text = gateway.chat([{"role": "user", "content": "hi"}])
+    assert text == "ok"
+    assert seen["url"] == "https://api.deepseek.com/v1/chat/completions"
+    assert seen["auth"] == "Bearer deepseek-key"
+
+
+def test_chat_blank_base_url_defaults_to_zhipu() -> None:
+    provider = lambda: {"api_key": "k", "model": "m", "base_url": ""}
+    gateway = GlmGateway(provider)
+    payload = json.dumps({"choices": [{"message": {"content": "ok"}}]}).encode("utf-8")
+    seen: dict = {}
+
+    def _open(request, timeout=None):
+        seen["url"] = request.full_url
+        return _FakeResponse(payload)
+
+    with mock.patch("server.infrastructure.glm_gateway.urlopen", _open):
+        gateway.chat([{"role": "user", "content": "hi"}])
+    assert seen["url"] == f"{GlmGateway.DEFAULT_BASE_URL}/chat/completions"
+
+
 def test_chat_not_configured() -> None:
     gateway = GlmGateway(lambda: None)
     try:

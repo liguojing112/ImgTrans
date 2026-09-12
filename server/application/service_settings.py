@@ -39,6 +39,7 @@ class ManageServiceSettings:
                 "wechat_pay_configured": False,
                 "glm_configured": False,
                 "glm_model": "",
+                "glm_base_url": "",
             }
         return {
             "wechat_appid": row.wechat_appid or "",
@@ -52,6 +53,7 @@ class ManageServiceSettings:
             "wechat_pay_configured": self._is_complete(row),
             "glm_configured": bool(row.glm_api_key_cipher),
             "glm_model": row.glm_model or "",
+            "glm_base_url": row.glm_base_url or "",
         }
 
     def save_wechat(self, values: dict) -> dict:
@@ -78,6 +80,7 @@ class ManageServiceSettings:
             wechat_notify_url=self._notify_url,
             glm_api_key_cipher=current.glm_api_key_cipher if current else None,
             glm_model=current.glm_model if current else None,
+            glm_base_url=current.glm_base_url if current else None,
         )
         self._repository.save(row)
         return self.get_public()
@@ -101,6 +104,7 @@ class ManageServiceSettings:
                 current.glm_api_key_cipher,
             ),
             glm_model=_strip(values.get("glm_model", "")),
+            glm_base_url=_strip(values.get("glm_base_url", "")),
         )
         self._repository.save(row)
         return self.get_public()
@@ -116,7 +120,11 @@ class ManageServiceSettings:
             return None
         if not api_key:
             return None
-        return {"api_key": api_key, "model": row.glm_model or ""}
+        return {
+            "api_key": api_key,
+            "model": row.glm_model or "",
+            "base_url": row.glm_base_url or "",
+        }
 
     def load_wechat_settings(self) -> dict | None:
         """解密出完整微信配置，供支付网关使用；未配置/解密失败返回 None。"""

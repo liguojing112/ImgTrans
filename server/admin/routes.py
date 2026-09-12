@@ -590,6 +590,7 @@ async def save_settings(request: Request) -> Response:
             {
                 "glm_api_key": form.get("glm_api_key", ""),
                 "glm_model": form.get("glm_model", ""),
+                "glm_base_url": form.get("glm_base_url", ""),
             }
         )
     else:

@@ -223,10 +223,37 @@ def test_plans_expose_wechat_pay_configured() -> None:
 def test_glm_settings_roundtrip() -> None:
     app = _app()
     manage = app.state.manage_service_settings
-    manage.save_glm({"glm_api_key": "glm-test-key-123456", "glm_model": "glm-4v-flash"})
+    manage.save_glm(
+        {
+            "glm_api_key": "glm-test-key-123456",
+            "glm_model": "glm-4v-flash",
+            "glm_base_url": "https://api.deepseek.com/v1",
+        }
+    )
     loaded = manage.load_glm_settings()
     assert loaded["api_key"] == "glm-test-key-123456"
     assert loaded["model"] == "glm-4v-flash"
+    assert loaded["base_url"] == "https://api.deepseek.com/v1"
+
+
+def test_glm_base_url_public_and_blank_falls_back() -> None:
+    app = _app()
+    manage = app.state.manage_service_settings
+    public = manage.save_glm(
+        {
+            "glm_api_key": "ds-key",
+            "glm_model": "deepseek-chat",
+            "glm_base_url": "https://api.deepseek.com/v1",
+        }
+    )
+    assert public["glm_base_url"] == "https://api.deepseek.com/v1"
+    # 清空 base_url → 存空串（网关端空串回退智谱默认地址）；key 留空保留原值
+    manage.save_glm(
+        {"glm_api_key": "", "glm_model": "deepseek-chat", "glm_base_url": ""}
+    )
+    loaded = manage.load_glm_settings()
+    assert loaded["base_url"] == ""
+    assert loaded["api_key"] == "ds-key"
 
 
 def test_glm_no_plaintext_in_public() -> None:

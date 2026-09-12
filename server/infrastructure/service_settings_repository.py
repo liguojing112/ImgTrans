@@ -22,6 +22,7 @@ class ServiceSettingsRow:
     wechat_notify_url: str | None = None
     glm_api_key_cipher: str | None = None
     glm_model: str | None = None
+    glm_base_url: str | None = None
 
 
 class ServiceSettingsRecord(Base):
@@ -38,6 +39,7 @@ class ServiceSettingsRecord(Base):
     wechat_notify_url: Mapped[str | None] = mapped_column(String(255), nullable=True)
     glm_api_key_cipher: Mapped[str | None] = mapped_column(String(500), nullable=True)
     glm_model: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    glm_base_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
@@ -66,6 +68,7 @@ class SqlAlchemyServiceSettingsRepository:
             record.wechat_notify_url = row.wechat_notify_url
             record.glm_api_key_cipher = row.glm_api_key_cipher
             record.glm_model = row.glm_model
+            record.glm_base_url = row.glm_base_url
             record.updated_at = _utc_now()
 
 
@@ -81,6 +84,7 @@ def _to_row(record: ServiceSettingsRecord) -> ServiceSettingsRow:
         wechat_notify_url=record.wechat_notify_url,
         glm_api_key_cipher=record.glm_api_key_cipher,
         glm_model=record.glm_model,
+        glm_base_url=record.glm_base_url,
     )
 
 
