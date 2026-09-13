@@ -1252,6 +1252,94 @@ def test_horizontal_group_does_not_collapse_three_label_boxes() -> None:
     assert len({round(layer.style.font_size, 3) for layer in normalized}) == 1
 
 
+def _glyph_band(pixels: np.ndarray, top: int, height: int) -> None:
+    """在浅底上画一条深色"文字"墨迹带，替代真实字形渲染。"""
+    pixels[top : top + height, 60:200] = (30, 30, 30)
+
+
+def test_noisy_ocr_boxes_with_equal_glyph_height_share_one_font_size() -> None:
+    """回归：OCR 框一松一紧、但原图字形同大时，译文必须同字号。
+
+    历史缺陷：视觉同组判定只看 OCR 框高比（≤1.08），框抖动直接让归并失败，
+    同图里视觉同大的文字各自按框高拟合，译成一块大一块小。"""
+    QApplication.instance() or QApplication(["layout-ink-height-group-test"])
+    pixels = np.full((200, 260, 3), (250, 250, 250), dtype=np.uint8)
+    _glyph_band(pixels, 61, 18)
+    _glyph_band(pixels, 131, 18)
+    document = ImageDocument(
+        ImageAsset(
+            Path("noisy-boxes.png"),
+            260,
+            200,
+            1,
+            ImageFileFormat.PNG,
+            False,
+            False,
+        ),
+        "RGB",
+        pixels.tobytes(),
+    )
+    layers = (
+        TextLayer(
+            "tight",
+            "Team",
+            TextBox(130, 70, 150, 24),
+            TextStyle("Arial", 20, (30, 30, 30)),
+        ),
+        TextLayer(
+            "loose",
+            "Team",
+            TextBox(130, 140, 150, 38),
+            TextStyle("Arial", 34, (30, 30, 30), font_stretch=87),
+        ),
+    )
+
+    normalized = _normalize_visual_group_sizes(document, layers)
+
+    assert len({round(layer.style.font_size, 3) for layer in normalized}) == 1
+    assert {layer.style.font_stretch for layer in normalized} == {87}
+    assert not any(layer.overflow for layer in normalized)
+
+
+def test_visual_group_keeps_hierarchy_from_glyph_height_not_box_height() -> None:
+    """框高相近但字形一大一小（标题/正文）不得并成同一字号。"""
+    QApplication.instance() or QApplication(["layout-ink-height-hierarchy-test"])
+    pixels = np.full((200, 260, 3), (250, 250, 250), dtype=np.uint8)
+    _glyph_band(pixels, 48, 26)
+    _glyph_band(pixels, 118, 13)
+    document = ImageDocument(
+        ImageAsset(
+            Path("hierarchy-boxes.png"),
+            260,
+            200,
+            1,
+            ImageFileFormat.PNG,
+            False,
+            False,
+        ),
+        "RGB",
+        pixels.tobytes(),
+    )
+    layers = (
+        TextLayer(
+            "heading",
+            "Team",
+            TextBox(130, 61, 150, 30),
+            TextStyle("Arial", 26, (30, 30, 30)),
+        ),
+        TextLayer(
+            "body",
+            "Team",
+            TextBox(130, 124, 150, 30),
+            TextStyle("Arial", 13, (30, 30, 30)),
+        ),
+    )
+
+    normalized = _normalize_visual_group_sizes(document, layers)
+
+    assert normalized == layers
+
+
 def test_qt_layout_preserves_region_geometry_and_estimates_foreground() -> None:
     QApplication.instance() or QApplication(["layout-test"])
     document = _document()

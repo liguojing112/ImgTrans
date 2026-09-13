@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
+
 from PySide6.QtCore import QElapsedTimer, QSignalBlocker, QTimer, Qt, Signal
 from PySide6.QtGui import QFontDatabase
 from PySide6.QtWidgets import (
@@ -55,6 +57,156 @@ def _group_title(text: str) -> QLabel:
     label = QLabel(text)
     label.setObjectName("groupTitle")
     return label
+
+
+# 系统把同一中文字体同时登记为英文名与中文名（SimSun / 宋体），下拉框统一
+# 显示中文名，并把英文别名并到同一条，避免重复项和满屏英文。
+_FONT_NAME_ZH = {
+    "SimSun": "宋体",
+    "NSimSun": "新宋体",
+    "SimHei": "黑体",
+    "KaiTi": "楷体",
+    "FangSong": "仿宋",
+    "DengXian": "等线",
+    "DengXian Light": "等线 Light",
+    "Microsoft YaHei": "微软雅黑",
+    "Microsoft YaHei Light": "微软雅黑 Light",
+    "YouYuan": "幼圆",
+    "LiSu": "隶书",
+    "STSong": "华文宋体",
+    "STZhongsong": "华文中宋",
+    "STFangsong": "华文仿宋",
+    "STKaiti": "华文楷体",
+    "STXihei": "华文细黑",
+    "STXinwei": "华文新魏",
+    "STXingkai": "华文行楷",
+    "STHupo": "华文琥珀",
+    "STLiti": "华文隶书",
+    "STCaiyun": "华文彩云",
+    "FZShuTi": "方正舒体",
+    "FZYaoTi": "方正姚体",
+}
+
+
+# 英文字体名对用户不可读（如 "Agency FB"），按字体风格追加中文说明。
+# 用「基名」匹配：字体族名常带 Light/Condensed/SemiBold 等字重后缀，从最长的
+# 单词前缀开始匹配基名，命中即返回，避免把 "Century Gothic"(无衬线) 误判成
+# "Century"(衬线)。未命中再走关键词兜底；都不确定时返回 None（不追加，宁缺勿错）。
+_SANS = "无衬线字体"
+_SERIF = "衬线字体"
+_SCRIPT = "手写体"
+_MONO = "等宽字体"
+_DECOR = "装饰字体"
+_SYM = "符号字体"
+_FONT_STYLE_BASE: dict[str, str] = {
+    "agency fb": _SANS, "algerian": _DECOR, "arial": _SANS, "bahnschrift": _SANS,
+    "baskerville": _SERIF, "bauhaus": _DECOR, "bell mt": _SANS, "berlin": _SANS,
+    "bernard mt": _SERIF, "blackadder": _DECOR, "bodoni mt": _SERIF,
+    "book antiqua": _SERIF, "bookman": _SERIF, "bradley hand": _SCRIPT,
+    "britannic": _SERIF, "broadway": _DECOR, "brush script mt": _SCRIPT,
+    "calibri": _SANS, "californian fb": _DECOR, "calisto mt": _SERIF,
+    "cambria": _SERIF, "candara": _SANS, "cascadia code": _MONO,
+    "cascadia mono": _MONO, "castellar": _DECOR, "centaur": _SERIF,
+    "century schoolbook": _SERIF, "century gothic": _SANS, "century": _SERIF,
+    "chiller": _SCRIPT, "colonna mt": _SERIF, "comic sans ms": _DECOR,
+    "consolas": _MONO, "constantia": _SERIF, "cooper": _SERIF,
+    "copperplate gothic": _SERIF, "corbel": _SANS, "courier": _MONO,
+    "curlz mt": _DECOR, "dejavu": _SERIF, "dengxian": _SANS, "dubai": _SANS,
+    "ebrima": _SANS, "edwardian script": _SCRIPT, "elephant": _DECOR,
+    "engravers mt": _SERIF, "eras": _DECOR, "felix titling": _DECOR,
+    "fixedsys": _MONO, "footlight mt": _SERIF, "forte": _DECOR,
+    "franklin gothic": _SANS, "gabriola": _DECOR, "gadugi": _SANS,
+    "garamond": _SERIF, "georgia": _SERIF, "gigi": _SCRIPT, "gill sans": _SANS,
+    "gloucester mt": _SERIF, "goudy old style": _SERIF, "goudy stout": _DECOR,
+    "haettenschweiler": _DECOR, "harlow solid": _DECOR, "harrington": _DECOR,
+    "high tower text": _DECOR, "hp simplified": _SANS, "impact": _DECOR,
+    "imprint mt shadow": _DECOR, "informal roman": _SERIF, "ink free": _SCRIPT,
+    "javanese": _SANS, "jokerman": _DECOR, "juice itc": _DECOR,
+    "kristen itc": _SERIF, "kunstler script": _SCRIPT, "leelawadee": _SANS,
+    "lucida bright": _SERIF, "lucida calligraphy": _SCRIPT, "lucida fax": _MONO,
+    "lucida handwriting": _SCRIPT, "lucida sans typewriter": _MONO,
+    "lucida sans": _SANS, "lucida console": _MONO, "magneto": _DECOR,
+    "maiandra gd": _DECOR, "malgun gothic": _SANS, "marlett": _SYM,
+    "matura mt script": _SCRIPT, "microsoft himalaya": _SANS,
+    "microsoft jhenghei": _SANS, "microsoft new tai lue": _SANS,
+    "microsoft phagspa": _SANS, "microsoft reference sans serif": _SANS,
+    "microsoft reference specialty": _DECOR, "microsoft sans serif": _SANS,
+    "microsoft tai le": _SANS, "microsoft uighur": _SANS,
+    "microsoft yahei ui": _SANS, "microsoft yi baiti": _SANS,
+    "mingliu": _SERIF, "mingliu-extb": _SERIF, "mingliu_hkscs-extb": _SERIF,
+    "mingliu_mscs-extb": _SERIF, "mistral": _SCRIPT, "modern no. 20": _MONO,
+    "modern": _MONO, "mongolian baiti": _DECOR, "monotype corsiva": _SCRIPT,
+    "mt extra": _SYM, "mv boli": _DECOR, "myanmar text": _SANS,
+    "niagara": _DECOR, "nirmala": _SANS, "noto sans": _SANS,
+    "noto serif": _SERIF, "nsimsun": _SERIF, "ocr a": _MONO,
+    "old english text mt": _DECOR, "onyx": _DECOR, "palace script mt": _SCRIPT,
+    "palatino linotype": _SERIF, "papyrus": _DECOR, "parchment": _SCRIPT,
+    "perpetua titling mt": _DECOR, "perpetua": _SERIF, "playbill": _DECOR,
+    "poor richard": _SERIF, "pristina": _SCRIPT, "pmingliu-extb": _SERIF,
+    "ravie": _SANS, "rage": _DECOR, "rockwell": _SERIF, "roman": _SERIF,
+    "script mt": _SCRIPT, "script": _SCRIPT, "segoe print": _SCRIPT,
+    "segoe script": _SCRIPT, "segoe ui symbol": _SYM, "segoe ui emoji": _SYM,
+    "segoe ui historic": _SYM, "segoe fluent icons": _SYM,
+    "segoe mdl2 assets": _SYM, "segoe ui variable": _SANS, "segoe ui": _SANS,
+    "showcard gothic": _SANS, "simhei": _SANS, "simsun": _SERIF,
+    "simsun-extb": _SERIF, "simsun-extg": _SERIF, "sitka": _SANS,
+    "snap itc": _DECOR, "stencil": _DECOR, "system": _SANS, "sylfaen": _SERIF,
+    "tahoma": _SANS,
+    "tempus sans itc": _SANS, "terminal": _MONO, "times new roman": _SERIF,
+    "trebuchet ms": _SANS, "tw cen mt": _SERIF, "verdana": _SANS,
+    "viner hand itc": _SCRIPT, "vivaldi": _SCRIPT, "vladimir script": _SCRIPT,
+    "wide latin": _SERIF, "yu gothic": _SANS, "ms gothic": _SANS,
+    "ms pgothic": _SANS, "ms reference sans serif": _SANS,
+    "ms reference specialty": _DECOR, "ms sans serif": _SANS, "ms serif": _SERIF,
+    "ms ui gothic": _SANS, "ms outlook": _SANS,
+}
+
+
+def _font_style_label(family: str) -> str | None:
+    """按字体风格返回中文说明；无法确定时返回 None（不追加，宁缺勿错）。"""
+    if not family or not family.isascii():
+        return None
+    low = family.lower().strip()
+    words = low.split()
+    for i in range(len(words), 0, -1):
+        prefix = " ".join(words[:i])
+        if prefix in _FONT_STYLE_BASE:
+            return _FONT_STYLE_BASE[prefix]
+    if any(k in low for k in ("mono", "console", "courier", "fixedsys")):
+        return _MONO
+    if any(k in low for k in ("symbol", "wingdings", "webdings", "marlett", "small fonts")):
+        return _SYM
+    if "sans serif" in low:
+        return _SERIF
+    if "sans" in low or "gothic" in low:
+        return _SANS
+    if any(k in low for k in ("script", "hand", "brush", "print", "corsiva")):
+        return _SCRIPT
+    if "serif" in low:
+        return _SERIF
+    return None
+
+
+def _translation_font_choices(
+    families: Iterable[str] | None = None,
+) -> list[tuple[str, str]]:
+    """返回 (显示名, 字体族)：中文名优先显示，英文名追加中文风格说明。
+
+    同一中文字体的英文别名与中文名合并成一条；英文字体名按风格追加
+    中文说明（如 "Agency FB（无衬线字体）"），让用户看得懂。
+    """
+    choices: dict[str, str] = {}
+    for family in QFontDatabase.families() if families is None else families:
+        display = _FONT_NAME_ZH.get(family, family)
+        if display.isascii():
+            style = _font_style_label(display)
+            if style:
+                display = f"{display}（{style}）"
+        existing = choices.get(display)
+        # 同显示名的字体优先保存英文族名：跨语言环境更稳，渲染时两者都能解析。
+        if existing is None or (not existing.isascii() and family.isascii()):
+            choices[display] = family
+    return sorted(choices.items(), key=lambda item: item[0].casefold())
 
 
 class TranslateControls(QFrame):
@@ -203,8 +355,8 @@ class TranslateControls(QFrame):
         self.translation_font = QComboBox()
         self.translation_font.setMinimumWidth(180)
         self.translation_font.addItem("自动匹配字体", None)
-        for family in sorted(set(QFontDatabase.families()), key=str.casefold):
-            self.translation_font.addItem(family, family)
+        for display, family in _translation_font_choices():
+            self.translation_font.addItem(display, family)
         self.translation_font.currentIndexChanged.connect(
             self._translation_font_changed
         )

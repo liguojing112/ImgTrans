@@ -240,6 +240,58 @@ def test_translate_controls_font_defaults_to_auto(qtbot) -> None:
     assert ctrl.translation_font.itemText(0) == "自动匹配字体"
 
 
+def test_translation_font_choices_show_chinese_names_without_duplicates() -> None:
+    """中文字体显示中文名，英文别名并入同一条，不出现重复项。"""
+    from src.ui.editor.widgets.translate_controls import _translation_font_choices
+
+    choices = _translation_font_choices(
+        [
+            "宋体",
+            "SimSun",
+            "Microsoft YaHei",
+            "微软雅黑",
+            "微软雅黑 Light",
+            "Arial",
+        ]
+    )
+
+    assert ("宋体", "SimSun") in choices
+    assert ("微软雅黑", "Microsoft YaHei") in choices
+    assert ("微软雅黑 Light", "微软雅黑 Light") in choices
+    assert ("Arial（无衬线字体）", "Arial") in choices
+    displays = [display for display, _ in choices]
+    assert len(displays) == len(set(displays))
+    assert "SimSun" not in displays
+    assert displays == sorted(displays, key=str.casefold)
+
+
+def test_font_style_label_covers_weight_variants_and_prefixes() -> None:
+    """英文字体名追加中文风格说明；字重变体/同名前缀不误判。"""
+    from src.ui.editor.widgets.translate_controls import _font_style_label
+
+    # 常见字体
+    assert _font_style_label("Agency FB") == "无衬线字体"
+    assert _font_style_label("Times New Roman") == "衬线字体"
+    assert _font_style_label("Comic Sans MS") == "装饰字体"
+    assert _font_style_label("Consolas") == "等宽字体"
+    assert _font_style_label("Segoe Script") == "手写体"
+    assert _font_style_label("Wingdings") == "符号字体"
+    assert _font_style_label("System") == "无衬线字体"
+    # 字重/变体后缀命中基名
+    assert _font_style_label("Arial Rounded MT Bold") == "无衬线字体"
+    assert _font_style_label("Bahnschrift SemiBold Condensed") == "无衬线字体"
+    assert _font_style_label("Baskerville Old Face") == "衬线字体"
+    assert _font_style_label("Rockwell Extra Bold") == "衬线字体"
+    # 最长前缀优先：Century Gothic 是 Sans，不能被 Century(衬线) 带偏
+    assert _font_style_label("Century Gothic") == "无衬线字体"
+    assert _font_style_label("Century") == "衬线字体"
+    assert _font_style_label("Century Schoolbook") == "衬线字体"
+    # 中文名/非 ASCII 不追加
+    assert _font_style_label("宋体") is None
+    # 无法确定时返回 None，不追加（宁缺勿错）
+    assert _font_style_label("ZzzUnknownFont") is None
+
+
 def test_translate_controls_set_translation_font(qtbot) -> None:
     """set_translation_font 选中字体族；未知字体回退自动且不触发信号。"""
     app = QApplication.instance() or QApplication(["imgtrans-font-test"])

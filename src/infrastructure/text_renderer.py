@@ -42,6 +42,9 @@ from src.platform.fonts import resolve_system_font, resolve_system_font_details
 
 _RTL_LANGUAGES = {"ar", "fa", "ur"}
 _AUTO_FONT_STRETCHES = (100, 87, 75, 67)
+# 视觉同大判定：优先用实测字形高度比，OCR 框高比只作宽松兜底。
+_INK_HEIGHT_RATIO_LIMIT = 1.2
+_BOX_HEIGHT_RATIO_GUARD = 2.0
 
 
 class QtBasicTextLayoutAdapter:
@@ -1109,13 +1112,19 @@ def _normalize_visual_group_sizes(
             parents[second_root] = first_root
 
     signatures = tuple(_background_signature(document, layer.box) for layer in layers)
+    ink_heights = tuple(
+        _measure_ink_height(document, layer.box, layer.style.fill_rgb)
+        for layer in layers
+    )
     for first in range(len(layers)):
         for second in range(first + 1, len(layers)):
             if _same_visual_group(
                 layers[first],
                 signatures[first],
+                ink_heights[first],
                 layers[second],
                 signatures[second],
+                ink_heights[second],
             ):
                 union(first, second)
     groups: dict[int, list[int]] = {}
@@ -1861,8 +1870,10 @@ def _matching_background_run_box(
 def _same_visual_group(
     first: TextLayer,
     first_background: tuple[np.ndarray, float, float],
+    first_ink_height: float | None,
     second: TextLayer,
     second_background: tuple[np.ndarray, float, float],
+    second_ink_height: float | None,
 ) -> bool:
     if first.path is not None or second.path is not None:
         return False
@@ -1876,17 +1887,32 @@ def _same_visual_group(
         or abs(first.box.rotation_degrees - second.box.rotation_degrees) > 3
     ):
         return False
-    height_ratio = max(first_height, second_height) / min(
+    box_ratio = max(first_height, second_height) / min(
         first_height,
         second_height,
     )
+    if first_ink_height is not None and second_ink_height is not None:
+        # OCR 框松紧不反映视觉大小：框比 >1.08 的同大文字会被挡在归并之外，
+        # 成了「原图一样大、译文一块大一块小」。改以实测字形高度比判定，
+        # 框高比只兜底防止把标题与正文并成一组。
+        if box_ratio > _BOX_HEIGHT_RATIO_GUARD:
+            return False
+        height_ratio = max(first_ink_height, second_ink_height) / min(
+            first_ink_height,
+            second_ink_height,
+        )
+        vertical_height_limit = horizontal_height_limit = _INK_HEIGHT_RATIO_LIMIT
+    else:
+        height_ratio = box_ratio
+        vertical_height_limit = 1.08
+        horizontal_height_limit = 1.15
     upper, lower = sorted((first.box, second.box), key=lambda box: box.center_y)
     vertical_gap = (
         lower.center_y - lower.height / 2
         - (upper.center_y + upper.height / 2)
     )
     vertical_stack = (
-        height_ratio <= 1.08
+        height_ratio <= vertical_height_limit
         and abs(first.box.center_x - second.box.center_x)
         <= max(first_height, second_height) * 0.65
         and -min(first_height, second_height) * 0.35
@@ -1899,7 +1925,7 @@ def _same_visual_group(
         - (left.center_x + left.width / 2)
     )
     horizontal_row = (
-        height_ratio <= 1.15
+        height_ratio <= horizontal_height_limit
         and abs(first.box.center_y - second.box.center_y)
         <= max(first_height, second_height) * 0.3
         and -min(first.box.width, second.box.width) * 0.15
@@ -1956,6 +1982,77 @@ def _background_signature(
     chroma = float(max(median) - min(median))
     texture = float(np.mean(np.std(samples, axis=0)))
     return median, chroma, texture
+
+
+def _measure_ink_height(
+    document: ImageDocument,
+    box: TextBox,
+    foreground_rgb: tuple[int, int, int],
+) -> float | None:
+    """实测框内墨迹的字形高度（像素），用于抵抗 OCR 框松紧抖动。
+
+    OCR 框常比字形大一圈或紧贴笔画，按框高拟合字号会把框的误差直接变成
+    字号差（视觉同大的文字译成一块大一块小）。这里只看像素：取最长连续
+    墨迹行段，多行文本得到单行字高，其它行文字也不会把高度撑大。
+    背景估计不可靠（对比度低、框太小）时返回 None，调用方回退按框高判断。
+    """
+    if abs(box.rotation_degrees) > 3:
+        return None
+    channels = 4 if document.mode == "RGBA" else 3
+    pixels = np.frombuffer(document.pixels, dtype=np.uint8).reshape(
+        document.asset.height,
+        document.asset.width,
+        channels,
+    )[:, :, :3]
+    padding_x = max(2, round(box.width * 0.08))
+    padding_y = max(2, round(box.height * 0.08))
+    x0 = max(0, int(box.center_x - box.width / 2) - padding_x)
+    x1 = min(
+        document.asset.width,
+        int(box.center_x + box.width / 2) + padding_x + 1,
+    )
+    y0 = max(0, int(box.center_y - box.height / 2) - padding_y)
+    y1 = min(
+        document.asset.height,
+        int(box.center_y + box.height / 2) + padding_y + 1,
+    )
+    patch = pixels[y0:y1, x0:x1]
+    height, width = patch.shape[:2]
+    if height < 8 or width < 6:
+        return None
+    edge = max(1, min(height, width) // 8)
+    border = np.concatenate(
+        (
+            patch[:edge].reshape(-1, 3),
+            patch[-edge:].reshape(-1, 3),
+            patch[:, :edge].reshape(-1, 3),
+            patch[:, -edge:].reshape(-1, 3),
+        )
+    ).astype(np.float32)
+    background = np.median(border, axis=0)
+    foreground = np.asarray(foreground_rgb, dtype=np.float32)
+    contrast = float(np.linalg.norm(foreground - background))
+    if contrast < 60:
+        return None
+    values = patch.astype(np.float32)
+    background_distance = np.linalg.norm(values - background, axis=2)
+    ink = (
+        (np.linalg.norm(values - foreground, axis=2) + 8 < background_distance)
+        & (background_distance > max(24, contrast * 0.18))
+    )
+    rows = np.count_nonzero(ink, axis=1)
+    peak = int(rows.max())
+    if peak < 2:
+        return None
+    # 阈值取峰值四成：只保留字形主体（≈大写字高），把升降部笔画与抗锯齿
+    # 边缘排除，同一字号的 "Happy" 与 "Team" 才不会被算成两种高度。
+    active = rows > max(1, int(peak * 0.4))
+    longest = 0
+    current = 0
+    for flag in active:
+        current = current + 1 if flag else 0
+        longest = max(longest, current)
+    return float(longest) if longest >= 2 else None
 
 
 def _text_fits(
