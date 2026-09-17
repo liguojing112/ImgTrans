@@ -1,8 +1,10 @@
 """属性面板测试。"""
 
 import os
+from pathlib import Path
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+import numpy as np
 from PySide6.QtCore import QPointF
 from PySide6.QtGui import QImage, QPainter
 from PySide6.QtWidgets import (
@@ -560,6 +562,57 @@ def test_format_brush_arm_toggles_canvas_rect_mode(qtbot) -> None:
     panel.format_brush_btn.click()  # 再点退出
     assert events == [True, False]
     assert page.scene._selection_mode is None
+
+
+def test_format_brush_keeps_rect_mode_after_document_refresh(qtbot) -> None:
+    """回归：框选套用后文档刷新不应关掉框选，否则「一次只能框一次」。
+
+    历史缺陷：批量套用走 apply_edit_result → set_document，而 set_document 会把
+    画布的 _manual_selection_enabled 置 False；面板按钮仍处于捕获状态，用户再
+    拖框却没反应，看起来像格式刷被自动关闭。"""
+    from types import SimpleNamespace
+
+    from PySide6.QtGui import QUndoStack
+
+    from src.domain.image import ImageAsset, ImageDocument, ImageFileFormat
+    from src.domain.layout import TextLayout
+    from src.ui.editor.editor_page import EditorPage
+
+    page = EditorPage(QUndoStack())
+    qtbot.addWidget(page)
+    page.show()
+    page._model = SimpleNamespace(
+        preview_mode="image",
+        ocr_result=None,
+        composition_editor=None,
+        text_layout=None,
+        rendered_document=None,
+        is_dirty=False,
+        translation_result=None,
+        selected_layer=None,
+    )
+    panel = page.property_panel
+    layer = _make_layer(region_id="src")
+    panel.set_layer(layer)
+    panel.format_brush_btn.click()
+    assert page.scene._manual_selection_enabled is True
+
+    asset = ImageAsset(Path("refresh.png"), 180, 120, 1, ImageFileFormat.PNG, False, False)
+    document = ImageDocument(
+        asset, "RGB", bytes(np.full((120, 180, 3), 255, dtype=np.uint8).tobytes())
+    )
+    page.apply_edit_result(
+        SimpleNamespace(
+            document=document,
+            layout=TextLayout((layer,)),
+            can_undo=True,
+            can_redo=False,
+        )
+    )
+
+    assert panel.format_brush_btn.isChecked()
+    assert page.scene._selection_mode == "format_brush"
+    assert page.scene._manual_selection_enabled is True
 
 
 def test_brush_snapshot_and_source_exposed(qtbot) -> None:

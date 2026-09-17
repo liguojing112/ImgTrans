@@ -747,6 +747,11 @@ class EditorPage(QWidget):
                     self._model.composition_editor.editing_document
                 )
             self.set_document(display_document)
+            # set_document 会把画布的 _manual_selection_enabled 置 False；
+            # 格式刷仍在捕获状态时恢复框选模式，否则批量套用一次后再拖框
+            # 没反应，看起来像格式刷被自动关掉（退出只由 Esc/再点按钮触发）。
+            if self.property_panel.brush_snapshot() is not None:
+                self.scene.set_area_selection_mode("format_brush")
             if self._model.preview_mode == "layers":
                 self.scene.set_text_layout(edit_result.layout)
             # set_document 会清空 OCR 识别框，编辑后恢复，避免识别框消失
