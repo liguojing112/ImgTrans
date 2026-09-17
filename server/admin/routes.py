@@ -593,6 +593,14 @@ async def save_settings(request: Request) -> Response:
                 "glm_base_url": form.get("glm_base_url", ""),
             }
         )
+    elif section == "translation_llm":
+        manage.save_translation_llm(
+            {
+                "translation_llm_api_key": form.get("translation_llm_api_key", ""),
+                "translation_llm_model": form.get("translation_llm_model", ""),
+                "translation_llm_base_url": form.get("translation_llm_base_url", ""),
+            }
+        )
     else:
         manage.save_wechat(
             {

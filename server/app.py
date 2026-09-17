@@ -221,6 +221,22 @@ def create_app(
         return None
 
     app.state.glm_gateway = GlmGateway(_glm_config_provider)
+
+    def _translation_llm_config_provider():
+        # 图片翻译专用大模型；未单独配置时应用层回退到商品详情配置，
+        # 再退回环境变量，保证升级后行为不变。
+        database_config = app.state.manage_service_settings.load_translation_llm_settings()
+        if database_config:
+            return database_config
+        if settings.glm_api_key:
+            return {
+                "api_key": settings.glm_api_key,
+                "model": settings.glm_model or "",
+                "base_url": settings.glm_base_url or "",
+            }
+        return None
+
+    app.state.translation_llm_gateway = GlmGateway(_translation_llm_config_provider)
     app.state.create_payment_order = CreatePaymentOrder(
         payment_gateway,
         app.state.manage_activation_plans,

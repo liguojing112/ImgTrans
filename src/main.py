@@ -112,7 +112,10 @@ def _create_translation_adapter(
         try:
             from src.infrastructure.server_llm_adapter import ServerLLMAdapter
 
-            llm_adapter = ServerLLMAdapter(backend_url, token_source)
+            # 图片翻译走「图片翻译」那组大模型配置（服务端可与商品详情分开设置）
+            llm_adapter = ServerLLMAdapter(
+                backend_url, token_source, purpose="translation"
+            )
         except Exception:
             llm_adapter = None
         return ServerTranslationAdapter(

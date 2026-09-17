@@ -40,6 +40,9 @@ class ManageServiceSettings:
                 "glm_configured": False,
                 "glm_model": "",
                 "glm_base_url": "",
+                "translation_llm_configured": False,
+                "translation_llm_model": "",
+                "translation_llm_base_url": "",
             }
         return {
             "wechat_appid": row.wechat_appid or "",
@@ -54,6 +57,10 @@ class ManageServiceSettings:
             "glm_configured": bool(row.glm_api_key_cipher),
             "glm_model": row.glm_model or "",
             "glm_base_url": row.glm_base_url or "",
+            # 图片翻译未单独配置时为 False，运行时回退沿用上面的 glm_* 配置
+            "translation_llm_configured": bool(row.translation_llm_api_key_cipher),
+            "translation_llm_model": row.translation_llm_model or "",
+            "translation_llm_base_url": row.translation_llm_base_url or "",
         }
 
     def save_wechat(self, values: dict) -> dict:
@@ -81,6 +88,13 @@ class ManageServiceSettings:
             glm_api_key_cipher=current.glm_api_key_cipher if current else None,
             glm_model=current.glm_model if current else None,
             glm_base_url=current.glm_base_url if current else None,
+            translation_llm_api_key_cipher=(
+                current.translation_llm_api_key_cipher if current else None
+            ),
+            translation_llm_model=current.translation_llm_model if current else None,
+            translation_llm_base_url=(
+                current.translation_llm_base_url if current else None
+            ),
         )
         self._repository.save(row)
         return self.get_public()
@@ -105,6 +119,36 @@ class ManageServiceSettings:
             ),
             glm_model=_strip(values.get("glm_model", "")),
             glm_base_url=_strip(values.get("glm_base_url", "")),
+            translation_llm_api_key_cipher=current.translation_llm_api_key_cipher,
+            translation_llm_model=current.translation_llm_model,
+            translation_llm_base_url=current.translation_llm_base_url,
+        )
+        self._repository.save(row)
+        return self.get_public()
+
+    def save_translation_llm(self, values: dict) -> dict:
+        """保存图片翻译（文本）大模型配置。API 密钥留空则保留原值；返回公开配置。"""
+        current = self._repository.load()
+        if current is None:
+            current = ServiceSettingsRow()
+        row = ServiceSettingsRow(
+            wechat_appid=current.wechat_appid,
+            wechat_mchid=current.wechat_mchid,
+            wechat_apiv3_key_cipher=current.wechat_apiv3_key_cipher,
+            wechat_private_key_cipher=current.wechat_private_key_cipher,
+            wechat_serial_no=current.wechat_serial_no,
+            wechat_platform_cert_cipher=current.wechat_platform_cert_cipher,
+            wechat_public_key_id=current.wechat_public_key_id,
+            wechat_notify_url=self._notify_url,
+            glm_api_key_cipher=current.glm_api_key_cipher,
+            glm_model=current.glm_model,
+            glm_base_url=current.glm_base_url,
+            translation_llm_api_key_cipher=self._encrypt_or_keep(
+                values.get("translation_llm_api_key", ""),
+                current.translation_llm_api_key_cipher,
+            ),
+            translation_llm_model=_strip(values.get("translation_llm_model", "")),
+            translation_llm_base_url=_strip(values.get("translation_llm_base_url", "")),
         )
         self._repository.save(row)
         return self.get_public()
@@ -124,6 +168,27 @@ class ManageServiceSettings:
             "api_key": api_key,
             "model": row.glm_model or "",
             "base_url": row.glm_base_url or "",
+        }
+
+    def load_translation_llm_settings(self) -> dict | None:
+        """图片翻译（文本）大模型配置。
+
+        未单独配置时回退到商品详情配置：升级前只有一套大模型配置的部署，
+        图片翻译仍照常可用；配置了独立密钥则完全走独立模型与地址。
+        """
+        row = self._repository.load()
+        if row is None or not row.translation_llm_api_key_cipher:
+            return self.load_glm_settings()
+        try:
+            api_key = self._cipher.decrypt(row.translation_llm_api_key_cipher)
+        except ValueError:
+            return self.load_glm_settings()
+        if not api_key:
+            return self.load_glm_settings()
+        return {
+            "api_key": api_key,
+            "model": row.translation_llm_model or "",
+            "base_url": row.translation_llm_base_url or "",
         }
 
     def load_wechat_settings(self) -> dict | None:

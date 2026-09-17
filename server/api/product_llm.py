@@ -20,8 +20,19 @@ class LlmChatRequest(StrictContract):
 
 @llm_router.post("/llm/chat")
 def llm_chat(payload: LlmChatRequest, request: Request) -> dict:
+    """商品详情生成（视觉模型）— 走商品详情大模型配置。"""
+    return _chat_with(request, "glm_gateway", payload)
+
+
+@llm_router.post("/llm/translation")
+def llm_translation(payload: LlmChatRequest, request: Request) -> dict:
+    """图片翻译（文本模型）— 与商品详情分开配置，可各自指定模型与接口地址。"""
+    return _chat_with(request, "translation_llm_gateway", payload)
+
+
+def _chat_with(request: Request, state_name: str, payload: LlmChatRequest) -> dict:
     require_client(request, "LLM 服务未启用")
-    gateway = getattr(request.app.state, "glm_gateway", None)
+    gateway = getattr(request.app.state, state_name, None)
     if gateway is None:
         raise HTTPException(status_code=503, detail="LLM 服务未配置")
     try:

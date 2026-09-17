@@ -199,6 +199,38 @@ def test_settings_page_super_only() -> None:
     _run(scenario)
 
 
+def test_settings_page_posts_translation_llm_section() -> None:
+    """后台表单 section=translation_llm 落到图片翻译那组配置，不影响商品详情配置。"""
+    app = _app()
+    manage = app.state.manage_service_settings
+    manage.save_glm({"glm_api_key": "vision-key", "glm_model": "glm-4.6v"})
+
+    async def scenario():
+        transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as admin:
+            csrf = await _login(admin)
+            resp = await admin.post(
+                "/admin/settings",
+                data={
+                    "csrf_token": csrf,
+                    "section": "translation_llm",
+                    "translation_llm_api_key": "text-key-123456",
+                    "translation_llm_model": "deepseek-chat",
+                    "translation_llm_base_url": "https://api.deepseek.com/v1",
+                },
+                follow_redirects=False,
+            )
+            assert resp.status_code == 303
+            page = await admin.get("/admin/settings")
+            assert "已单独配置" in page.text
+            assert "text-key-123456" not in page.text
+
+    _run(scenario)
+    translation = manage.load_translation_llm_settings()
+    assert translation["model"] == "deepseek-chat"
+    assert manage.load_glm_settings()["model"] == "glm-4.6v"
+
+
 def test_plans_expose_wechat_pay_configured() -> None:
     from server.domain.activation import ActivationPlanValues
 
@@ -272,3 +304,83 @@ def test_glm_blank_keeps_previous() -> None:
     loaded = manage.load_glm_settings()
     assert loaded["api_key"] == "glm-secret-key-789"
     assert loaded["model"] == "glm-5v"
+
+
+def test_translation_llm_roundtrip_is_independent_from_glm() -> None:
+    """图片翻译大模型与商品详情大模型各自独立保存、互不覆盖。"""
+    app = _app()
+    manage = app.state.manage_service_settings
+    manage.save_glm(
+        {
+            "glm_api_key": "vision-key",
+            "glm_model": "glm-4.6v",
+            "glm_base_url": "https://open.bigmodel.cn/api/paas/v4",
+        }
+    )
+    public = manage.save_translation_llm(
+        {
+            "translation_llm_api_key": "text-key",
+            "translation_llm_model": "deepseek-chat",
+            "translation_llm_base_url": "https://api.deepseek.com/v1",
+        }
+    )
+
+    assert public["glm_configured"] is True
+    assert public["translation_llm_configured"] is True
+    assert public["translation_llm_model"] == "deepseek-chat"
+    assert "text-key" not in str(public)
+
+    translation = manage.load_translation_llm_settings()
+    assert translation["api_key"] == "text-key"
+    assert translation["model"] == "deepseek-chat"
+    assert translation["base_url"] == "https://api.deepseek.com/v1"
+    # 商品详情配置不受影响
+    glm = manage.load_glm_settings()
+    assert glm["api_key"] == "vision-key"
+    assert glm["model"] == "glm-4.6v"
+
+    # 反过来保存商品详情也不能覆盖图片翻译配置
+    manage.save_glm({"glm_api_key": "", "glm_model": "glm-4.6v-plus"})
+    assert manage.load_translation_llm_settings()["model"] == "deepseek-chat"
+
+
+def test_translation_llm_falls_back_to_glm_when_unset() -> None:
+    """图片翻译未单独配置时沿用商品详情配置（升级后行为不变）。"""
+    app = _app()
+    manage = app.state.manage_service_settings
+    manage.save_glm(
+        {
+            "glm_api_key": "shared-key",
+            "glm_model": "glm-4.6v",
+            "glm_base_url": "https://api.deepseek.com/v1",
+        }
+    )
+    public = manage.get_public()
+    assert public["translation_llm_configured"] is False
+
+    fallback = manage.load_translation_llm_settings()
+    assert fallback == {
+        "api_key": "shared-key",
+        "model": "glm-4.6v",
+        "base_url": "https://api.deepseek.com/v1",
+    }
+
+
+def test_translation_llm_blank_key_keeps_previous_and_empty_stays_fallback() -> None:
+    app = _app()
+    manage = app.state.manage_service_settings
+    manage.save_translation_llm(
+        {
+            "translation_llm_api_key": "text-key",
+            "translation_llm_model": "deepseek-chat",
+        }
+    )
+    # 密钥留空 → 保留原值；模型可单独改
+    manage.save_translation_llm(
+        {"translation_llm_api_key": "", "translation_llm_model": "glm-4-flash"}
+    )
+    loaded = manage.load_translation_llm_settings()
+    assert loaded["api_key"] == "text-key"
+    assert loaded["model"] == "glm-4-flash"
+
+    assert manage.load_translation_llm_settings() is not None

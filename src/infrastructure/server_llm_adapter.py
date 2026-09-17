@@ -18,6 +18,13 @@ from src.infrastructure.llm_config import LLMConfig
 _MAX_RESPONSE_BYTES = 4 * 1024 * 1024
 TokenSource = str | Callable[[], str | None]
 
+# 服务端按用途分开配置大模型：商品详情用视觉模型，图片翻译用文本模型，
+# 两者在后台各自设置模型 / 接口地址 / 密钥，互不影响。
+_PURPOSE_PATHS = {
+    "product": "/v1/llm/chat",
+    "translation": "/v1/llm/translation",
+}
+
 
 class ServerLLMAdapter(LLMAdapter):
     """与 LLMAdapter 同接口，但 LLM 请求转发到服务端代理。"""
@@ -27,13 +34,17 @@ class ServerLLMAdapter(LLMAdapter):
         backend_url: str,
         access_token: TokenSource,
         timeout_seconds: float = 120.0,
+        purpose: str = "product",
     ) -> None:
         # provider 非 glm 以避免旧模型的 1024 max_tokens 截断限制；
         # glm-4.6v 等付费模型支持更高输出
         super().__init__(LLMConfig(provider="custom", max_tokens=4096))
+        if purpose not in _PURPOSE_PATHS:
+            raise ValueError(f"Unsupported LLM purpose: {purpose}")
         self._backend_url = backend_url.rstrip("/")
         self._token_source = access_token
         self._timeout_seconds = timeout_seconds
+        self._path = _PURPOSE_PATHS[purpose]
 
     def chat(
         self,
@@ -115,7 +126,7 @@ class ServerLLMAdapter(LLMAdapter):
             body, ensure_ascii=False, separators=(",", ":")
         ).encode("utf-8")
         request = Request(
-            self._backend_url + "/v1/llm/chat",
+            self._backend_url + self._path,
             data=encoded,
             headers={
                 "Accept": "application/json",

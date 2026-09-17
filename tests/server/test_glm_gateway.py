@@ -171,3 +171,52 @@ def test_llm_chat_unconfigured_gateway() -> None:
             assert resp.status_code == 503
 
     asyncio.run(scenario())
+
+
+def test_llm_translation_uses_separate_gateway() -> None:
+    """图片翻译端点走独立网关，与商品详情网关互不串用。"""
+    app = _app()
+    calls: list[str] = []
+
+    class FakeGateway:
+        def __init__(self, name: str) -> None:
+            self._name = name
+
+        def chat(self, messages, model=None, max_tokens=None, temperature=None):
+            calls.append(self._name)
+            return f"{self._name}:{messages[0]['content']}"
+
+    app.state.glm_gateway = FakeGateway("product")
+    app.state.translation_llm_gateway = FakeGateway("translation")
+
+    async def scenario():
+        transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+        headers = {"Authorization": f"Bearer {CLIENT_TOKEN}"}
+        body = {"messages": [{"role": "user", "content": "hi"}]}
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            product = await client.post("/v1/llm/chat", json=body, headers=headers)
+            translation = await client.post(
+                "/v1/llm/translation", json=body, headers=headers
+            )
+        assert product.json()["text"] == "product:hi"
+        assert translation.json()["text"] == "translation:hi"
+        assert calls == ["product", "translation"]
+
+    asyncio.run(scenario())
+
+
+def test_llm_translation_unconfigured_gateway() -> None:
+    app = _app()
+    app.state.translation_llm_gateway = GlmGateway(lambda: None)
+
+    async def scenario():
+        transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.post(
+                "/v1/llm/translation",
+                json={"messages": [{"role": "user", "content": "hi"}]},
+                headers={"Authorization": f"Bearer {CLIENT_TOKEN}"},
+            )
+            assert resp.status_code == 503
+
+    asyncio.run(scenario())

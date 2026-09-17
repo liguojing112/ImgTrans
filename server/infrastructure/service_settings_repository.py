@@ -23,6 +23,9 @@ class ServiceSettingsRow:
     glm_api_key_cipher: str | None = None
     glm_model: str | None = None
     glm_base_url: str | None = None
+    translation_llm_api_key_cipher: str | None = None
+    translation_llm_model: str | None = None
+    translation_llm_base_url: str | None = None
 
 
 class ServiceSettingsRecord(Base):
@@ -40,6 +43,9 @@ class ServiceSettingsRecord(Base):
     glm_api_key_cipher: Mapped[str | None] = mapped_column(String(500), nullable=True)
     glm_model: Mapped[str | None] = mapped_column(String(64), nullable=True)
     glm_base_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    translation_llm_api_key_cipher: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    translation_llm_model: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    translation_llm_base_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
@@ -69,6 +75,9 @@ class SqlAlchemyServiceSettingsRepository:
             record.glm_api_key_cipher = row.glm_api_key_cipher
             record.glm_model = row.glm_model
             record.glm_base_url = row.glm_base_url
+            record.translation_llm_api_key_cipher = row.translation_llm_api_key_cipher
+            record.translation_llm_model = row.translation_llm_model
+            record.translation_llm_base_url = row.translation_llm_base_url
             record.updated_at = _utc_now()
 
 
@@ -85,6 +94,9 @@ def _to_row(record: ServiceSettingsRecord) -> ServiceSettingsRow:
         glm_api_key_cipher=record.glm_api_key_cipher,
         glm_model=record.glm_model,
         glm_base_url=record.glm_base_url,
+        translation_llm_api_key_cipher=record.translation_llm_api_key_cipher,
+        translation_llm_model=record.translation_llm_model,
+        translation_llm_base_url=record.translation_llm_base_url,
     )
 
 
