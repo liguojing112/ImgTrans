@@ -39,3 +39,46 @@ def consume_usage(request: Request) -> dict:
     consumed, remaining = manage.consume(token, 1)
     total, _ = manage.get_usage(token)
     return {"consumed": consumed, "quota_total": total, "quota_remaining": remaining}
+
+
+@usage_router.get("/watermark")
+def get_watermark_usage(request: Request) -> dict:
+    require_client(request, "客户端认证未配置")
+    limit, used, remaining = _manage(request).get_watermark(_token(request))
+    return {
+        "watermark_daily_limit": limit,
+        "watermark_used_today": used,
+        "watermark_remaining": remaining,
+    }
+
+
+@usage_router.post("/watermark/consume")
+async def consume_watermark_usage(request: Request) -> dict:
+    require_client(request, "客户端认证未配置")
+    manage = _manage(request)
+    token = _token(request)
+    amount = _watermark_amount(await _json_body(request))
+    consumed, limit, used, remaining = manage.consume_watermark(token, amount)
+    return {
+        "consumed": consumed,
+        "watermark_daily_limit": limit,
+        "watermark_used_today": used,
+        "watermark_remaining": remaining,
+    }
+
+
+async def _json_body(request: Request) -> dict:
+    try:
+        payload = await request.json()
+    except Exception:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _watermark_amount(payload: dict) -> int:
+    amount = payload.get("amount", 1)
+    if not isinstance(amount, int) or isinstance(amount, bool):
+        raise HTTPException(status_code=422, detail="amount 必须为整数")
+    if not 1 <= amount <= 10_000:
+        raise HTTPException(status_code=422, detail="amount 超出范围")
+    return amount

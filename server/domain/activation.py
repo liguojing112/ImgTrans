@@ -33,6 +33,7 @@ class ActivationPlanValues:
     enabled: bool = True
     plan_type: str = "duration"  # duration | quota | combo
     quota: int = 0
+    watermark_daily_limit: int = 0  # 每日可去水印张数，0=该套餐不含
     sale_amount_minor: int | None = None
     sale_ends_at: datetime | None = None
     sale_dates: tuple[date, ...] = ()
@@ -55,6 +56,8 @@ class ActivationPlanValues:
             raise ActivationError("Activation plan duration is invalid")
         if not 0 <= self.quota <= 1_000_000:
             raise ActivationError("Activation plan quota is invalid")
+        if not 0 <= self.watermark_daily_limit <= 1_000_000:
+            raise ActivationError("Activation plan watermark daily limit is invalid")
         if self.duration_hours <= 0 and self.quota <= 0:
             raise ActivationError("Activation plan must include duration or quota")
         if self.plan_type == "duration" and self.duration_hours <= 0:
@@ -132,6 +135,8 @@ class ActivationCode:
     disabled_at: datetime | None
     quota_total: int = 0
     quota_remaining: int = 0
+    watermark_used_today: int = 0
+    watermark_used_date: date | None = None
     plaintext: str | None = None
 
 
@@ -143,6 +148,7 @@ class DeviceActivation:
     expires_at: datetime
     quota_total: int = 0
     quota_remaining: int = 0
+    watermark_daily_limit: int = 0
 
 
 @dataclass(frozen=True, slots=True)

@@ -51,6 +51,7 @@ from src.domain.terminology import (
     TerminologyEntry,
     normalize_terminology_entries,
 )
+from src.infrastructure.doubao_share import download_image, fetch_share_images
 from src.infrastructure.pillow_image_codec import PillowImageCodec
 from src.infrastructure.text_renderer import circular_text_path_for_region
 from src.platform.fonts import resolve_system_font
@@ -64,6 +65,13 @@ from src.ui.editor.services.editor_export_service import export_document
 from src.ui.editor.theme import EDITOR_DARK_THEME
 from src.application.composition import crop_image_document, transform_image_document
 from src.application.coordinate_transform import crop_ocr_result, transform_ocr_result
+
+
+def _share_cache_dir() -> Path:
+    """去水印取回的图片先落到缓存目录，再按普通导入流程进编辑器。"""
+    import tempfile
+
+    return Path(tempfile.gettempdir()) / "imgtrans-watermark-removal"
 
 
 class EditorMainWindow(QMainWindow):
@@ -575,6 +583,13 @@ class EditorMainWindow(QMainWindow):
         )
         self._editor_page.save_requested.connect(self._on_quick_save)
         self._editor_page.feature_requested.connect(self._on_feature_requested)
+        self._editor_page.watermark_link_requested.connect(self._on_watermark_link)
+        self._editor_page.watermark_import_requested.connect(
+            self._on_watermark_import
+        )
+        self._editor_page.watermark_save_all_requested.connect(
+            self._on_watermark_save_all
+        )
         self._editor_page.tool_changed.connect(self._on_editor_tool_changed)
         self._editor_page.manual_region_requested.connect(
             self._on_manual_region_selected
@@ -2183,6 +2198,114 @@ class EditorMainWindow(QMainWindow):
         elif feature_id == "watermark":
             self._apply_preview_mode("layers")
             self._editor_page.open_watermark_dialog()
+        elif feature_id == "watermark_removal":
+            self._editor_page.open_watermark_removal_dialog()
+
+    # —— 去水印（豆包分享链接取无水印原图）——
+
+    def _on_watermark_link(self, url: str) -> None:
+        dialog = self._editor_page.watermark_removal_dialog
+        if self._task_runner is None:
+            dialog.set_status("任务执行器不可用", ok=False)
+            return
+        dialog.set_busy(True)
+        self._task_runner.submit(
+            lambda: fetch_share_images(url),
+            lambda images: (dialog.set_busy(False), dialog.set_images(images)),
+            lambda error: (dialog.set_busy(False), dialog.set_status(str(error), ok=False)),
+        )
+
+    def _watermark_quota_precheck(self, amount: int) -> str | None:
+        """去水印每日额度预检（GUI 线程）；通过返回 None，否则返回中文提示。"""
+        if self._quota_client is None:
+            return None  # 未配置用量服务，不强制
+        token = self._access_token() if self._access_token else None
+        if not token:
+            return "请先激活应用，再使用去水印"
+        try:
+            info = self._quota_client.get_watermark(token)
+        except Exception as error:
+            return f"无法获取去水印额度：{error}"
+        if info.daily_limit <= 0:
+            return "当前套餐不含去水印次数，请购买含去水印的套餐后使用"
+        if info.remaining < amount:
+            return f"今日去水印次数不足：剩余 {info.remaining} 张，需要 {amount} 张"
+        return None
+
+    def _consume_watermark_quota(self, amount: int) -> None:
+        """原子扣减每日去水印额度（工作线程调用）；失败抛错中止下载。"""
+        if self._quota_client is None:
+            return
+        token = self._access_token() if self._access_token else None
+        if not token:
+            raise RuntimeError("请先激活应用，再使用去水印")
+        info = self._quota_client.consume_watermark(token, amount)
+        if not info.consumed:
+            if info.daily_limit <= 0:
+                raise RuntimeError("当前套餐不含去水印次数，请购买含去水印的套餐后使用")
+            raise RuntimeError(
+                f"今日去水印次数不足：剩余 {info.remaining} 张，需要 {amount} 张"
+            )
+
+    def _on_watermark_import(self, image) -> None:
+        dialog = self._editor_page.watermark_removal_dialog
+        if self._task_runner is None:
+            return
+        if (error := self._watermark_quota_precheck(1)) is not None:
+            dialog.set_status(error, ok=False)
+            return
+        dialog.set_status("正在下载原图…")
+
+        def succeeded(path: object) -> None:
+            dialog.set_status(f"已取到无水印原图：{Path(path).name}")
+            self._on_import(Path(path))
+
+        def work() -> object:
+            self._consume_watermark_quota(1)
+            return self._save_share_image(image, _share_cache_dir())
+
+        self._task_runner.submit(
+            work,
+            succeeded,
+            lambda error: dialog.set_status(str(error), ok=False),
+        )
+
+    def _on_watermark_save_all(self, images, directory) -> None:
+        dialog = self._editor_page.watermark_removal_dialog
+        if self._task_runner is None:
+            return
+        amount = len(images)
+        if (error := self._watermark_quota_precheck(amount)) is not None:
+            dialog.set_status(error, ok=False)
+            return
+        dialog.set_status(f"正在下载 {amount} 张原图…")
+        target_dir = Path(directory)
+
+        def succeeded(paths) -> None:
+            dialog.set_status(f"已保存 {len(paths)} 张到 {target_dir}")
+            self.statusBar().showMessage(
+                f"去水印：已保存 {len(paths)} 张无水印原图到 {target_dir}", 6000
+            )
+
+        def work() -> object:
+            self._consume_watermark_quota(amount)
+            return self._save_share_images(images, target_dir)
+
+        self._task_runner.submit(
+            work,
+            succeeded,
+            lambda error: dialog.set_status(str(error), ok=False),
+        )
+
+    @staticmethod
+    def _save_share_image(image, directory: Path) -> Path:
+        directory.mkdir(parents=True, exist_ok=True)
+        target = directory / f"{Path(image.key).stem}-raw.png"
+        target.write_bytes(download_image(image.url))
+        return target
+
+    def _save_share_images(self, images, directory: Path) -> tuple[Path, ...]:
+        return tuple(self._save_share_image(image, directory) for image in images)
 
     def _ensure_composition_editor(self) -> bool:
         if self._model.composition_editor is not None:

@@ -873,6 +873,7 @@ _PLAN_ERROR_MESSAGES = {
     "Activation plan sale price is invalid": "促销价必须低于原价（单位：元）",
     "Activation plan duration is invalid": "时长（小时）必须在 0~87600 之间",
     "Activation plan quota is invalid": "次数必须在 0~1000000 之间",
+    "Activation plan watermark daily limit is invalid": "去水印（张/日）必须在 0~1000000 之间",
     "Activation plan must include duration or quota": "方案必须包含时长或次数",
     "Duration plan requires duration hours": "时长包必须填写时长（小时）",
     "Quota plan requires quota": "次数包必须填写次数",
@@ -909,8 +910,12 @@ def _activation_response(
         session,
         title="激活管理",
         format_beijing_time=_format_beijing_time,
+        beijing_today=datetime.now(_BEIJING_TIMEZONE).date(),
         plans=plans,
         plan_names={plan.plan_id: plan.values.name for plan in plans},
+        plan_watermark_limits={
+            plan.plan_id: plan.values.watermark_daily_limit for plan in plans
+        },
         codes=codes,
         issued_count=issued_count,
         activation_configured=request.app.state.device_authorization_enabled,
@@ -1085,6 +1090,7 @@ def _plan_values(form: dict[str, str]) -> ActivationPlanValues:
         enabled=form.get("enabled") == "true",
         plan_type=plan_type,
         quota=_integer_or_zero(form, "quota"),
+        watermark_daily_limit=_integer_or_zero(form, "watermark_daily_limit"),
         sale_amount_minor=(
             _yuan_to_minor(form, "sale_amount_minor") if sale_amount_raw else None
         ),

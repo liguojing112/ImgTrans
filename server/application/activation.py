@@ -93,6 +93,14 @@ class ActivationRepository(Protocol):
         self, token_digest: str, amount: int, now: datetime
     ) -> tuple[bool, int]: ...
 
+    def get_watermark_usage(
+        self, token_digest: str, now: datetime
+    ) -> tuple[int, int, int]: ...
+
+    def consume_watermark(
+        self, token_digest: str, amount: int, now: datetime
+    ) -> tuple[bool, int, int, int]: ...
+
     def list_usage(self, limit: int = 100) -> list[UsageRecord]: ...
 
     def list_usage_page(

@@ -33,6 +33,27 @@ class ManageUsage:
             datetime.now(timezone.utc),
         )
 
+    def get_watermark(self, token: str) -> tuple[int, int, int]:
+        """返回 (每日上限, 今日已用, 今日剩余)；无效 token 返回 (0,0,0)。"""
+        if self._hasher is None:
+            return (0, 0, 0)
+        return self._repository.get_watermark_usage(
+            self._hasher.digest_token(token),
+            datetime.now(timezone.utc),
+        )
+
+    def consume_watermark(
+        self, token: str, amount: int = 1
+    ) -> tuple[bool, int, int, int]:
+        """原子扣减每日去水印张数。返回 (是否成功, 上限, 已用, 剩余)。"""
+        if self._hasher is None:
+            return (False, 0, 0, 0)
+        return self._repository.consume_watermark(
+            self._hasher.digest_token(token),
+            amount,
+            datetime.now(timezone.utc),
+        )
+
     def list_usage(self, limit: int = 100) -> list[UsageRecord]:
         return self._repository.list_usage(limit)
 

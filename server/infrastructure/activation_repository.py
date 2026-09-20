@@ -5,7 +5,8 @@ import json
 from threading import Lock
 from uuid import uuid4
 
-from sqlalchemy import BigInteger, Boolean, CheckConstraint, DateTime, ForeignKey, Integer, String, UniqueConstraint, delete, func, select, update
+from sqlalchemy import BigInteger, Boolean, CheckConstraint, Date, DateTime, ForeignKey, Integer, String, UniqueConstraint, delete, func, select, update
+from zoneinfo import ZoneInfo
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -41,6 +42,7 @@ class ActivationPlanRecord(Base):
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False)
     plan_type: Mapped[str] = mapped_column(String(10), nullable=False, default="duration")
     quota: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    watermark_daily_limit: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     sale_amount_minor: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     sale_ends_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     sale_dates_json: Mapped[str | None] = mapped_column(String(2048), nullable=True)
@@ -76,6 +78,8 @@ class ActivationCodeRecord(Base):
     disabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     quota_total: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     quota_remaining: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    watermark_used_today: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    watermark_used_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     code_plaintext_cipher: Mapped[str | None] = mapped_column(
         String(500), nullable=True
     )
@@ -113,6 +117,7 @@ class SqlAlchemyActivationRepository:
                 enabled=values.enabled,
                 plan_type=values.plan_type,
                 quota=values.quota,
+                watermark_daily_limit=values.watermark_daily_limit,
                 sale_amount_minor=values.sale_amount_minor,
                 sale_ends_at=values.sale_ends_at,
                 sale_dates_json=_serialize_sale_dates(values.sale_dates),
@@ -141,6 +146,7 @@ class SqlAlchemyActivationRepository:
             record.enabled = values.enabled
             record.plan_type = values.plan_type
             record.quota = values.quota
+            record.watermark_daily_limit = values.watermark_daily_limit
             record.sale_amount_minor = values.sale_amount_minor
             record.sale_ends_at = values.sale_ends_at
             record.sale_dates_json = _serialize_sale_dates(values.sale_dates)
@@ -438,6 +444,9 @@ class SqlAlchemyActivationRepository:
                         expires_at=expires_at,
                         quota_total=record.quota_total,
                         quota_remaining=record.quota_remaining,
+                        watermark_daily_limit=_plan_watermark_limit(
+                            session, record
+                        ),
                     )
             except IntegrityError as error:
                 raise ActivationConflict("Device token collision") from error
@@ -553,6 +562,54 @@ class SqlAlchemyActivationRepository:
                 session.flush()
                 return (True, record.quota_remaining)
 
+    def get_watermark_usage(
+        self, token_digest: str, now: datetime
+    ) -> tuple[int, int, int]:
+        """返回 (每日上限, 今日已用, 今日剩余)；未找到激活码返回 (0,0,0)。
+
+        每日上限实时取自激活码所属套餐（0=该套餐不含去水印）。
+        """
+        with self._database.session() as session:
+            record = session.scalar(
+                select(ActivationCodeRecord).where(
+                    ActivationCodeRecord.token_digest == token_digest
+                )
+            )
+            if record is None:
+                return (0, 0, 0)
+            limit = _plan_watermark_limit(session, record)
+            used = _watermark_used_on(record, _beijing_today(now))
+            return (limit, used, max(0, limit - used))
+
+    def consume_watermark(
+        self, token_digest: str, amount: int, now: datetime
+    ) -> tuple[bool, int, int, int]:
+        """原子扣减每日去水印张数。返回 (是否成功, 每日上限, 今日已用, 今日剩余)。"""
+        if amount <= 0:
+            return (False, 0, 0, 0)
+        with self._activation_lock:
+            with self._database.session() as session:
+                record = session.scalar(
+                    select(ActivationCodeRecord)
+                    .where(ActivationCodeRecord.token_digest == token_digest)
+                    .with_for_update()
+                )
+                if record is None or record.disabled:
+                    if record is None:
+                        return (False, 0, 0, 0)
+                    limit = _plan_watermark_limit(session, record)
+                    used = _watermark_used_on(record, _beijing_today(now))
+                    return (False, limit, used, max(0, limit - used))
+                limit = _plan_watermark_limit(session, record)
+                today = _beijing_today(now)
+                used = _watermark_used_on(record, today)
+                if limit <= 0 or used + amount > limit:
+                    return (False, limit, used, max(0, limit - used))
+                record.watermark_used_date = today
+                record.watermark_used_today = used + amount
+                session.flush()
+                return (True, limit, used + amount, limit - (used + amount))
+
     def list_usage(self, limit: int = 100) -> list[UsageRecord]:
         with self._database.session() as session:
             records = session.scalars(
@@ -611,6 +668,23 @@ class SqlAlchemyActivationRepository:
             ], total
 
 
+def _beijing_today(now: datetime) -> date:
+    return now.astimezone(ZoneInfo("Asia/Shanghai")).date()
+
+
+def _plan_watermark_limit(
+    session, record: ActivationCodeRecord
+) -> int:
+    """激活码所属套餐的每日去水印上限（实时读取；套餐不存在视为 0）。"""
+    plan = session.get(ActivationPlanRecord, record.plan_id)
+    return plan.watermark_daily_limit if plan is not None else 0
+
+
+def _watermark_used_on(record: ActivationCodeRecord, today: date) -> int:
+    """记录中的计数按北京日归属；非当日视为 0（跨日自动清零）。"""
+    return record.watermark_used_today if record.watermark_used_date == today else 0
+
+
 def _plan_to_domain(record: ActivationPlanRecord) -> ActivationPlan:
     return ActivationPlan(
         plan_id=record.plan_id,
@@ -622,6 +696,7 @@ def _plan_to_domain(record: ActivationPlanRecord) -> ActivationPlan:
             enabled=record.enabled,
             plan_type=record.plan_type,
             quota=record.quota,
+            watermark_daily_limit=record.watermark_daily_limit,
             sale_amount_minor=record.sale_amount_minor,
             sale_ends_at=_as_utc(record.sale_ends_at),
             sale_dates=_deserialize_sale_dates(record.sale_dates_json),
@@ -677,6 +752,8 @@ def _code_to_domain(
         disabled_at=_as_utc(record.disabled_at),
         quota_total=record.quota_total,
         quota_remaining=record.quota_remaining,
+        watermark_used_today=record.watermark_used_today,
+        watermark_used_date=record.watermark_used_date,
         plaintext=_decrypt_plaintext(cipher, record.code_plaintext_cipher),
     )
 

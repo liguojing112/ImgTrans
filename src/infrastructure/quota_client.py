@@ -23,6 +23,14 @@ class QuotaInfo:
     consumed: bool = False
 
 
+@dataclass(frozen=True, slots=True)
+class WatermarkQuota:
+    daily_limit: int
+    used_today: int
+    remaining: int
+    consumed: bool = False
+
+
 class QuotaClient:
     """商品详情次数额度客户端 — 查询/扣减/解绑。"""
 
@@ -44,6 +52,19 @@ class QuotaClient:
     def consume(self, token: str) -> QuotaInfo:
         payload = self._request("/v1/usage/consume", token, None, "POST")
         return _parse_quota(payload)
+
+    def get_watermark(self, token: str) -> WatermarkQuota:
+        payload = self._request("/v1/usage/watermark", token, None, "GET")
+        return _parse_watermark(payload)
+
+    def consume_watermark(self, token: str, amount: int = 1) -> WatermarkQuota:
+        encoded = json.dumps({"amount": amount}, separators=(",", ":")).encode(
+            "utf-8"
+        )
+        payload = self._request(
+            "/v1/usage/watermark/consume", token, encoded, "POST"
+        )
+        return _parse_watermark(payload)
 
     def unbind(self, activation_code: str) -> bool:
         encoded = json.dumps(
@@ -87,6 +108,20 @@ def _parse_quota(payload: object) -> QuotaInfo:
         return QuotaInfo(
             quota_total=int(payload["quota_total"]),
             quota_remaining=int(payload["quota_remaining"]),
+            consumed=bool(payload.get("consumed", False)),
+        )
+    except (KeyError, TypeError, ValueError) as error:
+        raise QuotaError("invalid_quota_response", "用量服务响应无效") from error
+
+
+def _parse_watermark(payload: object) -> WatermarkQuota:
+    if not isinstance(payload, dict):
+        raise QuotaError("invalid_quota_response", "用量服务响应无效")
+    try:
+        return WatermarkQuota(
+            daily_limit=int(payload["watermark_daily_limit"]),
+            used_today=int(payload["watermark_used_today"]),
+            remaining=int(payload["watermark_remaining"]),
             consumed=bool(payload.get("consumed", False)),
         )
     except (KeyError, TypeError, ValueError) as error:

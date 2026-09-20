@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QButtonGroup,
@@ -16,6 +16,8 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QListWidget,
+    QListWidgetItem,
     QPushButton,
     QSpinBox,
     QVBoxLayout,
@@ -457,6 +459,148 @@ class WatermarkToolDialog(QDialog):
     @property
     def selected_position(self) -> str:
         return str(self.position.currentData())
+
+
+class WatermarkRemovalDialog(QDialog):
+    """去水印 — 从豆包分享链接取无水印原图。
+
+    豆包把水印加在 CDN 交付模板上（APP 下载走 cdld_wm3），而分享页数据里
+    同时给出了 image_raw 模板的原图地址，取它就是真正的无水印原图（无损、
+    零图像处理）。链接带签名且会过期，解析后应尽快导入或下载。
+    """
+
+    fetch_requested = Signal(str)
+    import_requested = Signal(object)
+    save_all_requested = Signal(object, object)
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("去水印")
+        _apply_editor_theme(self)
+        self.setModal(False)
+        self.setMinimumWidth(440)
+        self._images: tuple = ()
+
+        layout = QVBoxLayout(self)
+        title = QLabel("去水印（豆包）")
+        title.setObjectName("propertyTitle")
+        layout.addWidget(title)
+
+        hint = QLabel(
+            "在豆包里生成图片后「复制链接」，粘贴到下面解析，即可取到无水印原图。\n"
+            "链接有时效，解析成功后请尽快导入或下载。"
+        )
+        hint.setObjectName("captionLabel")
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+
+        row = QHBoxLayout()
+        self.link = QLineEdit()
+        self.link.setPlaceholderText("粘贴豆包分享链接，如 https://www.doubao.com/thread/…")
+        self.fetch_button = QPushButton("解析链接")
+        self.fetch_button.clicked.connect(self._on_fetch_clicked)
+        self.link.returnPressed.connect(self._on_fetch_clicked)
+        row.addWidget(self.link, stretch=1)
+        row.addWidget(self.fetch_button)
+        layout.addLayout(row)
+
+        self.status = QLabel("尚未解析链接")
+        self.status.setObjectName("captionLabel")
+        self.status.setWordWrap(True)
+        layout.addWidget(self.status)
+
+        self.results = QListWidget()
+        self.results.setObjectName("thumbnailList")
+        self.results.setMinimumHeight(160)
+        self.results.currentRowChanged.connect(self._update_buttons)
+        layout.addWidget(self.results)
+
+        buttons = QHBoxLayout()
+        self.import_button = QPushButton("导入选中到编辑器")
+        self.import_button.clicked.connect(self._on_import_clicked)
+        self.save_all_button = QPushButton("全部下载到文件夹…")
+        self.save_all_button.clicked.connect(self._on_save_all_clicked)
+        buttons.addWidget(self.import_button)
+        buttons.addWidget(self.save_all_button)
+        buttons.addStretch()
+        layout.addLayout(buttons)
+
+        close = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        close.button(QDialogButtonBox.StandardButton.Close).setText("关闭")
+        close.rejected.connect(self.reject)
+        layout.addWidget(close)
+
+        self._update_buttons()
+
+    # —— 对外接口（MainWindow 调用）——
+
+    def set_images(self, images) -> None:
+        self._images = tuple(images)
+        self.results.clear()
+        for index, image in enumerate(self._images, start=1):
+            size = (
+                f"{image.width}×{image.height}"
+                if image.width and image.height
+                else "尺寸未知"
+            )
+            item = QListWidgetItem(f"{index}. 原图（无水印）　{size}")
+            item.setData(Qt.ItemDataRole.UserRole, image)
+            self.results.addItem(item)
+        if self._images:
+            self.results.setCurrentRow(0)
+        self.set_status(f"解析到 {len(self._images)} 张无水印原图", ok=True)
+        self._update_buttons()
+
+    def set_status(self, text: str, ok: bool = True) -> None:
+        self.status.setText(text)
+        self.status.setStyleSheet("color: #15803d;" if ok else "color: #dc2626;")
+
+    def set_busy(self, busy: bool) -> None:
+        self.fetch_button.setEnabled(not busy)
+        self.link.setEnabled(not busy)
+        self.fetch_button.setText("解析中…" if busy else "解析链接")
+        self._update_buttons()
+
+    @property
+    def busy(self) -> bool:
+        return not self.fetch_button.isEnabled()
+
+    def selected_image(self):
+        item = self.results.currentItem()
+        return item.data(Qt.ItemDataRole.UserRole) if item is not None else None
+
+    def images(self) -> tuple:
+        return self._images
+
+    # —— 内部 ——
+
+    def _update_buttons(self) -> None:
+        idle = self.fetch_button.isEnabled()
+        self.import_button.setEnabled(idle and self.selected_image() is not None)
+        self.save_all_button.setEnabled(idle and bool(self._images))
+
+    def _on_fetch_clicked(self) -> None:
+        url = self.link.text().strip()
+        if not url:
+            self.set_status("请先粘贴豆包分享链接", ok=False)
+            return
+        self.set_status("正在解析链接…")
+        self.fetch_requested.emit(url)
+
+    def _on_import_clicked(self) -> None:
+        image = self.selected_image()
+        if image is None:
+            self.set_status("请先选择一张图片", ok=False)
+            return
+        self.import_requested.emit(image)
+
+    def _on_save_all_clicked(self) -> None:
+        if not self._images:
+            self.set_status("请先解析链接", ok=False)
+            return
+        directory = QFileDialog.getExistingDirectory(self, "选择保存文件夹")
+        if directory:
+            self.save_all_requested.emit(self._images, Path(directory))
 
 
 class BatchExportDialog(QDialog):
