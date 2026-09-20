@@ -210,7 +210,7 @@ def test_admin_plan_form_persists_watermark_daily_limit() -> None:
         ) as client:
             await _login(client)
             page = await client.get("/admin/activation")
-            assert "去水印（张/日）" in page.text
+            assert "强化翻译（张/日）" in page.text
             create = await client.post(
                 "/admin/activation/plans",
                 data={
