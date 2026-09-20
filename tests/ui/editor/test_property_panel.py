@@ -5,7 +5,7 @@ from pathlib import Path
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import numpy as np
-from PySide6.QtCore import QPointF
+from PySide6.QtCore import QEvent, QPointF
 from PySide6.QtGui import QImage, QPainter
 from PySide6.QtWidgets import (
     QAbstractSpinBox,
@@ -398,6 +398,9 @@ def test_format_brush_captures_style_and_applies_on_new_selection(qtbot) -> None
     assert snapshot["fill_rgb"] == (255, 0, 0)
     assert snapshot["line_height"] == 1.4
     assert snapshot["letter_spacing"] == 2.0
+    # 快照不带 auto_fit：刷出的目标按源字号定值渲染，
+    # 若带上 auto_fit=True，reflow 会按目标框重算字号 → 字号「没刷上」
+    assert "auto_fit" not in snapshot
     assert "center_x" not in snapshot and "text" not in snapshot
 
     # 保持 armed：继续刷下一层
@@ -736,3 +739,146 @@ def test_property_panel_narrow_allows_horizontal_scroll(qtbot) -> None:
         lambda: scroll.horizontalScrollBar().maximum() > 0,
         timeout=2000,
     )
+
+
+# ============================================================
+# 格式刷：画布点击选中（与框选并存）
+# ============================================================
+
+def _brush_scene():
+    """190×72 小图场景，含 src（左）/tgt（右）两个文字图层。"""
+    from src.domain.image import ImageAsset, ImageDocument, ImageFileFormat
+    from src.domain.layout import TextLayout
+    from src.ui.editor.canvas.scene import EditorScene
+
+    asset = ImageAsset(Path("fake.png"), 190, 72, 1, ImageFileFormat.PNG, False, False)
+    document = ImageDocument(
+        asset, "RGB", bytes(np.full((72, 190, 3), 235, dtype=np.uint8))
+    )
+    scene = EditorScene()
+    scene.set_document(document)
+    scene.set_text_layout(
+        TextLayout(
+            (
+                TextLayer("src", "A", TextBox(40, 36, 60, 20), TextStyle("Arial", 12, (1, 2, 3))),
+                TextLayer("tgt", "B", TextBox(140, 36, 60, 20), TextStyle("Arial", 12, (4, 5, 6))),
+            )
+        )
+    )
+    return scene
+
+
+def _scene_send(scene, kind, point, buttons=None) -> None:
+    from PySide6.QtCore import Qt as _Qt
+    from PySide6.QtWidgets import QGraphicsSceneMouseEvent
+
+    event = QGraphicsSceneMouseEvent(kind)
+    event.setScenePos(QPointF(*point))
+    event.setButton(_Qt.MouseButton.LeftButton)
+    event.setButtons(
+        _Qt.MouseButton.NoButton if buttons is None else buttons
+    )
+    handlers = {
+        QEvent.Type.GraphicsSceneMousePress: scene.mousePressEvent,
+        QEvent.Type.GraphicsSceneMouseMove: scene.mouseMoveEvent,
+        QEvent.Type.GraphicsSceneMouseRelease: scene.mouseReleaseEvent,
+    }
+    handlers[kind](event)
+
+
+def _scene_click(scene, point) -> None:
+    """同一点按下+抬起，不拖动（单次点击）。"""
+    _scene_send(scene, QEvent.Type.GraphicsSceneMousePress, point)
+    _scene_send(scene, QEvent.Type.GraphicsSceneMouseRelease, point)
+
+
+def test_format_brush_click_selects_target_layer(qtbot) -> None:
+    """格式刷 armed 时，单击（不拖）文字图层即选中该图层；点空白不产生选中。"""
+    from PySide6.QtCore import Qt as _Qt
+
+    QApplication.instance() or QApplication(["format-brush-click-test"])
+    scene = _brush_scene()
+    scene.set_area_selection_mode("format_brush")
+    selected = []
+    boxes = []
+    scene.layer_selected.connect(selected.append)
+    scene.area_selected.connect(
+        lambda mode, box: boxes.append(box) if mode == "format_brush" else None
+    )
+
+    _scene_click(scene, (140, 36))  # tgt 图层中心
+    assert selected == ["tgt"]
+    assert boxes == []  # 单击不应走框选路径
+
+    _scene_click(scene, (95, 60))  # 两图层之间的空白
+    assert selected == ["tgt"]
+
+
+def test_format_brush_box_selection_still_works(qtbot) -> None:
+    """回归：拖动 ≥4px 仍按框选发射 area_selected，且不误发 layer_selected。"""
+    QApplication.instance() or QApplication(["format-brush-box-test"])
+    scene = _brush_scene()
+    scene.set_area_selection_mode("format_brush")
+    selected = []
+    boxes = []
+    scene.layer_selected.connect(selected.append)
+    scene.area_selected.connect(
+        lambda mode, box: boxes.append(box) if mode == "format_brush" else None
+    )
+
+    _scene_send(scene, QEvent.Type.GraphicsSceneMousePress, (115, 25))
+    _scene_send(scene, QEvent.Type.GraphicsSceneMouseMove, (165, 45))
+    _scene_send(scene, QEvent.Type.GraphicsSceneMouseRelease, (165, 45))
+
+    assert len(boxes) == 1
+    assert boxes[0].width == 50
+    assert boxes[0].height == 20
+    assert selected == []
+
+
+def test_editor_page_format_brush_canvas_click_applies_style(qtbot) -> None:
+    """集成：刷待用时在画布单击图层 → 走 set_layer 单图层套用链路发射快照。"""
+    from types import SimpleNamespace
+
+    from PySide6.QtGui import QUndoStack
+
+    from src.domain.image import ImageAsset, ImageDocument, ImageFileFormat
+    from src.domain.layout import TextLayout
+    from src.ui.editor.editor_page import EditorPage
+
+    family = _test_font_family()
+    page = EditorPage(QUndoStack())
+    qtbot.addWidget(page)
+    page.show()
+
+    source = TextLayer("src", "A", TextBox(40, 36, 60, 20), TextStyle(family, 20, (255, 0, 0)))
+    target = TextLayer("tgt", "B", TextBox(140, 36, 60, 20), TextStyle(family, 12, (10, 20, 30)))
+    page._model = SimpleNamespace(
+        text_layout=TextLayout((source, target)),
+        ocr_result=None,
+        translation_result=None,
+    )
+    asset = ImageAsset(Path("fake.png"), 190, 72, 1, ImageFileFormat.PNG, False, False)
+    page.scene.set_document(
+        ImageDocument(asset, "RGB", bytes(np.full((72, 190, 3), 235, dtype=np.uint8)))
+    )
+    page.scene.set_text_layout(page._model.text_layout)
+
+    applied = []
+    page.property_panel.style_brush_applied.connect(lambda *a: applied.append(a))
+
+    panel = page.property_panel
+    panel.set_layer(source)
+    panel.format_brush_btn.click()  # arm
+
+    _scene_click(page.scene, (140, 36))  # 画布单击 tgt 图层
+
+    assert len(applied) == 1
+    region_id, source_id, snapshot = applied[0]
+    assert region_id == "tgt"
+    assert source_id == "src"
+    assert snapshot["font_size"] == 20.0
+    assert snapshot["fill_rgb"] == (255, 0, 0)
+    # 刷保持待用，可继续点选/框选
+    assert panel.format_brush_btn.isChecked()
+    panel.disarm_brush()

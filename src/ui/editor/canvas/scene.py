@@ -524,11 +524,9 @@ class EditorScene(QGraphicsScene):
             and self._manual_selection_origin is not None
             and event.button() is Qt.MouseButton.LeftButton
         ):
+            origin = self._manual_selection_origin
             end = self._clamp_to_scene(event.scenePos())
-            rect = self._constrained_selection_rect(
-                self._manual_selection_origin,
-                end,
-            )
+            rect = self._constrained_selection_rect(origin, end)
             self._manual_selection_origin = None
             self._clear_manual_selection_item()
             if rect.width() >= 4 and rect.height() >= 4:
@@ -543,6 +541,18 @@ class EditorScene(QGraphicsScene):
                 if self._selection_mode == "crop":
                     self._crop_selection_rect = QRectF(rect)
                 self.area_selected.emit(self._selection_mode or "", box)
+            elif self._selection_mode == "format_brush":
+                # 框选未达最小尺寸 → 视为单击：命中文字图层则选中，
+                # 经 layer_selected 链路触发单图层刷套用（与列表点选一致）。
+                # 图层项仅图层预览模式存在，translated 模式回退命中 OCR 框
+                # （region_id 与图层一致，两种模式下都常驻场景）。
+                clicked = self._hit_layer_at(origin)
+                if clicked is not None:
+                    self._emit_selection(clicked)
+                else:
+                    ocr = self._hit_ocr_at(origin)
+                    if ocr is not None:
+                        self.layer_selected.emit(ocr.region_id)
             # format_brush 与 crop 一样保持框选模式，直到面板显式退出
             # （否则一次拖拽后自动退出会与属性面板「格式刷」按钮状态不同步）
             if self._selection_mode not in {"crop", "format_brush"}:
@@ -597,6 +607,20 @@ class EditorScene(QGraphicsScene):
         self.clear_selection()
         item.setSelected(True)
         self.layer_selected.emit(item.region_id)
+
+    def _hit_layer_at(self, scene_pos) -> TextLayerItem | None:
+        """返回该位置命中的文字图层（格式刷单击选取目标）。"""
+        for item in self._layer_items.values():
+            if item.contains(item.mapFromScene(scene_pos)):
+                return item
+        return None
+
+    def _hit_ocr_at(self, scene_pos) -> OcrRegionItem | None:
+        """返回该位置命中的 OCR 识别框（无图层项时的格式刷点击回退）。"""
+        for item in self._ocr_items.values():
+            if item.contains(item.mapFromScene(scene_pos)):
+                return item
+        return None
 
     def mouseMoveEvent(self, event: QGraphicsSceneMouseEvent) -> None:
         if (

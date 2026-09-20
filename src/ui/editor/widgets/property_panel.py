@@ -400,8 +400,8 @@ class PropertyPanel(QFrame):
         self.format_brush_btn.setCheckable(True)
         self.format_brush_btn.setText("格式刷")
         self.format_brush_btn.setToolTip(
-            "捕获当前图层的文字样式；之后在画布上拖拽框选一片区域，"
-            "框内的文字图层会一次性应用该样式（也可点选单个逐个套用）。"
+            "捕获当前图层的文字样式；之后在画布上单击文字图层逐个套用，"
+            "或拖拽框选一片区域，框内的文字图层一次性应用该样式。"
             "按 Esc 或再次点击取消"
         )
         self.format_brush_btn.toggled.connect(self._on_format_brush_toggled)
@@ -553,11 +553,11 @@ class PropertyPanel(QFrame):
             app.removeEventFilter(self)
 
     def _capture_brush_snapshot(self) -> dict[str, object]:
-        """抓取当前图层的全部文字样式（不含位置/旋转/文字内容/路径）。
+        """抓取当前图层的全部文字样式（不含位置/旋转/文字内容/路径/自适应）。
 
-        应用顺序有讲究：effect_preset 会联动改描边/阴影，先应用；
-        auto_fit 最后应用，覆盖 font_size 的 auto_fit=False 副作用。
-        """
+        不带 auto_fit：刷出的目标按源图层实际字号定值渲染。若把 auto_fit
+        带进快照，源为自适应时目标会被 reflow 按自身框重算字号与拉伸，
+        画布上表现为「只有对齐和颜色刷上了，字号没变」。"""
         return {
             "effect_preset": self.artistic_preset.currentData(),
             "font_family": self.font_family.currentFont().family(),
@@ -580,7 +580,6 @@ class PropertyPanel(QFrame):
             "shadow_offset_x": self.shadow_x_spin.value(),
             "shadow_offset_y": self.shadow_y_spin.value(),
             "shadow_opacity": self.shadow_opacity_spin.value(),
-            "auto_fit": self.auto_fit_check.isChecked(),
         }
 
     def _maybe_apply_brush_to(self, region_id: str) -> None:
@@ -769,6 +768,7 @@ class PropertyPanel(QFrame):
         layer: TextLayer | None,
         ocr_region: object = None,
         translation_unit: object = None,
+        allow_brush_reapply: bool = False,
     ) -> None:
         self._ocr_editing = False
         prev_id = self._region_id
@@ -927,8 +927,11 @@ class PropertyPanel(QFrame):
         finally:
             self._suppress_signals = False
 
-        # 格式刷：选中新的图层时自动应用已捕获的样式（同一图层重入不重复刷）
-        if prev_id != layer.region_id:
+        # 格式刷：选中新的图层时自动应用已捕获的样式；画布点击路径允许
+        # 重击同一图层再次套用（用户主动点击=明确刷取意图，与框选重复
+        # 框选一致）。渲染回调/模型联动的 set_layer 不带该标记，避免
+        # 「刷→渲染→再刷」循环。
+        if prev_id != layer.region_id or allow_brush_reapply:
             self._maybe_apply_brush_to(layer.region_id)
 
     def set_ocr_region(

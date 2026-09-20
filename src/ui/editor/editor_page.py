@@ -58,6 +58,7 @@ from src.ui.editor.widgets.tool_dialogs import (
     BatchExportDialog,
     CropToolDialog,
     EraseToolDialog,
+    WatermarkRemovalDialog,
     WatermarkToolDialog,
 )
 from src.ui.manual_region_panel import ManualRegionPanel
@@ -110,6 +111,9 @@ class EditorPage(QWidget):
     watermark_state_requested = Signal(str, str, bool)
     watermark_property_requested = Signal(str, str, object)
     watermark_edit_requested = Signal(object)
+    watermark_link_requested = Signal(str)
+    watermark_import_requested = Signal(object)
+    watermark_save_all_requested = Signal(object, object)
     watermark_delete_requested = Signal(str)
     watermark_duplicate_requested = Signal(str)
     layer_move_requested = Signal(str, str, int)
@@ -184,6 +188,7 @@ class EditorPage(QWidget):
         self.erase_dialog = EraseToolDialog(self)
         self.crop_dialog = CropToolDialog(self)
         self.watermark_dialog = WatermarkToolDialog(self)
+        self.watermark_removal_dialog = WatermarkRemovalDialog(self)
         self.manual_region_dialog = QDialog(self)
         self.manual_region_dialog.setWindowTitle("框选翻译")
         self.manual_region_dialog.setProperty("editorStyle", True)
@@ -236,6 +241,7 @@ class EditorPage(QWidget):
             "ai_erase": self.erase_dialog,
             "crop": self.crop_dialog,
             "watermark": self.watermark_dialog,
+            "watermark_removal": self.watermark_removal_dialog,
         }
         for panel in self._layer_tool_pages.values():
             if isinstance(panel, QDialog):
@@ -495,6 +501,15 @@ class EditorPage(QWidget):
         self.crop_dialog.rejected.connect(self._close_crop_tool)
         self.crop_dialog.accepted.connect(lambda: self._show_layer_tool("layers"))
         self.watermark_dialog.rejected.connect(lambda: self._show_layer_tool("layers"))
+        self.watermark_removal_dialog.fetch_requested.connect(
+            self.watermark_link_requested.emit
+        )
+        self.watermark_removal_dialog.import_requested.connect(
+            self.watermark_import_requested.emit
+        )
+        self.watermark_removal_dialog.save_all_requested.connect(
+            self.watermark_save_all_requested.emit
+        )
 
     def _on_topbar_translate(self) -> None:
         ocr = self.translate_controls.selected_ocr_language
@@ -589,6 +604,9 @@ class EditorPage(QWidget):
 
     def open_watermark_dialog(self) -> None:
         self._show_layer_tool("watermark")
+
+    def open_watermark_removal_dialog(self) -> None:
+        self._show_layer_tool("watermark_removal")
 
     def _show_layer_tool(self, tool_id: str) -> None:
         panel = self._layer_tool_pages.get(tool_id, self.layer_state_panel)
@@ -908,6 +926,12 @@ class EditorPage(QWidget):
         self.layer_state_requested.emit(region_id, "visible", visible)
 
     def _on_scene_selection(self, region_id: str) -> None:
+        brush_armed = self.property_panel.brush_snapshot() is not None
+        # 换层时 model setter 会经 selected_layer_changed 触发一次刷取；
+        # 只有重击当前层（setter 早退、无信号）才需要在这里强制重刷
+        rebind_needed = (
+            getattr(self._model, "selected_layer_id", None) == region_id
+        )
         if hasattr(self, "_model") and self._model is not None:
             self._model.selected_layer_id = region_id
         # 画布选中 → 右侧 OCR 列表同步选中对应行（不跳转标签页）
@@ -924,6 +948,7 @@ class EditorPage(QWidget):
                     layer,
                     self._find_ocr_region(region_id),
                     self._find_translation_unit(region_id),
+                    allow_brush_reapply=brush_armed and rebind_needed,
                 )
 
     def _on_layer_dropped(self, region_id: str, box: TextBox) -> None:

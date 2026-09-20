@@ -929,7 +929,7 @@ def test_editor_left_toolbar_has_comfortable_click_targets():
     try:
         assert toolbar.width() == 88
         buttons = toolbar.findChildren(QPushButton, "toolButton")
-        assert len(buttons) == 8
+        assert len(buttons) == 9
         assert "matting" not in toolbar.buttons
         assert all(button.width() == 72 and button.height() == 44 for button in buttons)
         assert list(toolbar.buttons) == [
@@ -941,9 +941,74 @@ def test_editor_left_toolbar_has_comfortable_click_targets():
             "crop",
             "layers",
             "watermark",
+            "watermark_removal",
         ]
     finally:
         toolbar.close()
+
+
+def test_watermark_removal_entry_sits_under_watermark_and_requests_feature():
+    """去水印入口在「水印」下方，点击后按功能型工具发起请求。"""
+    QApplication.instance() or QApplication(["watermark-removal-toolbar-test"])
+    toolbar = EditorToolBar()
+    requested: list[str] = []
+    toolbar.feature_requested.connect(requested.append)
+    try:
+        labels = [button.text() for button in toolbar.buttons.values()]
+        assert labels.index("去水印") == labels.index("水印") + 1
+
+        toolbar.buttons["watermark_removal"].click()
+        assert requested == ["watermark_removal"]
+    finally:
+        toolbar.close()
+
+
+def test_watermark_removal_dialog_lists_images_and_emits_requests():
+    """对话框只负责展示与发起请求，下载/导入由 MainWindow 后台执行。"""
+    from src.infrastructure.doubao_share import ShareImage
+    from src.ui.editor.widgets.tool_dialogs import WatermarkRemovalDialog
+
+    QApplication.instance() or QApplication(["watermark-removal-dialog-test"])
+    dialog = WatermarkRemovalDialog()
+    fetched: list[str] = []
+    imported: list[object] = []
+    dialog.fetch_requested.connect(fetched.append)
+    dialog.import_requested.connect(imported.append)
+    try:
+        dialog.fetch_button.click()  # 空链接：只提示，不发请求
+        assert fetched == []
+        assert "粘贴" in dialog.status.text()
+
+        dialog.link.setText("https://www.doubao.com/thread/abc")
+        dialog.fetch_button.click()
+        assert fetched == ["https://www.doubao.com/thread/abc"]
+
+        assert not dialog.import_button.isEnabled()
+        assert not dialog.save_all_button.isEnabled()
+
+        images = (
+            ShareImage(
+                url="https://cdn.test/a~image_raw.png",
+                key="k/a.png",
+                width=1536,
+                height=1536,
+            ),
+            ShareImage(
+                url="https://cdn.test/b~image_raw.png",
+                key="k/b.png",
+                width=1024,
+                height=1024,
+            ),
+        )
+        dialog.set_images(images)
+        assert dialog.results.count() == 2
+        assert "1536×1536" in dialog.results.item(0).text()
+        assert dialog.import_button.isEnabled()
+
+        dialog.import_button.click()
+        assert imported == [images[0]]
+    finally:
+        dialog.close()
 
 
 def test_add_text_tool_stays_selected_after_activation():
@@ -3426,5 +3491,166 @@ def test_verify_activation_expired_warns_with_expiry_message():
         finally:
             QMessageBox.warning = original_warning
         assert warnings and "激活已到期" in warnings[0][1]
+    finally:
+        window.close()
+
+
+# ============================================================
+# 格式刷：字号/拉伸按源图层实际值同步（不被 auto_fit 重算覆盖）
+# ============================================================
+
+def _scene_click_at(scene, x: float, y: float) -> None:
+    from PySide6.QtCore import QEvent as _QEvent, QPointF as _QPointF
+    from PySide6.QtWidgets import QGraphicsSceneMouseEvent
+
+    def event(kind, buttons):
+        mouse_event = QGraphicsSceneMouseEvent(kind)
+        mouse_event.setScenePos(_QPointF(x, y))
+        mouse_event.setButton(Qt.MouseButton.LeftButton)
+        mouse_event.setButtons(buttons)
+        return mouse_event
+
+    scene.mousePressEvent(event(_QEvent.Type.GraphicsSceneMousePress, Qt.MouseButton.LeftButton))
+    scene.mouseReleaseEvent(event(_QEvent.Type.GraphicsSceneMouseRelease, Qt.MouseButton.NoButton))
+
+
+def test_format_brush_click_applies_fixed_font_size():
+    """源图层 auto_fit=True 时刷目标：字号/拉伸按源实际值定值套用。
+
+    历史缺陷：快照携带 auto_fit=True 并最后应用，reflow 按目标框重新自适应
+    字号与拉伸，画布上表现为「只有对齐和颜色刷上了，字号没变」。"""
+    QApplication.instance() or QApplication(["format-brush-size-sync-test"])
+    window = _translation_window()
+    try:
+        window._apply_preview_mode("layers")
+        page = window._editor_page
+        panel = page.property_panel
+        source = window._model.text_layout.layer_by_id("high")
+        assert source.style.auto_fit is True
+        assert source.style.font_size == pytest.approx(14)
+        page._on_model_selection_changed(source)
+
+        panel.format_brush_btn.click()
+        assert panel.format_brush_btn.isChecked()
+
+        # 画布单击 low 图层（中心 48,33）
+        _scene_click_at(page.scene, 48, 33)
+
+        low = window._model.text_layout.layer_by_id("low")
+        assert low.style.font_size == pytest.approx(14), low.style.font_size
+        assert low.style.auto_fit is False
+    finally:
+        window.close()
+
+
+def test_format_brush_click_refreshes_panel_after_apply():
+    """点选套用完成后，属性面板应立即回显目标图层刷后的样式。"""
+    QApplication.instance() or QApplication(["format-brush-panel-refresh-test"])
+    window = _translation_window()
+    try:
+        window._apply_preview_mode("layers")
+        page = window._editor_page
+        panel = page.property_panel
+        source = window._model.text_layout.layer_by_id("high")
+        page._on_model_selection_changed(source)
+        panel.font_size_spin.setValue(28)
+        QTest.qWait(400)
+
+        panel.format_brush_btn.click()
+        _scene_click_at(page.scene, 48, 33)
+
+        assert panel.selected_region_id == "low"
+        assert panel.font_size_spin.value() == pytest.approx(28)
+    finally:
+        window.close()
+
+
+def test_format_brush_box_applies_fixed_font_size():
+    """框选套用与点选一致：字号按源实际值定值渲染，不被 auto_fit 重算。
+
+    框选路径不经 Qt 信号传递快照（无字典键序重排），auto_fit 若在快照中
+    会按源码序最后应用，reflow 随即按目标框重算字号/拉伸。"""
+    QApplication.instance() or QApplication(["format-brush-box-size-test"])
+    window = _translation_window()
+    try:
+        page = window._editor_page
+        panel = page.property_panel
+        source = window._model.text_layout.layer_by_id("high")
+        assert source.style.auto_fit is True
+        page._on_model_selection_changed(source)
+
+        panel.format_brush_btn.click()
+        # 框选只罩住 low（框 48,33,60,20），不含来源 high（95~145）
+        page._on_area_selected("format_brush", TextBox(20, 24, 70, 16))
+
+        low = window._model.text_layout.layer_by_id("low")
+        assert low.style.font_size == pytest.approx(14), low.style.font_size
+        assert low.style.auto_fit is False
+    finally:
+        window.close()
+
+
+def test_format_brush_click_same_target_reapplies():
+    """回归：格式刷待用时重复点击同一目标应再次套用（与框选重复框选一致）。
+
+    历史缺陷：面板以 prev_id != region_id 判定「换层」才套用，重击同一目标
+    被当作重入吞掉，用户改完源样式想重刷同一区域没有效果；框选路径则
+    每次都套用，两条路径体验不一致。渲染完成回调里的 set_layer 仍走默认
+    路径，不会形成「刷→渲染→再刷」循环。"""
+    QApplication.instance() or QApplication(["format-brush-reclick-test"])
+    window = _translation_window()
+    try:
+        window._apply_preview_mode("layers")
+        page = window._editor_page
+        panel = page.property_panel
+        page._model.selected_layer_id = "high"
+        panel.format_brush_btn.click()
+
+        applied = []
+        panel.style_brush_applied.connect(lambda rid, sid, snap: applied.append(rid))
+
+        _scene_click_at(page.scene, 48, 33)  # low
+        assert applied == ["low"]
+
+        # 渲染完成回调（ImmediateTaskRunner 已同步执行）不应追加套用
+        assert applied == ["low"]
+
+        _scene_click_at(page.scene, 48, 33)  # 重击同一目标 → 再次套用
+        assert applied == ["low", "low"]
+
+        # 再来一轮：连续第三次点击仍可套用
+        _scene_click_at(page.scene, 48, 33)
+        assert applied == ["low", "low", "low"]
+    finally:
+        window.close()
+
+
+def test_format_brush_click_works_in_translated_preview():
+    """回归：translated（合成图）预览下画布无图层项，点击应回退命中 OCR 框。
+
+    历史缺陷：_hit_layer_at 只遍历场景图层项，而图层项仅在图层预览模式
+    存在；默认 translated 模式下点击文字永远落空，用户表现为「点击不起
+    作用」。OCR 框（region_id 与图层一致）在两种模式下都存在，作为回退。"""
+    QApplication.instance() or QApplication(["format-brush-click-translated-test"])
+    window = _translation_window()
+    try:
+        page = window._editor_page
+        scene = page.scene
+        assert scene._layer_items == {}  # translated 模式无图层项
+        assert "low" in scene._ocr_items
+        panel = page.property_panel
+        page._model.selected_layer_id = "high"
+
+        panel.format_brush_btn.click()
+        applied = []
+        panel.style_brush_applied.connect(
+            lambda rid, sid, snap: applied.append(rid)
+        )
+
+        _scene_click_at(scene, 48, 33)  # low 的文字位置（OCR 框内）
+        assert applied == ["low"], applied
+        low = window._model.text_layout.layer_by_id("low")
+        assert low.style.font_size == pytest.approx(14)
+        assert low.style.auto_fit is False
     finally:
         window.close()
