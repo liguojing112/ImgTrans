@@ -1,8 +1,12 @@
-"""豆包分享链接取原图 — 解析分享页数据里的无水印地址。
+"""AI分享链接取原图 — 解析分享页数据里的无水印地址。
 
-豆包的水印加在 CDN 的**交付模板**上：APP「下载」走 `cdld_wm3`（带水印），
+AI的水印加在 CDN 的**交付模板**上：APP「下载」走 `cdld_wm3`（带水印），
 而分享页数据里同时给出了 `image_raw` 模板的原图地址，取它即可得到无水印原图，
 不需要任何图像处理。
+
+`image_raw` 有两种写法：老图/上传图是 `-image_raw.png|heic`，图生图产出的生成图
+是 `-image_raw_hadp:<base64 令牌>.png`。后者必须连同令牌一起取，截断到 `_hadp`
+之前会拿到带水印的图，截断令牌则被 CDN 拒绝（403）。
 
 两个限制：链接带签名且会过期（解析后应尽快下载）；模板名由平台维护，
 平台调整后需要跟着改（解析失败会明确报错，不会静默返回带水印的图）。
@@ -12,6 +16,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import re
+import time
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
@@ -24,7 +29,14 @@ _USER_AGENT = (
     "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 )
 _SHARE_HOSTS = ("doubao.com",)
-_RAW_URL = re.compile(r"https://[^\"'<>\s\\]*-image_raw\.(?:png|heic)[^\"'<>\s\\]*")
+# 模板名有两种写法：老图/上传图是 `-image_raw.png|heic`，生成图是
+# `-image_raw_hadp:<base64 令牌>.png`。两者都指向无水印原图；冒号后的令牌
+# 不能截断，缺了它 CDN 会回 403。
+_RAW_URL = re.compile(
+    r"https://[^\"'<>\s\\]*-image_raw"
+    r"(?:\.(?:png|heic)|_hadp(?:[:.][^\"'<>\s\\]*)?)"
+    r"[^\"'<>\s\\]*"
+)
 _KEY_IN_JSON = re.compile(r'"key"\s*:\s*"([^"]+)"')
 _SIZE_AFTER = re.compile(r'"width"\s*:\s*(\d+)\s*,\s*"height"\s*:\s*(\d+)')
 _ESCAPE_PAIRS = (
@@ -51,7 +63,7 @@ class ShareImage:
 
 
 def is_share_url(value: str) -> bool:
-    """是否是受支持的分享链接（目前支持豆包分享页）。"""
+    """是否是受支持的分享链接（目前支持AI分享页）。"""
     try:
         host = urlsplit(value.strip()).hostname or ""
     except ValueError:
@@ -113,8 +125,15 @@ def parse_share_images(html: str) -> tuple[ShareImage, ...]:
 
 def fetch_share_page(url: str, timeout: float = _TIMEOUT_SECONDS) -> str:
     if not is_share_url(url):
-        raise DoubaoShareError("请粘贴豆包分享链接（含 doubao.com 的地址）")
-    request = Request(url.strip(), headers={"User-Agent": _USER_AGENT})
+        raise DoubaoShareError("请粘贴AI分享链接（含 doubao.com 的地址）")
+    # 分享页 HTML 可能被 CDN 缓存：自动重试常复用同一线程链接，不带时间戳
+    # 会反复拉到「还没有 image_raw」的旧快照，表现为点了 N 次解析都没有原图。
+    base = url.strip()
+    sep = "&" if "?" in base else "?"
+    request = Request(
+        f"{base}{sep}_ts={int(time.time() * 1000)}",
+        headers={"User-Agent": _USER_AGENT, "Cache-Control": "no-cache"},
+    )
     try:
         with urlopen(request, timeout=timeout) as response:
             payload = response.read(_MAX_PAGE_BYTES + 1)

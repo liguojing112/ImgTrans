@@ -60,6 +60,41 @@ def test_parse_prefers_png_over_heic() -> None:
     assert images[0].url.split("~")[1].startswith("tplv-a9rns2rl98-image_raw.png")
 
 
+# 图生图产出的生成图：模板名带 _hadp 与 base64 令牌（真实分享页里的形态）
+_GENERATED_FIXTURE = (
+    '{"data":{"creations":['
+    '{"gen_detail":{"image":{'
+    '"key":"tos-cn-i-a9rns2rl98\\/rc_gen_image\\/32f51fddf89c4763ae1061e653d5e6b7.jpeg",'
+    '"image_thumb":{"url":"https:\\/\\/p26-flow-imagex-sign.byteimg.com\\/tos-cn-i-a9rns2rl98'
+    '\\/rc_gen_image\\/32f51fddf89c4763ae1061e653d5e6b7.jpeg~tplv-a9rns2rl98-cthumb_wm1'
+    ':RGIwMjEyTkExOXhkUHE3M2s5akM=.png?lk3s=1&amp;x-signature=THUMB%3D",'
+    '"width":1536,"height":1536},'
+    '"url_formats":{'
+    '"png":"https:\\/\\/p11-flow-imagex-sign.byteimg.com\\/tos-cn-i-a9rns2rl98'
+    '\\/rc_gen_image\\/32f51fddf89c4763ae1061e653d5e6b7.jpeg~tplv-a9rns2rl98-image_raw_hadp'
+    ':RGIwMjEyTkExOXhkUHE3M2s5akM=.png?lk3s=8e244e95&amp;x-expires=2105295481'
+    '&amp;x-signature=ehA9M6pBbbr2pilMOpZafi9mXzY%3D"'
+    '}}}}]}}'
+)
+
+
+def test_parse_generated_image_with_hadp_template() -> None:
+    """生成图走 `-image_raw_hadp:<令牌>.png`，令牌与签名都要完整取回。"""
+    images = parse_share_images(_GENERATED_FIXTURE)
+
+    assert len(images) == 1
+    assert images[0].url.endswith("x-signature=ehA9M6pBbbr2pilMOpZafi9mXzY%3D")
+    assert "-image_raw_hadp:RGIwMjEyTkExOXhkUHE3M2s5akM=.png" in images[0].url
+    assert images[0].key.endswith("32f51fddf89c4763ae1061e653d5e6b7.jpeg")
+    assert images[0].width == 1536 and images[0].height == 1536
+
+
+def test_parse_generated_image_skips_watermarked_thumb() -> None:
+    images = parse_share_images(_GENERATED_FIXTURE)
+
+    assert "cthumb_wm1" not in images[0].url
+
+
 def test_parse_returns_empty_without_raw_variant() -> None:
     assert parse_share_images("<html></html>") == ()
 

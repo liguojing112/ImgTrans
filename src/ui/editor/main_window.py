@@ -6,12 +6,14 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import logging
 from math import atan2, degrees, hypot
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QDragEnterEvent, QDropEvent, QShowEvent, QUndoStack
 from PySide6.QtWidgets import (
+    QApplication,
     QFileDialog,
     QMainWindow,
     QMessageBox,
@@ -59,6 +61,7 @@ from src.platform.fonts import resolve_system_font
 from src.ui.editor.editor_model import EditorModel
 from src.ui.editor.editor_page import EditorPage
 from src.ui.editor.error_handler import classify_error
+from src.ui.enhance.prompt_builder import build_prompt
 from src.ui.editor.home_page import HomePage
 from src.ui.editor.services.editor_import_service import load_document
 from src.ui.editor.services.editor_export_service import export_document
@@ -78,6 +81,11 @@ class EditorMainWindow(QMainWindow):
     """编辑器应用主窗口。"""
 
     batch_snapshot_changed = Signal(object)
+
+    # 分享快照是复制那一刻定格的：生成刚完成就复制，快照里常常还没收录生成图。
+    # 首次抓取前稍等，让分享页 HTML 挂上 image_raw；抓到后只回填链接，
+    # 「解析链接」由用户手动点击（自动连点曾被反馈为异常）。
+    _share_link_grace_ms = 4000
 
     def __init__(
         self,
@@ -184,6 +192,8 @@ class EditorMainWindow(QMainWindow):
         self._hold_slider_compare = False
         self._translation_document_id: str | None = None
         self._translation_stage: ImageStage | None = None
+        # 强化翻译自动化链的令牌：新一轮激活自增，旧回调发现令牌变了就退出
+        self._enhance_run = 0
         self._ocr_preview_layers: dict[str, str] = {}
         # Keep the first OCR geometry as the anchor for OCR-only corrections.
         # Editing the source text must never resize or reflow the detected box.
@@ -583,12 +593,12 @@ class EditorMainWindow(QMainWindow):
         )
         self._editor_page.save_requested.connect(self._on_quick_save)
         self._editor_page.feature_requested.connect(self._on_feature_requested)
-        self._editor_page.watermark_link_requested.connect(self._on_watermark_link)
-        self._editor_page.watermark_import_requested.connect(
-            self._on_watermark_import
+        self._editor_page.enhance_link_requested.connect(self._on_enhance_link)
+        self._editor_page.enhance_import_requested.connect(
+            self._on_enhance_import
         )
-        self._editor_page.watermark_save_all_requested.connect(
-            self._on_watermark_save_all
+        self._editor_page.enhance_save_all_requested.connect(
+            self._on_enhance_save_all
         )
         self._editor_page.tool_changed.connect(self._on_editor_tool_changed)
         self._editor_page.manual_region_requested.connect(
@@ -1297,6 +1307,7 @@ class EditorMainWindow(QMainWindow):
         """点击左侧图片列表切换工作台文档。"""
         self._model.set_active_document(doc_id)
         self._load_active_document()
+        self._on_enhance_document_activated()
 
     def _on_remove_document(self, doc_id: str) -> None:
         """从工作台移除一张图片（不影响磁盘文件）。"""
@@ -2129,7 +2140,8 @@ class EditorMainWindow(QMainWindow):
 
     def _on_editor_tool_changed(self, tool_id: str) -> None:
         if self._model.translation_result is None:
-            if tool_id not in {"select", "ai_erase", "manual_translate"}:
+            # 强化翻译直接吃导入的原图，不要求先跑完 OCR / 翻译
+            if tool_id not in {"select", "ai_erase", "manual_translate", "enhance_translate"}:
                 self.statusBar().showMessage("请先导入图片并完成 OCR 或翻译")
                 return
         if tool_id == "select":
@@ -2177,6 +2189,7 @@ class EditorMainWindow(QMainWindow):
         labels = {
             "crop": "裁剪",
             "watermark": "水印",
+            "enhance_translate": "强化翻译",
         }
         if (
             feature_id == "watermark"
@@ -2185,6 +2198,28 @@ class EditorMainWindow(QMainWindow):
         ):
             self.statusBar().showMessage("请先导入图片，再添加水印")
             self._editor_page.toolbar.set_active_tool("select")
+            return
+        if feature_id == "enhance_translate":
+            # 点击即点亮：不依赖按钮自身的 toggle 状态（曾出现点了不变蓝的反馈）
+            self._editor_page.open_enhance_translate()
+            self._editor_page.toolbar.set_active_tool("enhance_translate")
+            if self._model.active_document() is None:
+                # 这里不能退回「选择」：工具栏先发 feature_requested 再发
+                # tool_changed，而后者已经把画布和右侧面板切到强化翻译了，
+                # 退回会让高亮与实际模式对不上（用户反馈「点了强化翻译不变蓝」）
+                self.statusBar().showMessage(
+                    "请先导入图片，再使用强化翻译；导入后点击左侧图片即可自动处理"
+                )
+                self._editor_page.enhance_panel.set_automation_status(
+                    "请先在左侧导入图片，再点击图片开始自动处理", ok=False
+                )
+                return
+            # 只进入模式，不自动上传：自动化入口是「点击左侧列表里的图片」
+            # （用户反馈：每次进入强化翻译没点图就会自动上传/填词）
+            self.statusBar().showMessage("点击左侧列表中的图片开始自动处理")
+            self._editor_page.enhance_panel.set_automation_status(
+                "请点击左侧列表中的图片开始自动处理"
+            )
             return
         if self._model.composition_editor is None and feature_id != "crop":
             self.statusBar().showMessage(
@@ -2198,57 +2233,68 @@ class EditorMainWindow(QMainWindow):
         elif feature_id == "watermark":
             self._apply_preview_mode("layers")
             self._editor_page.open_watermark_dialog()
-        elif feature_id == "watermark_removal":
-            self._editor_page.open_watermark_removal_dialog()
 
-    # —— 去水印（豆包分享链接取无水印原图）——
+    # —— 强化翻译（AI图生图 + 手动粘链接降级）——
 
-    def _on_watermark_link(self, url: str) -> None:
-        dialog = self._editor_page.watermark_removal_dialog
+    def _on_enhance_link(self, url: str) -> None:
+        dialog = self._editor_page.enhance_panel
+        if dialog.busy:
+            # 单飞：已有解析在途时重复点按钮丢弃，避免并发 fetch 互相覆盖结果
+            dialog.set_status("正在解析中，请稍候…", ok=False)
+            return
         if self._task_runner is None:
             dialog.set_status("任务执行器不可用", ok=False)
             return
         dialog.set_busy(True)
+
+        def on_images(images) -> None:
+            dialog.set_busy(False)
+            self._on_enhance_images_parsed(images)
+
+        def on_error(error) -> None:
+            dialog.set_busy(False)
+            self._on_enhance_fetch_failed(error)
+
         self._task_runner.submit(
             lambda: fetch_share_images(url),
-            lambda images: (dialog.set_busy(False), dialog.set_images(images)),
-            lambda error: (dialog.set_busy(False), dialog.set_status(str(error), ok=False)),
+            on_images,
+            on_error,
         )
 
     def _watermark_quota_precheck(self, amount: int) -> str | None:
-        """去水印每日额度预检（GUI 线程）；通过返回 None，否则返回中文提示。"""
+        """强化翻译每日额度预检（GUI 线程）；通过返回 None，否则返回中文提示。"""
         if self._quota_client is None:
             return None  # 未配置用量服务，不强制
         token = self._access_token() if self._access_token else None
         if not token:
-            return "请先激活应用，再使用去水印"
+            return "请先激活应用，再使用强化翻译"
         try:
             info = self._quota_client.get_watermark(token)
         except Exception as error:
-            return f"无法获取去水印额度：{error}"
+            return f"无法获取强化翻译额度：{error}"
         if info.daily_limit <= 0:
-            return "当前套餐不含去水印次数，请购买含去水印的套餐后使用"
+            return "当前套餐不含强化翻译次数，请购买含强化翻译的套餐后使用"
         if info.remaining < amount:
-            return f"今日去水印次数不足：剩余 {info.remaining} 张，需要 {amount} 张"
+            return f"今日强化翻译次数不足：剩余 {info.remaining} 张，需要 {amount} 张"
         return None
 
     def _consume_watermark_quota(self, amount: int) -> None:
-        """原子扣减每日去水印额度（工作线程调用）；失败抛错中止下载。"""
+        """原子扣减每日强化翻译额度（工作线程调用）；失败抛错中止下载。"""
         if self._quota_client is None:
             return
         token = self._access_token() if self._access_token else None
         if not token:
-            raise RuntimeError("请先激活应用，再使用去水印")
+            raise RuntimeError("请先激活应用，再使用强化翻译")
         info = self._quota_client.consume_watermark(token, amount)
         if not info.consumed:
             if info.daily_limit <= 0:
-                raise RuntimeError("当前套餐不含去水印次数，请购买含去水印的套餐后使用")
+                raise RuntimeError("当前套餐不含强化翻译次数，请购买含强化翻译的套餐后使用")
             raise RuntimeError(
-                f"今日去水印次数不足：剩余 {info.remaining} 张，需要 {amount} 张"
+                f"今日强化翻译次数不足：剩余 {info.remaining} 张，需要 {amount} 张"
             )
 
-    def _on_watermark_import(self, image) -> None:
-        dialog = self._editor_page.watermark_removal_dialog
+    def _on_enhance_import(self, image) -> None:
+        dialog = self._editor_page.enhance_panel
         if self._task_runner is None:
             return
         if (error := self._watermark_quota_precheck(1)) is not None:
@@ -2270,8 +2316,8 @@ class EditorMainWindow(QMainWindow):
             lambda error: dialog.set_status(str(error), ok=False),
         )
 
-    def _on_watermark_save_all(self, images, directory) -> None:
-        dialog = self._editor_page.watermark_removal_dialog
+    def _on_enhance_save_all(self, images, directory) -> None:
+        dialog = self._editor_page.enhance_panel
         if self._task_runner is None:
             return
         amount = len(images)
@@ -2284,7 +2330,7 @@ class EditorMainWindow(QMainWindow):
         def succeeded(paths) -> None:
             dialog.set_status(f"已保存 {len(paths)} 张到 {target_dir}")
             self.statusBar().showMessage(
-                f"去水印：已保存 {len(paths)} 张无水印原图到 {target_dir}", 6000
+                f"强化翻译：已保存 {len(paths)} 张无水印原图到 {target_dir}", 6000
             )
 
         def work() -> object:
@@ -2296,6 +2342,260 @@ class EditorMainWindow(QMainWindow):
             succeeded,
             lambda error: dialog.set_status(str(error), ok=False),
         )
+
+    def _on_enhance_document_activated(self) -> None:
+        """强化翻译模式下激活文档：准备原始图与提示词（自动化入口）。
+
+        按当前工具判断而非画布栈当前页：工具栏先发 feature_requested 再发
+        tool_changed，点击瞬间浏览器尚未切出，按栈判断会整体跳过自动化。
+        """
+        # 静默 return 会让用户以为「点了没反应」，整个决策链都留痕便于排查
+        log = logging.getLogger("imgtrans")
+        tool = self._editor_page.toolbar.active_tool
+        # AI已切到中央（画布栈第 1 页）时同样按强化翻译处理：工具状态与画布
+        # 偶发不同步时，点击左侧图片不该静默失效
+        browser_on = self._editor_page.canvas_stack.currentIndex() == 1
+        ref = self._model.active_document()
+        log.info(
+            "enhance_activate tool=%s browser=%s doc=%s",
+            tool,
+            browser_on,
+            ref.name if ref is not None else None,
+        )
+        if tool != "enhance_translate" and not browser_on:
+            return
+        if ref is None:
+            return
+        panel = self._editor_page.enhance_panel
+        browser = self._editor_page.enhance_browser
+        if not hasattr(browser, "set_source_image"):
+            panel.set_automation_status(
+                "本机缺少浏览器组件，请手动打开AI网页处理；"
+                "生成后复制链接粘贴到下方解析",
+                ok=False,
+            )
+            return
+        try:
+            browser.set_source_image(ref.source_path)
+            controls = self._editor_page.translate_controls
+            prompt = build_prompt(
+                ref.ocr_result,
+                ref.translation_result,
+                controls.selected_target_language,
+                source_language=controls.selected_ocr_language,
+            )
+        except Exception as error:
+            panel.set_automation_status(
+                f"准备原始图失败（{type(error).__name__}），"
+                "请在AI中手动上传图片与提示词",
+                ok=False,
+            )
+            return
+        # 重新开始一轮：作废旧轮询与分享状态机，免得互踩基线
+        self._enhance_run += 1
+        run = self._enhance_run
+        self._set_enhance_overlay(False)
+        if hasattr(browser, "begin_flow"):
+            browser.begin_flow()
+        panel.set_automation_status("正在连接AI并上传图片…")
+        browser.load_doubao()
+        browser.run_action_when_ready(
+            "check_page",
+            callback=lambda result: self._on_enhance_check_done(
+                result, prompt, run=run
+            ),
+        )
+
+    def _is_stale_enhance_run(self, run: int | None) -> bool:
+        """回调所属的自动化轮次是否已被新一轮激活取代。"""
+        return run is not None and run != self._enhance_run
+
+    def _set_enhance_overlay(self, visible: bool, text: str = "") -> None:
+        """生成等待 / 取链接期间盖住AI页面，防止用户乱点打断流程。
+
+        用户在等待期间点页面会关掉「选择对话」弹窗、触发新的选择态，
+        自动化状态机随之失效（用户反馈第二轮取不到链接）。
+        """
+        browser = self._editor_page.enhance_browser
+        if hasattr(browser, "set_automation_overlay"):
+            browser.set_automation_overlay(visible, text)
+
+    def _on_enhance_check_done(
+        self, result: object, prompt: str, run: int | None = None
+    ) -> None:
+        if self._is_stale_enhance_run(run):
+            return
+        panel = self._editor_page.enhance_panel
+        browser = self._editor_page.enhance_browser
+        info = result if isinstance(result, dict) else {}
+        if not info.get("ok"):
+            detail = str(info.get("detail", ""))
+            if "input" in detail:
+                panel.set_automation_status(
+                    "AI页面未就绪：请在中间浏览器登录AI后，重试点击图片",
+                    ok=False,
+                )
+            else:
+                panel.set_automation_status(
+                    "AI页面结构可能已更新，请在浏览器中手动上传图片与粘贴提示词",
+                    ok=False,
+                )
+            return
+        browser.upload_source_image(
+            callback=lambda r: self._on_enhance_upload_done(r, prompt, run=run),
+        )
+
+    def _on_enhance_upload_done(
+        self, result: object, prompt: str, run: int | None = None
+    ) -> None:
+        if self._is_stale_enhance_run(run):
+            return
+        panel = self._editor_page.enhance_panel
+        browser = self._editor_page.enhance_browser
+        info = result if isinstance(result, dict) else {}
+        if not info.get("ok"):
+            panel.set_automation_status(
+                "自动上传失败，请把图片手动拖入AI输入框（原图路径已复制到剪贴板）",
+                ok=False,
+            )
+            ref = self._model.active_document()
+            if ref is not None:
+                QApplication.clipboard().setText(str(ref.source_path))
+            return
+        panel.set_automation_status("图片已上传，正在填写提示词…")
+        browser.fill_prompt_text(
+            prompt,
+            callback=lambda r: self._on_enhance_prompt_done(r, run=run),
+        )
+
+    def _on_enhance_prompt_done(
+        self, result: object, run: int | None = None
+    ) -> None:
+        if self._is_stale_enhance_run(run):
+            return
+        panel = self._editor_page.enhance_panel
+        browser = self._editor_page.enhance_browser
+        info = result if isinstance(result, dict) else {}
+        if not info.get("ok"):
+            panel.set_automation_status(
+                "提示词自动填写失败，请在AI输入框中手动输入提示词后发送",
+                ok=False,
+            )
+            return
+        panel.set_automation_status(
+            "图片与提示词已就绪，请在AI页面点击「发送」（生成完成后自动获取分享链接）"
+        )
+        browser.wait_for_manual_send(
+            callback=lambda r: self._on_enhance_send_done(r, run=run),
+        )
+
+    def _on_enhance_send_done(
+        self, result: object, run: int | None = None
+    ) -> None:
+        if self._is_stale_enhance_run(run):
+            return
+        panel = self._editor_page.enhance_panel
+        browser = self._editor_page.enhance_browser
+        info = result if isinstance(result, dict) else {}
+        if not info.get("ok"):
+            self._set_enhance_overlay(False)
+            panel.set_automation_status(
+                "未检测到发送动作，请在AI中手动发送；生成后在AI里「分享 → 复制链接」粘贴到下方解析",
+                ok=False,
+            )
+            return
+        self._set_enhance_overlay(True, "AI 正在生成译文图片，请勿操作中间页面（最长约 3 分钟）…")
+        panel.set_automation_status("已发送，等待AI生成完成（最长 3 分钟）…")
+        browser.wait_for_result(
+            callback=lambda r: self._on_enhance_result_done(r, run=run),
+        )
+
+    def _on_enhance_result_done(
+        self, result: object, run: int | None = None
+    ) -> None:
+        if self._is_stale_enhance_run(run):
+            return
+        panel = self._editor_page.enhance_panel
+        browser = self._editor_page.enhance_browser
+        info = result if isinstance(result, dict) else {}
+        if not info.get("ok"):
+            self._set_enhance_overlay(False)
+            panel.set_automation_status(
+                "未自动检测到生成结果，请在AI中「分享 → 复制链接」后粘贴到下方解析",
+                ok=False,
+            )
+            return
+        self._set_enhance_overlay(True, "生成完成，正在自动获取分享链接，请勿操作中间页面…")
+        panel.set_automation_status("生成完成，正在获取分享链接…")
+        if not hasattr(browser, "get_share_link"):
+            self._set_enhance_overlay(False)
+            return
+
+        def grab() -> None:
+            if self._is_stale_enhance_run(run):
+                return
+            browser.get_share_link(
+                callback=lambda r: self._on_enhance_link_done(r, run=run),
+            )
+
+        QTimer.singleShot(self._share_link_grace_ms, grab)
+
+    def _on_enhance_link_done(
+        self, result: object, run: int | None = None
+    ) -> None:
+        if self._is_stale_enhance_run(run):
+            return
+        # 取链接结束（无论成败）：解锁页面，后续解析/手动操作交给用户
+        self._set_enhance_overlay(False)
+        panel = self._editor_page.enhance_panel
+        info = result if isinstance(result, dict) else {}
+        if not info.get("ok"):
+            hint = self._share_link_failure_hint(str(info.get("detail", "")))
+            panel.set_automation_status(
+                f"未能自动获取分享链接（{hint}），"
+                "请点击「分享 → 复制链接」手动复制后粘贴到下方解析",
+                ok=False,
+            )
+            return
+        url = str(info.get("detail", ""))
+        panel.link.setText(url)
+        panel.set_automation_status("已获取分享链接，请点击下方「解析链接」")
+
+    @staticmethod
+    def _share_link_failure_hint(detail: str) -> str:
+        """把自动抓链接失败的原因译成用户能看懂、能截图上报的一句话。"""
+        if detail == "action-row-not-found":
+            return "AI页面里没找到消息操作栏（请确认停在有回复的会话上）"
+        if detail == "share-icon-not-found":
+            return "AI回复下方那排图标里没找到「分享」"
+        if detail == "copy-link-not-found":
+            return "AI底部工具栏里没找到「复制链接」按钮"
+        if detail == "copy-link-disabled":
+            return "「复制链接」按钮暂不可用（可能需先在AI里「选择对话」），请手动点开再点一次「复制链接」"
+        if detail == "link-not-found":
+            return "点击后剪贴板里没有链接"
+        return detail or "原因未知"
+
+    @staticmethod
+    def _has_generated_image(images) -> bool:
+        """快照里是否已包含AI新生成的图（-image_raw_hadp 模板）。"""
+        return any("-image_raw_hadp" in image.url for image in images)
+
+    def _on_enhance_images_parsed(self, images) -> None:
+        dialog = self._editor_page.enhance_panel
+        dialog.set_images(images)
+        if self._has_generated_image(images):
+            dialog.set_automation_status("解析完成，可导入或全部下载")
+            return
+        dialog.set_automation_status(
+            "解析结果里没有AI新生成的图：请在AI里稍等片刻重新"
+            "「分享 → 复制链接」，再点「解析链接」",
+            ok=False,
+        )
+
+    def _on_enhance_fetch_failed(self, error: Exception) -> None:
+        dialog = self._editor_page.enhance_panel
+        dialog.set_status(str(error), ok=False)
 
     @staticmethod
     def _save_share_image(image, directory: Path) -> Path:

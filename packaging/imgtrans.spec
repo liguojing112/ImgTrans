@@ -75,6 +75,10 @@ analysis = Analysis(
         "PIL.ImageQt",
         "qrcode",
         "png",
+        # 强化翻译：内嵌豆包网页浏览器
+        "PySide6.QtWebEngineCore",
+        "PySide6.QtWebEngineWidgets",
+        "PySide6.QtWebChannel",
         # 商品链接解析：Playwright（1688 等需浏览器渲染/人工验证）
         "playwright",
         "playwright.sync_api",
@@ -112,12 +116,20 @@ analysis = Analysis(
         "uvicorn",
         "jinja2",
         "lxml",
-        "PySide6.QtWebEngineCore",
-        "PySide6.QtWebEngineWidgets",
+        "PySide6.QtQuick",
+        "PySide6.QtQml",
     ],
     noarchive=False,
     optimize=0,
 )
+
+# 排除 PySide6 的 qml 数据目录：桌面 Widgets 应用不需要 QML，且其中
+# 深层 .obj 路径超过 Windows MAX_PATH，Inno Setup 打包会失败
+analysis.datas = [
+    item
+    for item in analysis.datas
+    if "/qml/" not in f"/{item[1].replace(chr(92), '/')}/"
+]
 pyz = PYZ(analysis.pure)
 
 executable = EXE(

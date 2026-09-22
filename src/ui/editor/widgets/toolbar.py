@@ -19,7 +19,7 @@ class EditorToolBar(QFrame):
         ("crop", "裁剪", "裁剪图片"),
         ("layers", "图层", "查看文字图层状态"),
         ("watermark", "水印", "添加或管理水印"),
-        ("watermark_removal", "去水印", "从豆包分享链接获取无水印原图"),
+        ("enhance_translate", "强化翻译", "内嵌AI处理艺术字等复杂图文"),
     )
 
     def __init__(self) -> None:
@@ -84,6 +84,6 @@ class EditorToolBar(QFrame):
         return button
 
     def _activate(self, tool_id: str) -> None:
-        if tool_id in {"crop", "watermark", "watermark_removal"}:
+        if tool_id in {"crop", "watermark", "enhance_translate"}:
             self.feature_requested.emit(tool_id)
         self.tool_changed.emit(tool_id)

@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QListWidgetItem,
+    QPlainTextEdit,
     QPushButton,
     QSpinBox,
     QVBoxLayout,
@@ -461,42 +462,60 @@ class WatermarkToolDialog(QDialog):
         return str(self.position.currentData())
 
 
-class WatermarkRemovalDialog(QDialog):
-    """去水印 — 从豆包分享链接取无水印原图。
+class EnhanceTranslatePanel(QDialog):
+    """强化翻译 — 内嵌AI图生图处理复杂图文，含手动粘链接降级路径。
 
-    豆包把水印加在 CDN 交付模板上（APP 下载走 cdld_wm3），而分享页数据里
+    常规管线（OCR→翻译→擦除→回填）处理不了的图片（艺术字、图文融合），
+    通过AI图生图直接生成译文版图片。自动化（上传/填词/抓链接）失败时
+    逐环降级：手动拖图、手动在AI输入框输入提示词、手动粘贴分享链接解析。
+    「解析链接」只由用户手动点击，程序最多把链接填进输入框。
+    AI把水印加在 CDN 交付模板上（APP 下载走 cdld_wm3），而分享页数据里
     同时给出了 image_raw 模板的原图地址，取它就是真正的无水印原图（无损、
-    零图像处理）。链接带签名且会过期，解析后应尽快导入或下载。
+    零图像处理）。链接带签名且会过期，解析成功后应尽快导入或下载。
     """
 
     fetch_requested = Signal(str)
     import_requested = Signal(object)
     save_all_requested = Signal(object, object)
 
+    _FLOW_HINT = (
+        "流程：① 左侧点图 → 自动上传并填提示词　"
+        "② 在中间AI页点「发送」　"
+        "③ 生成后自动取分享链接　"
+        "④ 手动点「解析链接」　"
+        "⑤ 导入或全部下载"
+    )
+
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("去水印")
+        self.setWindowTitle("强化翻译")
         _apply_editor_theme(self)
         self.setModal(False)
         self.setMinimumWidth(440)
         self._images: tuple = ()
 
         layout = QVBoxLayout(self)
-        title = QLabel("去水印（豆包）")
+        title = QLabel("强化翻译（AI图生图）")
         title.setObjectName("propertyTitle")
         layout.addWidget(title)
 
-        hint = QLabel(
-            "在豆包里生成图片后「复制链接」，粘贴到下面解析，即可取到无水印原图。\n"
-            "链接有时效，解析成功后请尽快导入或下载。"
-        )
-        hint.setObjectName("captionLabel")
-        hint.setWordWrap(True)
-        layout.addWidget(hint)
+        flow = QLabel(self._FLOW_HINT)
+        flow.setObjectName("captionLabel")
+        flow.setWordWrap(True)
+        layout.addWidget(flow)
+
+        self.automation_status = QLabel("点击左侧图片列表开始自动处理")
+        self.automation_status.setObjectName("captionLabel")
+        self.automation_status.setWordWrap(True)
+        layout.addWidget(self.automation_status)
+
+        divider = QLabel("—— 粘贴AI分享链接后手动点「解析链接」 ——")
+        divider.setObjectName("captionLabel")
+        layout.addWidget(divider)
 
         row = QHBoxLayout()
         self.link = QLineEdit()
-        self.link.setPlaceholderText("粘贴豆包分享链接，如 https://www.doubao.com/thread/…")
+        self.link.setPlaceholderText("粘贴AI分享链接，如 https://www.doubao.com/thread/…")
         self.fetch_button = QPushButton("解析链接")
         self.fetch_button.clicked.connect(self._on_fetch_clicked)
         self.link.returnPressed.connect(self._on_fetch_clicked)
@@ -551,6 +570,12 @@ class WatermarkRemovalDialog(QDialog):
         self.set_status(f"解析到 {len(self._images)} 张无水印原图", ok=True)
         self._update_buttons()
 
+    def set_automation_status(self, text: str, ok: bool = True) -> None:
+        self.automation_status.setText(text)
+        self.automation_status.setStyleSheet(
+            "color: #15803d;" if ok else "color: #dc2626;"
+        )
+
     def set_status(self, text: str, ok: bool = True) -> None:
         self.status.setText(text)
         self.status.setStyleSheet("color: #15803d;" if ok else "color: #dc2626;")
@@ -582,7 +607,7 @@ class WatermarkRemovalDialog(QDialog):
     def _on_fetch_clicked(self) -> None:
         url = self.link.text().strip()
         if not url:
-            self.set_status("请先粘贴豆包分享链接", ok=False)
+            self.set_status("请先粘贴AI分享链接", ok=False)
             return
         self.set_status("正在解析链接…")
         self.fetch_requested.emit(url)

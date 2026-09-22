@@ -461,7 +461,10 @@ def test_translation_completion_shows_and_exports_the_same_clean_rendered_previe
         assert window._model.composition_editor._document is result.document
         assert window._editor_page.main_splitter.count() == 3
         assert window._editor_page.main_splitter.widget(0) is window._editor_page.original_view
-        assert window._editor_page.main_splitter.widget(1) is window._editor_page.view
+        # 画布与强化翻译浏览器共用栈内第 1 格，切豆包时右侧面板不受影响
+        canvas_stack = window._editor_page.canvas_stack
+        assert window._editor_page.main_splitter.widget(1) is canvas_stack
+        assert canvas_stack.widget(0) is window._editor_page.view
         assert window._editor_page.main_splitter.widget(2) is window._editor_page.right_panel
         assert not window._editor_page.original_view.isVisible()
         assert window._editor_page.right_tabs.count() == 5
@@ -705,7 +708,12 @@ def test_split_comparison_fits_both_images_without_overlay_or_clipping():
         assert page.original_view.isVisible()
         assert sizes[0] > 0 and sizes[1] > 0
         assert abs(sizes[0] - sizes[1]) <= 2
-        assert page.original_view.geometry().right() <= page.view.geometry().left()
+        # view 现在挂在画布栈里，两者几何要换算到同一坐标系再比
+        original_right = page.original_view.mapTo(
+            page.main_splitter, page.original_view.rect().topRight()
+        ).x()
+        view_left = page.view.mapTo(page.main_splitter, page.view.rect().topLeft()).x()
+        assert original_right <= view_left
 
         for view in (page.original_view, page.view):
             visible_scene = view.mapToScene(view.viewport().rect()).boundingRect()
@@ -941,35 +949,35 @@ def test_editor_left_toolbar_has_comfortable_click_targets():
             "crop",
             "layers",
             "watermark",
-            "watermark_removal",
+            "enhance_translate",
         ]
     finally:
         toolbar.close()
 
 
-def test_watermark_removal_entry_sits_under_watermark_and_requests_feature():
-    """去水印入口在「水印」下方，点击后按功能型工具发起请求。"""
-    QApplication.instance() or QApplication(["watermark-removal-toolbar-test"])
+def test_enhance_translate_entry_sits_under_watermark_and_requests_feature():
+    """强化翻译入口在「水印」下方，点击后按功能型工具发起请求。"""
+    QApplication.instance() or QApplication(["enhance-translate-toolbar-test"])
     toolbar = EditorToolBar()
     requested: list[str] = []
     toolbar.feature_requested.connect(requested.append)
     try:
         labels = [button.text() for button in toolbar.buttons.values()]
-        assert labels.index("去水印") == labels.index("水印") + 1
+        assert labels.index("强化翻译") == labels.index("水印") + 1
 
-        toolbar.buttons["watermark_removal"].click()
-        assert requested == ["watermark_removal"]
+        toolbar.buttons["enhance_translate"].click()
+        assert requested == ["enhance_translate"]
     finally:
         toolbar.close()
 
 
-def test_watermark_removal_dialog_lists_images_and_emits_requests():
-    """对话框只负责展示与发起请求，下载/导入由 MainWindow 后台执行。"""
+def test_enhance_translate_panel_lists_images_and_emits_requests():
+    """面板只负责展示与发起请求，下载/导入由 MainWindow 后台执行。"""
     from src.infrastructure.doubao_share import ShareImage
-    from src.ui.editor.widgets.tool_dialogs import WatermarkRemovalDialog
+    from src.ui.editor.widgets.tool_dialogs import EnhanceTranslatePanel
 
-    QApplication.instance() or QApplication(["watermark-removal-dialog-test"])
-    dialog = WatermarkRemovalDialog()
+    QApplication.instance() or QApplication(["enhance-translate-panel-test"])
+    dialog = EnhanceTranslatePanel()
     fetched: list[str] = []
     imported: list[object] = []
     dialog.fetch_requested.connect(fetched.append)
@@ -1007,6 +1015,10 @@ def test_watermark_removal_dialog_lists_images_and_emits_requests():
 
         dialog.import_button.click()
         assert imported == [images[0]]
+
+        # 提示词框已删（提示词直接填在AI输入框里）；「解析链接」只由用户手动点
+        assert not hasattr(dialog, "prompt_edit")
+        assert "手动点「解析链接」" in dialog._FLOW_HINT
     finally:
         dialog.close()
 

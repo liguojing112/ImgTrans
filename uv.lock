@@ -384,6 +384,8 @@ dependencies = [
     { name = "playwright" },
     { name = "pypng" },
     { name = "pyside6" },
+    { name = "pyside6-addons" },
+    { name = "pyside6-essentials" },
     { name = "qrcode" },
     { name = "rapidocr" },
 ]
@@ -433,6 +435,8 @@ requires-dist = [
     { name = "pyinstaller", marker = "extra == 'release'", specifier = "==6.19.0" },
     { name = "pypng", specifier = ">=0.20220715" },
     { name = "pyside6", specifier = "==6.11.1" },
+    { name = "pyside6-addons", specifier = "==6.11.1" },
+    { name = "pyside6-essentials", specifier = "==6.11.1" },
     { name = "pytest", marker = "extra == 'test'", specifier = "==8.3.5" },
     { name = "pytest-qt", marker = "extra == 'test'", specifier = "==4.5.0" },
     { name = "python-bidi", marker = "extra == 'test'", specifier = "==0.6.11" },

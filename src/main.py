@@ -335,6 +335,32 @@ def _install_qt_translator(application: QApplication) -> None:
 _shared_instance_memory = None
 
 
+# QtWebEngine 必须在 QApplication 创建之前导入；运行期置 True/False 供
+# 强化翻译功能判断降级（缺组件时保留手动粘链接路径）
+WEBENGINE_AVAILABLE = False
+
+
+def _import_webengine() -> bool:
+    global WEBENGINE_AVAILABLE
+    from src.main import WEBENGINE_AVAILABLE as _unused  # noqa: F401
+
+    try:
+        import PySide6.QtWebEngineWidgets  # noqa: F401
+    except Exception:
+        import src.main as _m
+
+        _m.WEBENGINE_AVAILABLE = False
+        return False
+    if os.environ.get("QT_QPA_PLATFORM") == "offscreen":
+        os.environ.setdefault(
+            "QTWEBENGINE_CHROMIUM_FLAGS", "--disable-gpu --no-sandbox"
+        )
+    import src.main as _m
+
+    _m.WEBENGINE_AVAILABLE = True
+    return _m.WEBENGINE_AVAILABLE
+
+
 def _ensure_single_instance() -> bool:
     """同一时间只允许一个客户端实例运行（双击多次只开一个窗口）。"""
     global _shared_instance_memory
@@ -351,6 +377,7 @@ def _ensure_single_instance() -> bool:
 
 def main(argv: Sequence[str] | None = None) -> int:
     multiprocessing.freeze_support()
+    _import_webengine()
     parser = argparse.ArgumentParser(prog="imgtrans")
     parser.add_argument(
         "--smoke-test",

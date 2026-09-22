@@ -58,7 +58,7 @@ from src.ui.editor.widgets.tool_dialogs import (
     BatchExportDialog,
     CropToolDialog,
     EraseToolDialog,
-    WatermarkRemovalDialog,
+    EnhanceTranslatePanel,
     WatermarkToolDialog,
 )
 from src.ui.manual_region_panel import ManualRegionPanel
@@ -111,9 +111,9 @@ class EditorPage(QWidget):
     watermark_state_requested = Signal(str, str, bool)
     watermark_property_requested = Signal(str, str, object)
     watermark_edit_requested = Signal(object)
-    watermark_link_requested = Signal(str)
-    watermark_import_requested = Signal(object)
-    watermark_save_all_requested = Signal(object, object)
+    enhance_link_requested = Signal(str)
+    enhance_import_requested = Signal(object)
+    enhance_save_all_requested = Signal(object, object)
     watermark_delete_requested = Signal(str)
     watermark_duplicate_requested = Signal(str)
     layer_move_requested = Signal(str, str, int)
@@ -188,7 +188,7 @@ class EditorPage(QWidget):
         self.erase_dialog = EraseToolDialog(self)
         self.crop_dialog = CropToolDialog(self)
         self.watermark_dialog = WatermarkToolDialog(self)
-        self.watermark_removal_dialog = WatermarkRemovalDialog(self)
+        self.enhance_panel = EnhanceTranslatePanel(self)
         self.manual_region_dialog = QDialog(self)
         self.manual_region_dialog.setWindowTitle("框选翻译")
         self.manual_region_dialog.setProperty("editorStyle", True)
@@ -241,7 +241,7 @@ class EditorPage(QWidget):
             "ai_erase": self.erase_dialog,
             "crop": self.crop_dialog,
             "watermark": self.watermark_dialog,
-            "watermark_removal": self.watermark_removal_dialog,
+            "enhance_translate": self.enhance_panel,
         }
         for panel in self._layer_tool_pages.values():
             if isinstance(panel, QDialog):
@@ -271,8 +271,15 @@ class EditorPage(QWidget):
 
         self.main_splitter = QSplitter(Qt.Orientation.Horizontal)
         self.main_splitter.setChildrenCollapsible(False)
+        # 中央智能切换：画布(0) / 强化翻译AI浏览器(1)。栈放在 splitter 内部而不是
+        # 整块中央区——否则切到AI时，右侧面板（含解析链接框）会跟着一起被换掉。
+        self.canvas_stack = QStackedWidget()
+        self.canvas_stack.addWidget(self.view)
+        self.enhance_browser = self._create_enhance_browser()
+        self.canvas_stack.addWidget(self.enhance_browser)
+        self.canvas_stack.setCurrentIndex(0)
         self.main_splitter.addWidget(self.original_view)
-        self.main_splitter.addWidget(self.view)
+        self.main_splitter.addWidget(self.canvas_stack)
         self.main_splitter.addWidget(self.right_panel)
         self.main_splitter.setStretchFactor(0, 0)
         self.main_splitter.setStretchFactor(1, 1)
@@ -317,6 +324,32 @@ class EditorPage(QWidget):
         layout.addWidget(center_widget, stretch=1)
 
         self._connect_signals()
+
+    def _create_enhance_browser(self):
+        """强化翻译浏览器：仅 WebEngine 可用且非 offscreen 时创建真实视图。"""
+        import os
+
+        if os.environ.get("QT_QPA_PLATFORM") == "offscreen":
+            placeholder = QLabel("AI浏览器（当前测试环境不可用）")
+            placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            return placeholder
+        try:
+            from src.ui.enhance.browser_panel import EnhanceTranslateBrowser
+        except Exception as error:
+            placeholder = QLabel(
+                "本机缺少浏览器组件，无法内嵌AI。\n"
+                "可使用右侧面板手动粘贴分享链接解析。\n"
+                f"（诊断：{type(error).__name__}: {error}）"
+            )
+            placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            placeholder.setWordWrap(True)
+            return placeholder
+        return EnhanceTranslateBrowser(self)
+
+    def show_enhance_browser(self, on: bool) -> None:
+        self.canvas_stack.setCurrentIndex(1 if on else 0)
+        # 对比滑条属于画布模式，AI页面下让位
+        self.comparison_slider_bar.setVisible(self._slider_compare and not on)
 
     def _connect_signals(self) -> None:
         self.toolbar.add_text_requested.connect(self._on_add_text_requested)
@@ -501,14 +534,14 @@ class EditorPage(QWidget):
         self.crop_dialog.rejected.connect(self._close_crop_tool)
         self.crop_dialog.accepted.connect(lambda: self._show_layer_tool("layers"))
         self.watermark_dialog.rejected.connect(lambda: self._show_layer_tool("layers"))
-        self.watermark_removal_dialog.fetch_requested.connect(
-            self.watermark_link_requested.emit
+        self.enhance_panel.fetch_requested.connect(
+            self.enhance_link_requested.emit
         )
-        self.watermark_removal_dialog.import_requested.connect(
-            self.watermark_import_requested.emit
+        self.enhance_panel.import_requested.connect(
+            self.enhance_import_requested.emit
         )
-        self.watermark_removal_dialog.save_all_requested.connect(
-            self.watermark_save_all_requested.emit
+        self.enhance_panel.save_all_requested.connect(
+            self.enhance_save_all_requested.emit
         )
 
     def _on_topbar_translate(self) -> None:
@@ -605,8 +638,8 @@ class EditorPage(QWidget):
     def open_watermark_dialog(self) -> None:
         self._show_layer_tool("watermark")
 
-    def open_watermark_removal_dialog(self) -> None:
-        self._show_layer_tool("watermark_removal")
+    def open_enhance_translate(self) -> None:
+        self._show_layer_tool("enhance_translate")
 
     def _show_layer_tool(self, tool_id: str) -> None:
         panel = self._layer_tool_pages.get(tool_id, self.layer_state_panel)
@@ -869,11 +902,14 @@ class EditorPage(QWidget):
             "ai_erase": 3,
             "crop": 3,
             "watermark": 3,
+            "enhance_translate": 3,
         }
         if tool_id in tab_by_tool:
             self.right_tabs.setCurrentIndex(tab_by_tool[tool_id])
         if tool_id in self._layer_tool_pages:
             self._show_layer_tool(tool_id)
+        # 中央智能切换：强化翻译显AI浏览器，其他工具回画布
+        self.show_enhance_browser(tool_id == "enhance_translate")
         self.tool_changed.emit(tool_id)
 
     def _on_translation_activity_changed(self, active: bool) -> None:

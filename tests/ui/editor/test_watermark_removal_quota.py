@@ -69,7 +69,7 @@ def _window(
 
 
 def _status(window) -> str:
-    return window._editor_page.watermark_removal_dialog.status.text()
+    return window._editor_page.enhance_panel.status.text()
 
 
 def test_import_requires_activation(monkeypatch):
@@ -80,8 +80,8 @@ def test_import_requires_activation(monkeypatch):
     downloads: dict = {}
     window = _window(monkeypatch, client, None, downloads)
     try:
-        window._on_watermark_import(_image())
-        assert _status(window) == "请先激活应用，再使用去水印"
+        window._on_enhance_import(_image())
+        assert _status(window) == "请先激活应用，再使用强化翻译"
         assert client.calls == []  # 未激活不发起任何额度请求
         assert "imported" not in downloads
     finally:
@@ -96,8 +96,8 @@ def test_import_rejects_plan_without_watermark_quota(monkeypatch):
     downloads: dict = {}
     window = _window(monkeypatch, client, "itd_test", downloads)
     try:
-        window._on_watermark_import(_image())
-        assert _status(window) == "当前套餐不含去水印次数，请购买含去水印的套餐后使用"
+        window._on_enhance_import(_image())
+        assert _status(window) == "当前套餐不含强化翻译次数，请购买含强化翻译的套餐后使用"
         assert all(call[0] != "consume" for call in client.calls)
         assert "imported" not in downloads
     finally:
@@ -112,8 +112,8 @@ def test_import_rejects_when_daily_quota_exhausted(monkeypatch):
     downloads: dict = {}
     window = _window(monkeypatch, client, "itd_test", downloads)
     try:
-        window._on_watermark_import(_image())
-        assert _status(window) == "今日去水印次数不足：剩余 0 张，需要 1 张"
+        window._on_enhance_import(_image())
+        assert _status(window) == "今日强化翻译次数不足：剩余 0 张，需要 1 张"
         assert all(call[0] != "consume" for call in client.calls)
         assert "imported" not in downloads
     finally:
@@ -128,7 +128,7 @@ def test_import_consumes_one_then_downloads(monkeypatch):
     downloads: dict = {}
     window = _window(monkeypatch, client, "itd_test", downloads)
     try:
-        window._on_watermark_import(_image())
+        window._on_enhance_import(_image())
         assert client.calls == [("get", "itd_test"), ("consume", "itd_test", 1)]
         assert "已取到无水印原图" in _status(window)
         assert len(downloads["imported"]) == 1
@@ -145,8 +145,8 @@ def test_save_all_rejects_batch_larger_than_remaining(monkeypatch):
     window = _window(monkeypatch, client, "itd_test", downloads)
     try:
         images = (_image("a"), _image("b"), _image("c"))
-        window._on_watermark_save_all(images, "/tmp/imgtrans-watermark-test")
-        assert _status(window) == "今日去水印次数不足：剩余 1 张，需要 3 张"
+        window._on_enhance_save_all(images, "/tmp/imgtrans-watermark-test")
+        assert _status(window) == "今日强化翻译次数不足：剩余 1 张，需要 3 张"
         assert all(call[0] != "consume" for call in client.calls)
     finally:
         window.close()
@@ -161,7 +161,7 @@ def test_save_all_consumes_batch_size(monkeypatch):
     window = _window(monkeypatch, client, "itd_test", downloads)
     try:
         images = (_image("a"), _image("b"), _image("c"))
-        window._on_watermark_save_all(images, "/tmp/imgtrans-watermark-test")
+        window._on_enhance_save_all(images, "/tmp/imgtrans-watermark-test")
         assert ("consume", "itd_test", 3) in client.calls
         assert "已保存 3 张" in _status(window)
     finally:
@@ -177,8 +177,8 @@ def test_consume_rejection_during_download_blocks_import(monkeypatch):
     downloads: dict = {}
     window = _window(monkeypatch, client, "itd_test", downloads)
     try:
-        window._on_watermark_import(_image())
-        assert _status(window) == "今日去水印次数不足：剩余 0 张，需要 1 张"
+        window._on_enhance_import(_image())
+        assert _status(window) == "今日强化翻译次数不足：剩余 0 张，需要 1 张"
         assert "imported" not in downloads
     finally:
         window.close()
