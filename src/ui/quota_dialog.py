@@ -132,4 +132,7 @@ def _format_duration(expires_at: datetime) -> str:
     total_hours = int(remaining.total_seconds() // 3600)
     if total_hours >= 24:
         return f"{total_hours // 24} 天 {total_hours % 24} 小时"
-    return f"{total_hours} 小时"
+    if total_hours >= 1:
+        return f"{total_hours} 小时"
+    # 剩余不足 1 小时显示分钟，避免刚购买的短时长套餐显示"0 小时"像没到账
+    return f"{max(1, int(remaining.total_seconds() // 60))} 分钟"

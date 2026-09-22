@@ -25,6 +25,13 @@ from src.infrastructure.payment_client import (
 )
 
 
+_PRIMARY_BUTTON_QSS = (
+    "QPushButton { background: #3973db; color: #ffffff; border: none;"
+    " border-radius: 6px; padding: 8px 24px; font-weight: 600; min-width: 72px; }"
+    "QPushButton:hover { background: #4a8af4; }"
+)
+
+
 class TaskRunner(Protocol):
     def submit(
         self,
@@ -327,9 +334,15 @@ class PurchasePanel(QWidget):
             self._timer.stop()
             self._polling = False
             self._status_label.setText(f"支付成功，激活码：{result.activation_code}")
-            QMessageBox.information(
-                self, "支付成功", f"激活码已生成：\n{result.activation_code}\n正在绑定本机…"
-            )
+            # 该弹窗可能脱离编辑器主题（首次激活流程），需显式指定主按钮样式，
+            # 否则确定按钮在系统原生样式下会白底白字
+            box = QMessageBox(self)
+            box.setWindowTitle("支付成功")
+            box.setIcon(QMessageBox.Icon.Information)
+            box.setText(f"激活码已生成：\n{result.activation_code}\n正在绑定本机…")
+            box.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+            box.setStyleSheet(_PRIMARY_BUTTON_QSS)
+            box.exec()
             self.purchase_completed.emit(result.activation_code)
             self.accept()
         elif result.status == "paid" and self._is_renewal:
