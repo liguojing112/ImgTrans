@@ -20,6 +20,7 @@ from src.domain.composition import (
     CropViewport,
     DeleteLayerCommand,
     ImageTransform,
+    PictureLayer,
     ReplaceCompositionStateCommand,
     ReplaceLayerCommand,
     WatermarkLayer,
@@ -486,6 +487,72 @@ class EditComposition:
             )
             return self._commit_state(before, after, region_id)
 
+    @property
+    def pictures(self) -> tuple[PictureLayer, ...]:
+        return self._session.state.pictures
+
+    def add_extracted_picture(
+        self,
+        picture: PictureLayer,
+        repaired_background: ImageDocument,
+        erase_mask: EraseMask,
+    ) -> CompositionEditResult:
+        """框选剥离：补全被剥离区域的背景并加入图片图层（一次撤销）。"""
+        with self._lock:
+            viewport = self.viewport
+            patch = _extract_patch(
+                repaired_background,
+                erase_mask,
+                viewport.x,
+                viewport.y,
+            )
+            before = self._session.state
+            after = replace(
+                before,
+                patches=before.patches + (patch,),
+                pictures=before.pictures + (picture,),
+            )
+            return self._commit_state(before, after, picture.layer_id)
+
+    def move_picture_layer(
+        self,
+        layer_id: str,
+        center_x: float,
+        center_y: float,
+    ) -> CompositionEditResult:
+        with self._lock:
+            before = self._session.state
+            target = next(
+                (item for item in before.pictures if item.layer_id == layer_id),
+                None,
+            )
+            if target is None:
+                raise KeyError(layer_id)
+            moved = replace(
+                target, center_x=float(center_x), center_y=float(center_y)
+            )
+            after = replace(
+                before,
+                pictures=tuple(
+                    moved if item.layer_id == layer_id else item
+                    for item in before.pictures
+                ),
+            )
+            return self._commit_state(before, after, layer_id)
+
+    def remove_picture_layer(self, layer_id: str) -> CompositionEditResult:
+        with self._lock:
+            before = self._session.state
+            if all(item.layer_id != layer_id for item in before.pictures):
+                raise KeyError(layer_id)
+            after = replace(
+                before,
+                pictures=tuple(
+                    item for item in before.pictures if item.layer_id != layer_id
+                ),
+            )
+            return self._commit_state(before, after, layer_id)
+
     def restore_original_region(
         self,
         region_id: str,
@@ -839,6 +906,7 @@ class EditComposition:
             ),
             visible_layout,
         )
+        rendered = _composite_picture_layers(rendered, state.pictures)
         return _render_watermarks(rendered, state.watermarks)
 
     def _commit_state(
@@ -1332,6 +1400,54 @@ def _crop_document(document: ImageDocument, viewport: CropViewport) -> ImageDocu
         has_alpha=document.mode == "RGBA",
     )
     return ImageDocument(asset, document.mode, bytes(output))
+
+
+def _composite_picture_layers(
+    document: ImageDocument,
+    pictures: tuple[PictureLayer, ...],
+) -> ImageDocument:
+    """按中心位置叠加图片图层（支持旋转与透明度由像素自带）。"""
+    visible = tuple(item for item in pictures if item.visible)
+    if not visible:
+        return document
+    base = Image.frombytes(
+        document.mode,
+        (document.asset.width, document.asset.height),
+        document.pixels,
+    ).convert("RGBA")
+    for picture in visible:
+        channels = 4 if len(picture.pixels) == picture.width * picture.height * 4 else 3
+        if channels == 4:
+            layer = Image.frombytes(
+                "RGBA", (picture.width, picture.height), picture.pixels
+            )
+        else:
+            layer = Image.frombytes(
+                "RGB", (picture.width, picture.height), picture.pixels
+            ).convert("RGBA")
+        if abs(picture.rotation_degrees) > 0.01:
+            layer = layer.rotate(
+                -picture.rotation_degrees,
+                expand=True,
+                resample=Image.Resampling.BICUBIC,
+            )
+        x = round(picture.center_x - layer.width / 2)
+        y = round(picture.center_y - layer.height / 2)
+        _paste_rgba(base, layer, x, y)
+    result = base.convert(document.mode)
+    return replace(document, pixels=result.tobytes())
+
+
+def _paste_rgba(base: Image.Image, layer: Image.Image, x: int, y: int) -> None:
+    """把图层贴到画布（允许负坐标，超出部分自动裁剪）。"""
+    left = max(0, x)
+    top = max(0, y)
+    right = min(base.width, x + layer.width)
+    bottom = min(base.height, y + layer.height)
+    if right <= left or bottom <= top:
+        return
+    cropped = layer.crop((left - x, top - y, right - x, bottom - y))
+    base.alpha_composite(cropped, dest=(left, top))
 
 
 def _render_watermarks(

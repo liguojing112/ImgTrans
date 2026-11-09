@@ -228,6 +228,8 @@ class TranslateControls(QFrame):
     load_fonts_requested = Signal()
     match_source_font_changed = Signal(bool)
     auto_font_changed = Signal(object)
+    kai_font_changed = Signal(object)
+    kai_recognition_changed = Signal(bool)
     paragraph_mode_changed = Signal(str)
 
     def __init__(self) -> None:
@@ -548,6 +550,41 @@ class TranslateControls(QFrame):
         auto_font_row.addWidget(self.auto_font)
         layout.addLayout(auto_font_row)
 
+        kai_font_row = QHBoxLayout()
+        kai_font_label = QLabel("楷体译文")
+        kai_font_label.setObjectName("propertyFieldLabel")
+        kai_font_row.addWidget(kai_font_label)
+        self.kai_font = QComboBox()
+        self.kai_font.setMinimumWidth(180)
+        self.kai_font.setEditable(True)
+        self.kai_font.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self.kai_font.setToolTip(
+            "识别为楷体的原图文字使用这个字体（如载入的品牌楷体）；"
+            "留空使用系统楷体，系统没有时用随包分发的楷体字体"
+        )
+        kai_completer = self.kai_font.completer()
+        if kai_completer is not None:
+            kai_completer.setFilterMode(Qt.MatchFlag.MatchContains)
+            kai_completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        self.kai_font.lineEdit().editingFinished.connect(
+            self._restore_kai_font_edit_text
+        )
+        self.kai_font.addItem("系统楷体（默认）", None)
+        for display, family in translation_font_choices():
+            self.kai_font.addItem(display, family)
+        self.kai_font.currentIndexChanged.connect(self._kai_font_changed)
+        kai_font_row.addWidget(self.kai_font)
+        layout.addLayout(kai_font_row)
+
+        self.kai_recognition = QCheckBox("识别楷体原图（实验）")
+        self.kai_recognition.setToolTip(
+            "逐块判断原图是否为楷体类文字，识别到时使用「楷体译文」字体；"
+            "楷体与黑体特征接近，识别不确定时保持默认字体，可随时关闭"
+        )
+        self.kai_recognition.setChecked(True)
+        self.kai_recognition.toggled.connect(self.kai_recognition_changed.emit)
+        layout.addWidget(self.kai_recognition)
+
         # —— 翻译范围 ——
         layout.addWidget(_group_title("翻译范围"))
         layout.addWidget(mode_label)
@@ -665,6 +702,19 @@ class TranslateControls(QFrame):
         auto_index = self.auto_font.findData(auto_current) if auto_current else 0
         self.auto_font.setCurrentIndex(auto_index if auto_index >= 0 else 0)
         del blocker
+        # 「楷体译文」列表同步补上刚载入的字体
+        kai_current = self.kai_font.currentData()
+        kai_known = {
+            self.kai_font.itemData(index)
+            for index in range(self.kai_font.count())
+        }
+        kai_blocker = QSignalBlocker(self.kai_font)
+        for display, family in translation_font_choices():
+            if family not in kai_known:
+                self.kai_font.addItem(display, family)
+        kai_index = self.kai_font.findData(kai_current) if kai_current else 0
+        self.kai_font.setCurrentIndex(kai_index if kai_index >= 0 else 0)
+        del kai_blocker
 
     def set_translation_font(self, value: str | None) -> None:
         blocker = QSignalBlocker(self.translation_font)
@@ -881,6 +931,42 @@ class TranslateControls(QFrame):
 
     def _auto_font_changed(self, _index: int = 0) -> None:
         self.auto_font_changed.emit(self.auto_font.currentData())
+
+    def _kai_font_changed(self, _index: int = 0) -> None:
+        self.kai_font_changed.emit(self.kai_font.currentData())
+
+    def _restore_kai_font_edit_text(self) -> None:
+        text = self.kai_font.currentText().strip()
+        match = (
+            self.kai_font.findText(text, Qt.MatchFlag.MatchFixedString)
+            if text
+            else -1
+        )
+        if match >= 0:
+            if match != self.kai_font.currentIndex():
+                self.kai_font.setCurrentIndex(match)
+            return
+        index = self.kai_font.currentIndex()
+        if index >= 0:
+            self.kai_font.setEditText(self.kai_font.itemText(index))
+
+    @property
+    def selected_kai_font(self) -> str | None:
+        return self.kai_font.currentData()
+
+    def set_kai_font(self, value: str | None) -> None:
+        blocker = QSignalBlocker(self.kai_font)
+        index = self.kai_font.findData(value) if value else 0
+        if index < 0:
+            self.kai_font.addItem(str(value), str(value))
+            index = self.kai_font.count() - 1
+        self.kai_font.setCurrentIndex(index)
+        del blocker
+
+    def set_kai_recognition(self, enabled: bool) -> None:
+        blocker = QSignalBlocker(self.kai_recognition)
+        self.kai_recognition.setChecked(bool(enabled))
+        del blocker
 
     def _restore_auto_font_edit_text(self) -> None:
         text = self.auto_font.currentText().strip()

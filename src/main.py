@@ -57,6 +57,8 @@ from src.infrastructure.server_translation_adapter import ServerTranslationAdapt
 from src.infrastructure.text_renderer import QtBasicTextLayoutAdapter, QtTextRenderer
 from src.infrastructure.user_preferences import (
     JsonAutoFontPreferences,
+    JsonKaiFontPreferences,
+    JsonKaiRecognitionPreferences,
     JsonBrandTermsPreferences,
     JsonEcommercePreferences,
     JsonFontMatchPreferences,
@@ -528,6 +530,10 @@ def _create_editor_window() -> EditorMainWindow:
     saved_match_source_font = font_match_prefs.load()
     auto_font_prefs = JsonAutoFontPreferences(preferences_path)
     saved_auto_font = auto_font_prefs.load()
+    kai_font_prefs = JsonKaiFontPreferences(preferences_path)
+    saved_kai_font = kai_font_prefs.load()
+    kai_recognition_prefs = JsonKaiRecognitionPreferences(preferences_path)
+    saved_kai_recognition = kai_recognition_prefs.load()
     portal_client = None
     if backend_url:
         try:
@@ -643,6 +649,10 @@ def _create_editor_window() -> EditorMainWindow:
         match_source_font_preferences=font_match_prefs,
         auto_font=saved_auto_font,
         auto_font_preferences=auto_font_prefs,
+        kai_font=saved_kai_font,
+        kai_font_preferences=kai_font_prefs,
+        kai_recognition=saved_kai_recognition,
+        kai_recognition_preferences=kai_recognition_prefs,
         portal_client=portal_client,
         update_ecommerce_translation=getattr(
             translation_adapter,

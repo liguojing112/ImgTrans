@@ -115,6 +115,29 @@ def _serif_families(language_code: str, system: str) -> tuple[str, ...]:
     return ("Noto Serif", "Noto Serif CJK SC", "DejaVu Serif")
 
 
+def resolve_kai_font_details(
+    language_code: str,
+    preferred: str | None = None,
+) -> FontResolution:
+    """楷体类原图的译文字体：优先用户指定，其次系统/打包楷体，最后回退默认。"""
+    if preferred and preferred.strip():
+        return FontResolution(language_code, preferred.strip(), False, None)
+    _register_system_fonts()
+    available = {family.casefold(): family for family in QFontDatabase.families()}
+    for name in (
+        "KaiTi",
+        "楷体",
+        "STKaiti",
+        "Kaiti SC",
+        "HanWang KaiBold-Gb5",
+        "TW-MOE-Std-Kai",
+        "HanWangYanKai",
+    ):
+        if name.casefold() in available:
+            return FontResolution(language_code, available[name.casefold()], False, None)
+    return _select_font(language_code, platform.system(), tuple(QFontDatabase.families()))
+
+
 def _register_system_fonts() -> None:
     global _REGISTERED
     with _LOCK:

@@ -7,6 +7,8 @@ from __future__ import annotations
 
 from dataclasses import replace
 import logging
+
+import numpy as np
 from math import atan2, degrees, hypot
 from pathlib import Path
 
@@ -79,6 +81,8 @@ from src.ui.editor.home_page import HomePage
 from src.ui.editor.store_page import StorePage
 from src.ui.portal_browser_window import PortalBrowserWindow
 from src.domain.portal import DEFAULT_WANXIANG_NOTE
+from src.domain.composition import PictureLayer
+from src.domain.inpainting import EraseMask
 from src.ui.editor.services.editor_import_service import load_document
 from src.ui.editor.services.editor_export_service import export_document
 from src.ui.editor.theme import EDITOR_DARK_THEME
@@ -137,6 +141,10 @@ class EditorMainWindow(QMainWindow):
         match_source_font_preferences: object | None = None,
         auto_font: str | None = None,
         auto_font_preferences: object | None = None,
+        kai_font: str | None = None,
+        kai_font_preferences: object | None = None,
+        kai_recognition: bool = True,
+        kai_recognition_preferences: object | None = None,
         portal_client: object | None = None,
         update_ecommerce_translation: object | None = None,
         translation_service_label: str = "翻译服务：可用",
@@ -193,6 +201,10 @@ class EditorMainWindow(QMainWindow):
         self._match_source_font_preferences = match_source_font_preferences
         self._initial_auto_font = auto_font
         self._auto_font_preferences = auto_font_preferences
+        self._initial_kai_font = kai_font
+        self._kai_font_preferences = kai_font_preferences
+        self._initial_kai_recognition = bool(kai_recognition)
+        self._kai_recognition_preferences = kai_recognition_preferences
         self._portal_client = portal_client
         self._portal_module = DEFAULT_WANXIANG_NOTE
         self._portal_window = None
@@ -705,6 +717,16 @@ class EditorMainWindow(QMainWindow):
             self._sync_history_actions
         )
         self._editor_page.delete_requested.connect(self._on_delete_layer)
+        self._editor_page.extract_layer_requested.connect(
+            self._on_extract_layer
+        )
+        self._editor_page.scene.picture_moved.connect(self._on_picture_moved)
+        self._editor_page.scene.picture_delete_requested.connect(
+            self._on_delete_picture
+        )
+        self._editor_page.scene.picture_selected.connect(
+            self._on_picture_selected
+        )
         self._editor_page.duplicate_requested.connect(self._on_duplicate_layer)
         self._editor_page.add_layer_requested.connect(self._on_add_layer)
         self._editor_page.add_layer_at_requested.connect(self._on_add_layer_at)
@@ -776,11 +798,21 @@ class EditorMainWindow(QMainWindow):
         )
         controls.set_auto_font(self._initial_auto_font)
         controls.auto_font_changed.connect(self._on_auto_font_changed)
+        controls.set_kai_font(self._initial_kai_font)
+        controls.kai_font_changed.connect(self._on_kai_font_changed)
+        controls.set_kai_recognition(self._initial_kai_recognition)
+        controls.kai_recognition_changed.connect(
+            self._on_kai_recognition_changed
+        )
         adapter = self._text_layout_adapter
         if adapter is not None and hasattr(adapter, "set_match_source_font"):
             adapter.set_match_source_font(self._initial_match_source_font)
         if adapter is not None and hasattr(adapter, "set_preferred_font"):
             adapter.set_preferred_font(self._initial_auto_font)
+        if adapter is not None and hasattr(adapter, "set_kai_font"):
+            adapter.set_kai_font(self._initial_kai_font)
+        if adapter is not None and hasattr(adapter, "set_kai_recognition"):
+            adapter.set_kai_recognition(self._initial_kai_recognition)
         controls.set_paragraph_mode(self._initial_paragraph_mode or "long")
         controls.paragraph_mode_changed.connect(
             self._on_paragraph_mode_changed
@@ -923,6 +955,39 @@ class EditorMainWindow(QMainWindow):
         except Exception as error:
             self.statusBar().showMessage(
                 f"无法保存自动匹配首选字体：{error}", 5000
+            )
+
+    def _on_kai_font_changed(self, value: object) -> None:
+        font_family = value if isinstance(value, str) else None
+        adapter = self._text_layout_adapter
+        if adapter is not None and hasattr(adapter, "set_kai_font"):
+            adapter.set_kai_font(font_family)
+        if self._kai_font_preferences is None:
+            return
+        try:
+            self._kai_font_preferences.save(font_family)
+            self.statusBar().showMessage(
+                "楷体译文字体已保存"
+                if font_family
+                else "楷体译文已恢复系统楷体",
+                3000,
+            )
+        except Exception as error:
+            self.statusBar().showMessage(
+                f"无法保存楷体译文字体：{error}", 5000
+            )
+
+    def _on_kai_recognition_changed(self, enabled: bool) -> None:
+        adapter = self._text_layout_adapter
+        if adapter is not None and hasattr(adapter, "set_kai_recognition"):
+            adapter.set_kai_recognition(bool(enabled))
+        if self._kai_recognition_preferences is None:
+            return
+        try:
+            self._kai_recognition_preferences.save(bool(enabled))
+        except Exception as error:
+            self.statusBar().showMessage(
+                f"无法保存楷体识别设置：{error}", 5000
             )
 
     def _on_paragraph_mode_changed(self, value: str) -> None:
@@ -4083,6 +4148,84 @@ class EditorMainWindow(QMainWindow):
             ),
         )
 
+    # —— 框选图层剥离 ——
+
+    def _on_extract_layer(self, box: object) -> None:
+        """框选剥离：框内像素成为可移动图片图层，原位置背景用 AI 修复补全。"""
+        from uuid import uuid4
+
+        editor = self._model.composition_editor
+        if editor is None or self._task_runner is None or self._repair_selection is None:
+            self.statusBar().showMessage(
+                "请先导入图片并完成一次翻译，再使用图层剥离", 6000
+            )
+            self._editor_page.toolbar.set_active_tool("select")
+            return
+        document = editor.document
+        width, height = document.asset.width, document.asset.height
+        left = max(0, min(width - 1, round(box.center_x - box.width / 2)))
+        top = max(0, min(height - 1, round(box.center_y - box.height / 2)))
+        right = max(left + 1, min(width, round(box.center_x + box.width / 2)))
+        bottom = max(top + 1, min(height, round(box.center_y + box.height / 2)))
+        channels = 4 if document.mode == "RGBA" else 3
+        pixels = np.frombuffer(document.pixels, dtype=np.uint8).reshape(
+            height, width, channels
+        )
+        crop = pixels[top:bottom, left:right].copy()
+        picture = PictureLayer(
+            layer_id=f"picture-{uuid4().hex}",
+            pixels=crop.tobytes(),
+            width=right - left,
+            height=bottom - top,
+            center_x=(left + right) / 2,
+            center_y=(top + bottom) / 2,
+        )
+        mask = _rect_erase_mask(width, height, left, top, right, bottom)
+        repair = self._repair_selection
+        self.statusBar().showMessage("正在剥离图层并补全背景…")
+
+        def operation():
+            repaired = repair.execute(editor.background_document, mask)
+            return editor.add_extracted_picture(picture, repaired.document, mask)
+
+        self._task_runner.submit(
+            operation,
+            self._editor_page.apply_edit_result,
+            lambda error: self.statusBar().showMessage(
+                f"图层剥离失败：{error}", 8000
+            ),
+        )
+        self._editor_page.toolbar.set_active_tool("select")
+
+    def _on_picture_moved(self, layer_id: str, center_x: float, center_y: float) -> None:
+        editor = self._model.composition_editor
+        if editor is None or self._task_runner is None:
+            return
+        self._task_runner.submit(
+            lambda: editor.move_picture_layer(layer_id, center_x, center_y),
+            self._editor_page.apply_edit_result,
+            lambda error: self.statusBar().showMessage(
+                f"移动图层失败：{error}", 6000
+            ),
+        )
+
+    def _on_delete_picture(self, layer_id: str) -> None:
+        editor = self._model.composition_editor
+        if editor is None or self._task_runner is None:
+            return
+        self._task_runner.submit(
+            lambda: editor.remove_picture_layer(layer_id),
+            self._editor_page.apply_edit_result,
+            lambda error: self.statusBar().showMessage(
+                f"删除图层失败：{error}", 6000
+            ),
+        )
+
+    def _on_picture_selected(self, layer_id: str) -> None:
+        self.statusBar().showMessage(
+            "已选中图片图层：拖动移动位置，按 Delete 删除", 4000
+        )
+
     def _on_delete_layer(self, region_id: str) -> None:
         editor = self._model.composition_editor
         if editor is None or self._task_runner is None:
@@ -4732,3 +4875,19 @@ class EditorMainWindow(QMainWindow):
     @property
     def undo_stack(self) -> QUndoStack:
         return self._undo_stack
+
+def _rect_erase_mask(
+    width: int,
+    height: int,
+    left: int,
+    top: int,
+    right: int,
+    bottom: int,
+) -> EraseMask:
+    data = bytearray(width * height)
+    span = max(0, right - left)
+    for y in range(max(0, top), min(height, bottom)):
+        start = y * width + left
+        data[start : start + span] = b"\xff" * span
+    return EraseMask(width, height, bytes(data))
+

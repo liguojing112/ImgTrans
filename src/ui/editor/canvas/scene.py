@@ -30,6 +30,7 @@ from .image_item import BackgroundImageItem
 from .layer_item import TextLayerItem, WatermarkLayerItem
 from .manual_selection_item import ManualSelectionItem
 from .ocr_item import OcrRegionItem
+from .picture_item import PictureLayerItem
 
 
 class EditorScene(QGraphicsScene):
@@ -51,6 +52,10 @@ class EditorScene(QGraphicsScene):
     add_text_at = Signal(object)
     # Delete 键删除当前选中的文字图层
     layer_delete_requested = Signal(str)
+    # 图片图层（框选剥离）：选中 / 移动 / 删除
+    picture_selected = Signal(str)
+    picture_moved = Signal(str, float, float)
+    picture_delete_requested = Signal(str)
 
     def __init__(self, readonly: bool = False) -> None:
         super().__init__()
@@ -61,6 +66,7 @@ class EditorScene(QGraphicsScene):
         self._ocr_items: dict[str, OcrRegionItem] = {}
         self._regions_visible = True
         self._watermark_items: dict[str, WatermarkLayerItem] = {}
+        self._picture_items: dict[str, PictureLayerItem] = {}
         self._erase_mask_image: QImage | None = None
         self._mask_visible = True
         self._scene_width = 800
@@ -119,6 +125,7 @@ class EditorScene(QGraphicsScene):
         self._ocr_items.clear()
         self._regions_visible = True
         self._watermark_items.clear()
+        self._picture_items.clear()
 
         asset = document.asset
         self._scene_width = asset.width
@@ -288,6 +295,30 @@ class EditorScene(QGraphicsScene):
 
     # —— 选择 ——
 
+    def set_picture_layers(self, pictures) -> None:
+        """同步画布上的图片图层图形项（框选剥离出来的元素）。"""
+        pictures = tuple(pictures or ())
+        wanted = {picture.layer_id for picture in pictures}
+        for layer_id in list(self._picture_items):
+            if layer_id not in wanted:
+                item = self._picture_items.pop(layer_id)
+                self.removeItem(item)
+        for picture in pictures:
+            item = self._picture_items.get(picture.layer_id)
+            if item is None:
+                item = PictureLayerItem(picture)
+                item.moved.connect(self.picture_moved.emit)
+                self.addItem(item)
+                self._picture_items[picture.layer_id] = item
+            else:
+                item.update_layer(picture)
+
+    def select_picture(self, layer_id: str) -> None:
+        self.clear_selection()
+        item = self._picture_items.get(layer_id)
+        if item is not None:
+            item.setSelected(True)
+
     def select_layer(self, region_id: str) -> None:
         self.clear_selection()
         item = self._layer_items.get(region_id)
@@ -301,6 +332,8 @@ class EditorScene(QGraphicsScene):
             item.setSelected(True)
 
     def clear_selection(self) -> None:
+        for item in self._picture_items.values():
+            item.setSelected(False)
         for item in self._layer_items.values():
             item.setSelected(False)
         for item in self._watermark_items.values():
@@ -444,6 +477,11 @@ class EditorScene(QGraphicsScene):
     def keyPressEvent(self, event: QKeyEvent) -> None:
         # Delete 键删除选中的文字图层（正在编辑文字时焦点在输入框，不会走到这里）
         if event.key() == Qt.Key.Key_Delete:
+            for item in self._picture_items.values():
+                if item.isSelected():
+                    self.picture_delete_requested.emit(item.layer_id)
+                    event.accept()
+                    return
             for item in self._layer_items.values():
                 if item.isSelected():
                     self.layer_delete_requested.emit(item.region_id)
@@ -559,6 +597,15 @@ class EditorScene(QGraphicsScene):
             ),
             None,
         )
+        if clicked is None:
+            for item in self._picture_items.values():
+                if item.contains(item.mapFromScene(pos)):
+                    self.clear_selection()
+                    item.setSelected(True)
+                    self.picture_selected.emit(item.layer_id)
+                    clicked = item
+                    clicked_kind = "picture"
+                    break
         if (
             clicked is None
             and selected_layer is not None
@@ -592,6 +639,8 @@ class EditorScene(QGraphicsScene):
                 self.clear_selection()
                 clicked.setSelected(True)
                 self.watermark_selected.emit(clicked.region_id)
+            elif clicked_kind == "picture":
+                pass  # 已在命中时选中并发出 picture_selected
             elif clicked_kind == "ocr":
                 pass  # 已高亮并联动
             elif not clicked.isSelected():

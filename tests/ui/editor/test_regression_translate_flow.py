@@ -937,7 +937,7 @@ def test_editor_left_toolbar_has_comfortable_click_targets():
     try:
         assert toolbar.width() == 88
         buttons = toolbar.findChildren(QPushButton, "toolButton")
-        assert len(buttons) == 10
+        assert len(buttons) == 11
         assert "matting" not in toolbar.buttons
         assert all(button.width() == 72 and button.height() == 44 for button in buttons)
         assert list(toolbar.buttons) == [
@@ -946,6 +946,7 @@ def test_editor_left_toolbar_has_comfortable_click_targets():
             "add_text",
             "manual_translate",
             "ai_erase",
+            "extract_layer",
             "crop",
             "layers",
             "watermark",
@@ -4518,5 +4519,38 @@ def test_portal_entry_opens_window_with_configured_link():
         window._open_portal_window()
         assert window._portal_window is not None
         window._portal_window.close()
+    finally:
+        window.close()
+
+
+def test_extract_layer_creates_picture_and_repairs_background():
+    """框选剥离：生成可移动图片图层，原区域背景走修复；Delete 可删除。"""
+    from src.domain.layout import TextBox
+
+    QApplication.instance() or QApplication(["extract-layer-test"])
+    source = _document()  # 190x72，深色块 18..49 x 18..171
+    window = EditorMainWindow(
+        import_image=object(),
+        task_runner=ImmediateTaskRunner(),
+        create_composition_editor=CreateCompositionEditor(
+            QtBasicTextLayoutAdapter("Arial"),
+            QtTextRenderer(),
+        ),
+        repair_selection=RepairSelection(FakeRepairAdapter()),
+    )
+    try:
+        window._on_image_loaded(source)
+        assert window._ensure_composition_editor()
+
+        window._on_extract_layer(TextBox(90, 34, 40, 24))
+
+        editor = window._model.composition_editor
+        assert editor is not None
+        assert len(editor.pictures) == 1
+        picture = editor.pictures[0]
+        assert (picture.width, picture.height) == (40, 24)
+
+        window._on_delete_picture(picture.layer_id)
+        assert editor.pictures == ()
     finally:
         window.close()

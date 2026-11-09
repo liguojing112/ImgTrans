@@ -128,7 +128,7 @@ def test_adapter_uses_serif_family_when_classifier_says_serif(monkeypatch) -> No
     QApplication.instance() or QApplication(["font-style-test"])
     calls: list = []
     monkeypatch.setattr(
-        renderer_module, "_estimate_serif", lambda document, region: True
+        renderer_module, "_estimate_font_style", lambda document, region: "serif"
     )
     monkeypatch.setattr(
         renderer_module,
@@ -150,8 +150,8 @@ def test_adapter_skips_source_matching_when_user_font_selected(monkeypatch) -> N
     called: list = []
     monkeypatch.setattr(
         renderer_module,
-        "_estimate_serif",
-        lambda document, region: called.append(1) or True,
+        "_estimate_font_style",
+        lambda document, region: called.append(1) or "serif",
     )
     adapter = QtBasicTextLayoutAdapter("Arial")
     layout = adapter.layout(_text_document(), _ocr(_region()), _translation())
@@ -166,7 +166,7 @@ def test_adapter_respects_match_source_font_switch(monkeypatch) -> None:
     QApplication.instance() or QApplication(["font-style-test"])
     seen: list = []
     monkeypatch.setattr(
-        renderer_module, "_estimate_serif", lambda document, region: True
+        renderer_module, "_estimate_font_style", lambda document, region: "serif"
     )
     monkeypatch.setattr(
         renderer_module,
@@ -196,7 +196,7 @@ def test_adapter_prefers_loaded_font_for_plain_text(monkeypatch) -> None:
 
     QApplication.instance() or QApplication(["font-style-test"])
     monkeypatch.setattr(
-        renderer_module, "_estimate_serif", lambda document, region: False
+        renderer_module, "_estimate_font_style", lambda document, region: "sans"
     )
     adapter = QtBasicTextLayoutAdapter()
     adapter.set_preferred_font("MyLoadedFont")
@@ -211,7 +211,7 @@ def test_adapter_preferred_font_does_not_override_serif(monkeypatch) -> None:
 
     QApplication.instance() or QApplication(["font-style-test"])
     monkeypatch.setattr(
-        renderer_module, "_estimate_serif", lambda document, region: True
+        renderer_module, "_estimate_font_style", lambda document, region: "serif"
     )
     monkeypatch.setattr(
         renderer_module,
@@ -231,7 +231,7 @@ def test_user_font_beats_preferred_font(monkeypatch) -> None:
 
     QApplication.instance() or QApplication(["font-style-test"])
     monkeypatch.setattr(
-        renderer_module, "_estimate_serif", lambda document, region: False
+        renderer_module, "_estimate_font_style", lambda document, region: "sans"
     )
     adapter = QtBasicTextLayoutAdapter("Arial")
     adapter.set_preferred_font("MyLoadedFont")
@@ -249,3 +249,90 @@ def test_auto_font_preferences_roundtrip(tmp_path) -> None:
     assert JsonAutoFontPreferences(tmp_path / "prefs.json").load() == "SourcedHan"
     prefs.save(None)
     assert JsonAutoFontPreferences(tmp_path / "prefs.json").load() is None
+
+
+def test_estimate_font_style_detects_kai_song_and_sans() -> None:
+    """三分类：楷体→kai，宋体→serif，黑体→sans（大字号）。"""
+    from src.infrastructure.text_renderer import _estimate_font_style
+
+    QApplication.instance() or QApplication(["font-style-test"])
+    assert _estimate_font_style(_text_document(_SIMSUN), _region()) == "serif"
+    assert _estimate_font_style(_text_document(_SIMHEI), _region()) == "sans"
+
+
+def test_estimate_font_style_detects_kaiti() -> None:
+    kaiti = "C:/Windows/Fonts/simkai.ttf"
+    if not Path(kaiti).is_file():
+        pytest.skip("需要 Windows 楷体字体")
+    from src.infrastructure.text_renderer import _estimate_font_style
+
+    QApplication.instance() or QApplication(["font-style-test"])
+    assert _estimate_font_style(_text_document(kaiti), _region()) == "kai"
+
+
+def test_resolve_kai_font_prefers_user_font() -> None:
+    from src.platform.fonts import resolve_kai_font_details
+
+    resolution = resolve_kai_font_details("zh-Hans", "MyKaiFont")
+    assert resolution.family == "MyKaiFont"
+
+
+def test_adapter_uses_kai_font_when_classifier_says_kai(monkeypatch) -> None:
+    import src.infrastructure.text_renderer as renderer_module
+
+    QApplication.instance() or QApplication(["font-style-test"])
+    calls: list = []
+    monkeypatch.setattr(
+        renderer_module, "_estimate_font_style", lambda document, region: "kai"
+    )
+    monkeypatch.setattr(
+        renderer_module,
+        "resolve_kai_font_details",
+        lambda language, preferred: calls.append((language, preferred))
+        or FontResolution(language, "KaiFixture", False, None),
+    )
+    adapter = QtBasicTextLayoutAdapter()
+    adapter.set_kai_font("MyKaiFont")
+    layout = adapter.layout(_text_document(), _ocr(_region()), _translation())
+
+    assert calls == [("en", "MyKaiFont")]
+    assert layout.layers[0].style.font_family == "KaiFixture"
+
+
+def test_adapter_kai_disabled_falls_back_to_default(monkeypatch) -> None:
+    import src.infrastructure.text_renderer as renderer_module
+
+    QApplication.instance() or QApplication(["font-style-test"])
+    seen: list = []
+    monkeypatch.setattr(
+        renderer_module, "_estimate_font_style", lambda document, region: "kai"
+    )
+    monkeypatch.setattr(
+        renderer_module,
+        "resolve_style_font_details",
+        lambda language, serif: seen.append(serif)
+        or FontResolution(language, "SansFixture", False, None),
+    )
+    adapter = QtBasicTextLayoutAdapter()
+    adapter.set_kai_recognition(False)
+    layout = adapter.layout(_text_document(), _ocr(_region()), _translation())
+
+    assert seen == [False]
+    assert layout.layers[0].style.font_family == "SansFixture"
+
+
+def test_kai_preferences_roundtrip(tmp_path) -> None:
+    from src.infrastructure.user_preferences import (
+        JsonKaiFontPreferences,
+        JsonKaiRecognitionPreferences,
+    )
+
+    font_prefs = JsonKaiFontPreferences(tmp_path / "prefs.json")
+    assert font_prefs.load() is None
+    font_prefs.save("MyKai")
+    assert JsonKaiFontPreferences(tmp_path / "prefs.json").load() == "MyKai"
+
+    recognition = JsonKaiRecognitionPreferences(tmp_path / "prefs.json")
+    assert recognition.load() is True
+    recognition.save(False)
+    assert JsonKaiRecognitionPreferences(tmp_path / "prefs.json").load() is False

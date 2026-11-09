@@ -719,3 +719,51 @@ def test_add_layer_at_click_position_and_clamped_to_canvas() -> None:
     half_height = layer.box.height / 2
     assert layer.box.center_x == pytest.approx(half_width)
     assert layer.box.center_y == pytest.approx(half_height)
+
+
+def test_extracted_picture_layer_composited_moved_and_removed() -> None:
+    """框选剥离的图片图层：合成到画面、可移动、可删除，支持撤销。"""
+    from src.domain.composition import PictureLayer
+    from src.domain.inpainting import EraseMask
+
+    QApplication.instance() or QApplication(["picture-layer-test"])
+    background = _background()  # 180x80
+    renderer = QtTextRenderer()
+    empty = TextLayout(())
+    initial = renderer.render(background, empty)
+    editor = CreateCompositionEditor(
+        QtBasicTextLayoutAdapter(), renderer
+    ).execute(background, initial, empty)
+
+    red = bytes([220, 30, 30] * (20 * 10))
+    picture = PictureLayer(
+        "picture-1", red, 20, 10, center_x=50, center_y=30
+    )
+    mask_data = bytearray(180 * 80)
+    for y in range(25, 35):
+        mask_data[y * 180 + 40 : y * 180 + 60] = b"\xff" * 20
+    mask = EraseMask(180, 80, bytes(mask_data))
+    edited = editor.add_extracted_picture(picture, background, mask)
+
+    pixels = np.frombuffer(edited.document.pixels, np.uint8).reshape(80, 180, 3)
+    assert tuple(pixels[30, 50]) == (220, 30, 30)
+    assert editor.pictures == (picture,)
+
+    moved = editor.move_picture_layer("picture-1", 120, 50)
+    pixels = np.frombuffer(moved.document.pixels, np.uint8).reshape(80, 180, 3)
+    assert tuple(pixels[50, 120]) == (220, 30, 30)
+
+    removed = editor.remove_picture_layer("picture-1")
+    assert editor.pictures == ()
+    pixels = np.frombuffer(removed.document.pixels, np.uint8).reshape(80, 180, 3)
+    assert tuple(pixels[50, 120]) != (220, 30, 30)
+
+    undone = editor.undo()
+    assert [item.layer_id for item in editor.pictures] == ["picture-1"]
+
+
+def test_picture_layer_rejects_mismatched_pixels() -> None:
+    from src.domain.composition import PictureLayer
+
+    with pytest.raises(ValueError):
+        PictureLayer("p", b"\x00" * 10, 5, 5, 0, 0)

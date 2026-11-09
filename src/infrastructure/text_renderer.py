@@ -39,6 +39,7 @@ from src.domain.layout import (
 from src.domain.ocr import OcrResult, TextRegion
 from src.domain.translation import TranslationResult, TranslationStatus, TranslationUnit
 from src.platform.fonts import (
+    resolve_kai_font_details,
     resolve_style_font_details,
     resolve_system_font,
     resolve_system_font_details,
@@ -59,6 +60,9 @@ class QtBasicTextLayoutAdapter:
         self._match_source_font = True
         # 自动匹配的首选字体（用户载入的外部字体）：无衬线场景优先使用
         self._preferred_font: str | None = None
+        # 楷体类原图识别与楷体译文字体（实验特性，可在翻译设置关闭）
+        self._kai_recognition = True
+        self._kai_font: str | None = None
 
     def set_font_family(self, font_family: str | None) -> None:
         self._font_family = font_family
@@ -68,6 +72,12 @@ class QtBasicTextLayoutAdapter:
 
     def set_preferred_font(self, font_family: str | None) -> None:
         self._preferred_font = font_family or None
+
+    def set_kai_recognition(self, enabled: bool) -> None:
+        self._kai_recognition = bool(enabled)
+
+    def set_kai_font(self, font_family: str | None) -> None:
+        self._kai_font = font_family or None
 
     def layout(
         self,
@@ -132,12 +142,21 @@ class QtBasicTextLayoutAdapter:
                 resolution = None
                 font_family = self._font_family
             else:
-                # 逐区域按原图文字风格选字体族（衬线类原图配衬线译文），
+                # 逐区域按原图文字风格选字体族：宋体类→衬线，楷体类→楷体，
                 # 分类不可靠时保守回退无衬线默认字体
-                serif = self._match_source_font and _estimate_serif(source, region)
-                if serif:
+                style = (
+                    _estimate_font_style(source, region)
+                    if self._match_source_font
+                    else "sans"
+                )
+                if style == "serif":
                     resolution = resolve_style_font_details(
                         unit.target_language, True
+                    )
+                    font_family = resolution.family
+                elif style == "kai" and self._kai_recognition:
+                    resolution = resolve_kai_font_details(
+                        unit.target_language, self._kai_font
                     )
                     font_family = resolution.family
                 elif self._preferred_font is not None:
@@ -2816,11 +2835,20 @@ def _estimate_serif(
     document: ImageDocument,
     region: TextRegion,
 ) -> bool:
-    """从原图文字区域估计是否为衬线（宋体/Time 类）风格。
+    return _estimate_font_style(document, region) == "serif"
+
+
+def _estimate_font_style(
+    document: ImageDocument,
+    region: TextRegion,
+) -> str:
+    """从原图文字区域估计字体风格：serif（宋体类）/ kai（楷体类）/ sans（黑体类）。
 
     衬线字体横画细、竖画粗：水平扫描线上的连续墨迹段（≈竖笔画宽度）
-    中位数明显大于垂直扫描线上的（≈横画厚度）。无衬线字体两者接近。
-    小字号量化噪声大，一律保守判为无衬线，避免误换字体。
+    中位数明显大于垂直扫描线上的（≈横画厚度）。
+    楷体与黑体在像素特征上区分度有限（实测笔画宽度变异仅差 0.03~0.1），
+    只有较大字号且笔画较细、粗细较均匀时才判为楷体；不确定时保守判为
+    无衬线，避免误换字体。
     """
     channels = 4 if document.mode == "RGBA" else 3
     pixels = np.frombuffer(document.pixels, dtype=np.uint8).reshape(
@@ -2837,7 +2865,7 @@ def _estimate_serif(
     patch = pixels[y0:y1, x0:x1]
     height, width = patch.shape[:2]
     if height < 26 or width < 12:
-        return False
+        return "sans"
     edge = max(1, min(height, width) // 8)
     border = np.concatenate(
         (
@@ -2854,7 +2882,7 @@ def _estimate_serif(
     )
     contrast = float(np.linalg.norm(foreground - background))
     if contrast < 70:
-        return False
+        return "sans"
     values = patch.astype(np.float32)
     foreground_distance = np.linalg.norm(values - foreground, axis=2)
     background_distance = np.linalg.norm(values - background, axis=2)
@@ -2863,13 +2891,25 @@ def _estimate_serif(
         & (background_distance > max(24, contrast * 0.18))
     ).astype(np.uint8)
     if not ink.any():
-        return False
+        return "sans"
     horizontal = _median_run_length(ink, axis=1)
     vertical = _median_run_length(ink, axis=0)
     if horizontal <= 0 or vertical <= 0:
-        return False
-    return horizontal / vertical >= 1.5
-
+        return "sans"
+    if horizontal / vertical >= 1.75:
+        return "serif"
+    ys_ink, _ = np.nonzero(ink)
+    text_height = int(ys_ink.max() - ys_ink.min()) + 1
+    if height >= 40 and text_height >= 30:
+        distance = cv2.distanceTransform(ink, cv2.DIST_L2, 3)
+        thickness = distance[ink > 0] * 2
+        if thickness.size:
+            mean_thickness = float(thickness.mean())
+            variation = float(thickness.std() / max(mean_thickness, 1e-6))
+            relative = mean_thickness / max(text_height, 1)
+            if variation <= 0.33 and relative <= 0.066:
+                return "kai"
+    return "sans"
 
 def _median_run_length(ink: np.ndarray, axis: int) -> float:
     """沿扫描线统计连续墨迹段长度的中位数（粗估笔画厚度）。"""

@@ -132,6 +132,7 @@ class EditorPage(QWidget):
     compare_hold_finished = Signal()
     toggle_layers_requested = Signal()
     delete_requested = Signal(str)  # region_id
+    extract_layer_requested = Signal(object)  # TextBox
     duplicate_requested = Signal(str)  # region_id
     add_layer_requested = Signal(str)  # default text
     add_layer_at_requested = Signal(str, float, float)  # default text, center_x, center_y
@@ -856,6 +857,12 @@ class EditorPage(QWidget):
                 self.scene.set_text_layout(edit_result.layout)
             # set_document 会清空 OCR 识别框，编辑后恢复，避免识别框消失
             self._restore_ocr_regions()
+            pictures = (
+                self._model.composition_editor.pictures
+                if self._model.composition_editor is not None
+                else ()
+            )
+            self.scene.set_picture_layers(pictures)
             self.layer_state_panel.set_composition(
                 edit_result.layout,
                 getattr(edit_result, "watermarks", ()),
@@ -940,10 +947,13 @@ class EditorPage(QWidget):
         )
 
     def _on_toolbar_tool_changed(self, tool_id: str) -> None:
+        self.view.unsetCursor()
         if tool_id != "ai_erase":
             self.scene.set_mask_brush(None)
             self.scene.set_edit_mask_visible(False)
-        if tool_id not in {"ai_erase", "crop", "manual_translate"}:
+        if tool_id == "extract_layer":
+            self.scene.set_area_selection_mode("extract_layer")
+        elif tool_id not in {"ai_erase", "crop", "manual_translate"}:
             self.scene.set_area_selection_mode(None)
         if tool_id != "manual_translate":
             self.scene.set_manual_selection_preview(None)
@@ -1005,6 +1015,8 @@ class EditorPage(QWidget):
             self._show_layer_tool("crop")
         elif mode == "format_brush":
             self._apply_brush_rect(box)
+        elif mode == "extract_layer":
+            self.extract_layer_requested.emit(box)
 
     def _on_area_selection_cleared(self, mode: str) -> None:
         if mode == "crop":
@@ -1028,9 +1040,12 @@ class EditorPage(QWidget):
         self.scene.set_area_selection_mode("add_text")
         self.toolbar.set_active_tool("add_text")
         self.right_tabs.setCurrentIndex(2)
+        # 光标变十字，提示用户当前处于「点哪里放哪里」的放置模式
+        self.view.setCursor(Qt.CursorShape.CrossCursor)
 
     def _on_add_text_at(self, point) -> None:
         # 放置完成：工具按钮复位为「选择」，避免误以为还在放置模式
+        self.view.unsetCursor()
         self.toolbar.set_active_tool("select")
         self.add_layer_at_requested.emit("新文本", float(point.x()), float(point.y()))
 

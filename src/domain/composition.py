@@ -101,10 +101,32 @@ class WatermarkLayer:
 
 
 @dataclass(frozen=True, slots=True)
+class PictureLayer:
+    """从图片中剥离出来的图片图层（矩形像素块，可移动）。"""
+
+    layer_id: str
+    pixels: bytes
+    width: int
+    height: int
+    center_x: float
+    center_y: float
+    rotation_degrees: float = 0.0
+    visible: bool = True
+
+    def __post_init__(self) -> None:
+        channels = 4 if len(self.pixels) == self.width * self.height * 4 else None
+        if channels is None and len(self.pixels) != self.width * self.height * 3:
+            raise ValueError("Picture layer pixels do not match its size")
+        if self.width <= 0 or self.height <= 0:
+            raise ValueError("Picture layer size must be positive")
+
+
+@dataclass(frozen=True, slots=True)
 class CompositionState:
     layout: TextLayout
     patches: tuple[BackgroundPatch, ...] = ()
     watermarks: tuple[WatermarkLayer, ...] = ()
+    pictures: tuple[PictureLayer, ...] = ()
     viewport: CropViewport | None = None
     base_document: ImageDocument | None = None
     reference_document: ImageDocument | None = None
@@ -116,6 +138,9 @@ class CompositionState:
         watermark_ids = tuple(item.watermark_id for item in self.watermarks)
         if len(watermark_ids) != len(set(watermark_ids)):
             raise ValueError("Watermark IDs must be unique")
+        picture_ids = tuple(item.layer_id for item in self.pictures)
+        if len(picture_ids) != len(set(picture_ids)):
+            raise ValueError("Picture layer IDs must be unique")
 
 
 @dataclass(frozen=True, slots=True)

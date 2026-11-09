@@ -26,6 +26,8 @@ _KNOWN_FIELDS = {
     "translation_paragraph_mode",
     "translation_match_source_font",
     "translation_auto_font",
+    "translation_kai_font",
+    "translation_kai_recognition",
 }
 
 
@@ -363,6 +365,47 @@ class JsonAutoFontPreferences:
             payload.pop(self._KEY, None)
         else:
             payload[self._KEY] = value.strip()
+        self._file.save(payload)
+
+
+class JsonKaiFontPreferences:
+    """楷体类原图的译文字体族；None 表示使用系统楷体（或随包楷体字体）。"""
+
+    _KEY = "translation_kai_font"
+
+    def __init__(self, path: Path) -> None:
+        self._file = _JsonPreferencesFile(path)
+
+    def load(self) -> str | None:
+        value = self._file.load().get(self._KEY)
+        if not isinstance(value, str) or not value.strip():
+            return None
+        return value.strip()
+
+    def save(self, value: str | None) -> None:
+        payload = self._file.load()
+        if value is None or not value.strip():
+            payload.pop(self._KEY, None)
+        else:
+            payload[self._KEY] = value.strip()
+        self._file.save(payload)
+
+
+class JsonKaiRecognitionPreferences:
+    """楷体原图识别开关（实验特性）；默认开启。"""
+
+    _KEY = "translation_kai_recognition"
+
+    def __init__(self, path: Path) -> None:
+        self._file = _JsonPreferencesFile(path)
+
+    def load(self) -> bool:
+        value = self._file.load().get(self._KEY)
+        return value if isinstance(value, bool) else True
+
+    def save(self, enabled: bool) -> None:
+        payload = self._file.load()
+        payload[self._KEY] = bool(enabled)
         self._file.save(payload)
 
 

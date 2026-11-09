@@ -16,6 +16,7 @@ class EditorToolBar(QFrame):
         ("text_regions", "文字区域", "显示并编辑识别到的文字区域"),
         ("manual_translate", "框选翻译", "框选漏翻区域并进行识别和翻译"),
         ("ai_erase", "AI消除", "查看或调整文字擦除区域"),
+        ("extract_layer", "图层剥离", "框选图中的元素，剥离为可移动图层并补全背景"),
         ("crop", "裁剪", "裁剪图片"),
         ("layers", "图层", "查看文字图层状态"),
         ("watermark", "水印", "添加或管理水印"),
