@@ -111,6 +111,17 @@ class EditorModel(QObject):
         self.active_document_changed.emit(doc_id)
         return doc_id
 
+    def pin_document(self, doc_id: str) -> None:
+        """把指定图片移到工作台列表最前面（不改变当前编辑中的图片）。"""
+        index = next(
+            (i for i, item in enumerate(self._documents) if item.doc_id == doc_id),
+            None,
+        )
+        if index is None or index == 0:
+            return
+        self._documents.insert(0, self._documents.pop(index))
+        self.documents_changed.emit()
+
     def remove_document(self, doc_id: str) -> None:
         self._documents = [d for d in self._documents if d.doc_id != doc_id]
         if self._active_document_id == doc_id:

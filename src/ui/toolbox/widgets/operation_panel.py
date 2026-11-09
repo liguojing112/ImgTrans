@@ -9,7 +9,6 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QAbstractSpinBox,
     QCheckBox,
-    QColorDialog,
     QComboBox,
     QFontComboBox,
     QFrame,
@@ -27,6 +26,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from src.ui.color_picker_dialog import pick_color
 from src.ui.toolbox.tool_box_model import OperationParams, WatermarkItem
 
 
@@ -568,11 +568,16 @@ class OperationPanel(QFrame):
     def _on_pick_color(self) -> None:
         from PySide6.QtGui import QColor
         current = QColor(self._wm_color_value)
-        color = QColorDialog.getColor(current, self, "选择水印颜色")
-        if color.isValid():
-            self._wm_color_value = color.name().upper()
-            self._update_color_label()
-            self._on_wm_field_changed()
+        rgb = pick_color(
+            self,
+            (current.red(), current.green(), current.blue()),
+            "选择水印颜色",
+        )
+        if rgb is None:
+            return
+        self._wm_color_value = QColor(*rgb).name().upper()
+        self._update_color_label()
+        self._on_wm_field_changed()
 
     def _update_color_label(self) -> None:
         from PySide6.QtGui import QColor

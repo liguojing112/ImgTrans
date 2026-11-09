@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable, Sequence
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 from threading import Event, Lock
 from typing import Protocol
@@ -18,9 +19,35 @@ from src.domain.batch import (
     BatchStatus,
 )
 from src.domain.image import ImageDocument
+from src.domain.inpainting import RepairOutcome
 from src.domain.job import ImageStage, JobCancelled
-from src.domain.ocr import HighRecallOcrOptions, OcrMode
-from src.domain.translation import TranslationSelection
+from src.domain.layout import TextLayout
+from src.domain.ocr import HighRecallOcrOptions, OcrMode, OcrResult
+from src.domain.translation import TranslationResult, TranslationSelection
+
+
+_log = logging.getLogger("imgtrans")
+
+
+@dataclass(frozen=True, slots=True)
+class BatchEditableState:
+    """批量项的翻译中间结果。
+
+    成品 PNG 只能看不能改；OCR、译文、文字布局与去字底图成对保存，
+    才能把成品送回工作台后继续编辑图层。
+    """
+
+    ocr: OcrResult
+    translation: TranslationResult
+    layout: TextLayout
+    repair: RepairOutcome
+
+
+@dataclass(frozen=True, slots=True)
+class BatchOcrState:
+    """仅 OCR 批次项：只带回识别结果，没有译文与图层。"""
+
+    ocr: OcrResult
 
 
 class BatchWorkflow(Protocol):
@@ -251,6 +278,7 @@ class RunBatch:
             result_ref = self._result_store.save(
                 batch_id, item.item_id, result.document
             )
+            self._save_editable_state(batch_id, item.item_id, result)
             return replace(
                 item,
                 status=BatchItemStatus.COMPLETED,
@@ -276,6 +304,35 @@ class RunBatch:
                 current_stage=None,
                 error=str(error) or type(error).__name__,
             )
+
+    def _save_editable_state(
+        self,
+        batch_id: str,
+        item_id: str,
+        result: object,
+    ) -> None:
+        # 工作流可能只返回渲染图（如压测用的透传工作流），此时没有可编辑状态
+        ocr = getattr(result, "ocr", None)
+        translation = getattr(result, "translation", None)
+        layout = getattr(result, "layout", None)
+        repair = getattr(result, "repair", None)
+        if ocr is not None and translation is None and layout is None and repair is None:
+            # 仅 OCR 批次：只存识别结果，供导出文本与工作台查看
+            state: object = BatchOcrState(ocr)
+        elif (
+            ocr is None
+            or translation is None
+            or layout is None
+            or repair is None
+        ):
+            return
+        else:
+            state = BatchEditableState(ocr, translation, layout, repair)
+        try:
+            self._result_store.save_editable(batch_id, item_id, state)
+        except Exception:
+            # 可编辑状态是增强项：缓存写失败只让该图退回「仅成品图」
+            _log.warning("批量可编辑状态缓存失败 %s", item_id, exc_info=True)
 
     def _stage_changed(
         self,

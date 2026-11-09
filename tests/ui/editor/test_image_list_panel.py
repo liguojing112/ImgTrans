@@ -186,3 +186,35 @@ def test_reclick_after_debounce_window_emits_again(qtbot) -> None:
     panel._on_item_clicked(panel._items["d1"])
 
     assert received == ["d1", "d1"]
+
+
+def test_pin_button_emits_selected_doc_id(qtbot) -> None:
+    app = QApplication.instance() or QApplication(["imglist-pin-test"])
+    panel = ImageListPanel()
+    qtbot.addWidget(panel)
+    panel.show()
+    panel.set_documents([_ref("d1"), _ref("d2", "b.png")])
+    panel.set_active("d2")
+
+    pinned: list[str] = []
+    panel.pin_requested.connect(pinned.append)
+    assert panel._pin_btn.isEnabled()
+    panel._pin_btn.click()
+
+    assert pinned == ["d2"]
+
+
+def test_set_documents_rebuild_does_not_emit_activation(qtbot) -> None:
+    """重建列表（置顶/删除后刷新）不能被当成点击了第一张图。"""
+    app = QApplication.instance() or QApplication(["imglist-rebuild-test"])
+    panel = ImageListPanel()
+    qtbot.addWidget(panel)
+    panel.show()
+    panel.set_documents([_ref("d1"), _ref("d2", "b.png")])
+    panel.set_active("d2")
+
+    activated: list[str] = []
+    panel.document_activated.connect(activated.append)
+    panel.set_documents([_ref("d2", "b.png"), _ref("d1")])
+
+    assert activated == []

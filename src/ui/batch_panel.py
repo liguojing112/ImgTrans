@@ -83,6 +83,7 @@ class BatchPanel(QFrame):
     resume_requested = Signal()
     cancel_requested = Signal()
     export_requested = Signal()
+    export_text_requested = Signal()
     preview_requested = Signal(str)
     send_to_editor_requested = Signal()
 
@@ -109,6 +110,15 @@ class BatchPanel(QFrame):
         layout.addWidget(hint)
 
         target_row = QHBoxLayout()
+        self._mode_label = QLabel("处理模式")
+        target_row.addWidget(self._mode_label)
+        self.mode = QComboBox()
+        self.mode.setObjectName("batchMode")
+        self.mode.addItem("翻译并替换文字", "translate")
+        self.mode.addItem("仅 OCR（只识别文字）", "ocr")
+        self.mode.currentIndexChanged.connect(self._on_mode_changed)
+        target_row.addWidget(self.mode)
+        target_row.addSpacing(18)
         target_row.addWidget(QLabel("目标语言"))
         self.target_language = QComboBox()
         self.target_language.setObjectName("batchTargetLanguage")
@@ -168,7 +178,7 @@ class BatchPanel(QFrame):
         self.progress.setRange(0, 100)
         self.progress.setValue(0)
         layout.addWidget(self.progress)
-        self.status_label = QLabel("添加多张图片后开始批量翻译")
+        self.status_label = QLabel(self._idle_status_text())
         self.status_label.setObjectName("batchStatusLabel")
         self.status_label.setWordWrap(True)
         layout.addWidget(self.status_label)
@@ -218,10 +228,16 @@ class BatchPanel(QFrame):
         self.export_now_button.setObjectName("exportBatchNowButton")
         self.export_now_button.setToolTip("选择导出目录并导出当前勾选的成功图片")
         self.export_now_button.clicked.connect(self.export_requested.emit)
+        self.export_text_button = QPushButton("导出识别文本")
+        self.export_text_button.setObjectName("exportBatchTextButton")
+        self.export_text_button.setToolTip("把勾选成功项的识别结果按图片导出为 .txt")
+        self.export_text_button.clicked.connect(self.export_text_requested.emit)
+        self.export_text_button.setVisible(False)
         export_actions.addWidget(self.select_success_button)
         export_actions.addWidget(self.output_format)
         export_actions.addWidget(self.export_button)
         export_actions.addWidget(self.export_now_button)
+        export_actions.addWidget(self.export_text_button)
         layout.addLayout(export_actions)
         folder_options = QHBoxLayout()
         self.separate_subdirectory = QCheckBox("导出到独立子目录")
@@ -340,6 +356,38 @@ class BatchPanel(QFrame):
     @property
     def selected_ocr_mode(self) -> OcrMode:
         return OcrMode(str(self.ocr_mode.currentData() or OcrMode.STANDARD.value))
+
+    @property
+    def ocr_only(self) -> bool:
+        """当前批处理模式：仅 OCR 识别，不翻译/不渲染。"""
+        return str(self.mode.currentData() or "translate") == "ocr"
+
+    def _on_mode_changed(self, *_args: object) -> None:
+        self._apply_mode_state()
+        if not self._sources:
+            self.status_label.setText(self._idle_status_text())
+        self.set_available(self._scheduler_available, self._running)
+
+    def _apply_mode_state(self) -> None:
+        ocr_only = self.ocr_only
+        self.start_button.setText("开始批量识别" if ocr_only else "开始批量翻译")
+        self.mode.setEnabled(not self._running)
+        self.target_language.setEnabled(not ocr_only and not self._running)
+        self.export_text_button.setVisible(ocr_only)
+
+    def _idle_status_text(self) -> str:
+        return (
+            "添加多张图片后开始批量识别"
+            if self.ocr_only
+            else "添加多张图片后开始批量翻译"
+        )
+
+    def set_ocr_mode_available(self, available: bool) -> None:
+        """没有接入 OCR 批次调度器的入口隐藏「仅 OCR」模式。"""
+        if not available and self.ocr_only:
+            self.mode.setCurrentIndex(0)
+        self.mode.setVisible(available)
+        self._mode_label.setVisible(available)
 
     def set_target_language(self, language_code: str) -> None:
         index = self.target_language.findData(language_code)
@@ -484,6 +532,13 @@ class BatchPanel(QFrame):
             and bool(self.selected_result_ids)
             and not running
         )
+        self.export_text_button.setEnabled(
+            scheduler_available
+            and has_success
+            and bool(self.selected_result_ids)
+            and not running
+        )
+        self._apply_mode_state()
 
     def set_error(self, message: str) -> None:
         self.pause_button.setEnabled(False)
@@ -510,7 +565,7 @@ class BatchPanel(QFrame):
         self._known_completed.clear()
         self.items.clear()
         self.progress.setValue(0)
-        self.status_label.setText("添加多张图片后开始批量翻译")
+        self.status_label.setText(self._idle_status_text())
         self.pause_button.setText("暂停")
         self.pause_button.setEnabled(False)
         self.set_available(self._scheduler_available, self._running)

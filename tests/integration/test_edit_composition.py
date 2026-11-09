@@ -11,6 +11,7 @@ from src.application.composition import CreateCompositionEditor, transform_image
 from src.domain.composition import ImageTransform
 from src.domain.image import ImageAsset, ImageDocument, ImageFileFormat
 from src.domain.layout import (
+    ColorRun,
     default_arc_path,
     TextAlignment,
     TextBox,
@@ -601,3 +602,120 @@ def test_invisible_text_layer_is_not_rendered_but_remains_in_layout() -> None:
     result = editor.replace_layer(layer)
     assert result.layout.layer_by_id("hidden").visible is False
     assert result.document.pixels == background.pixels
+
+
+def test_replace_layers_many_applies_path_in_one_undo_step() -> None:
+    """批量整层替换能带上文字路径（弧形），且只产生一条撤销记录。"""
+    from dataclasses import replace
+
+    from src.domain.layout import ArcTextPath, PathPoint
+
+    QApplication.instance() or QApplication(["layers-many-test"])
+    background = _background()
+    base_style = TextStyle(resolve_system_font("en"), 20, (20, 30, 40))
+    r1 = TextLayer("r1", "AAA", TextBox(50, 40, 80, 30), base_style)
+    r2 = TextLayer("r2", "BBB", TextBox(140, 40, 80, 30), base_style)
+    renderer = QtTextRenderer()
+    layout = TextLayout((r1, r2))
+    initial = renderer.render(background, layout)
+    editor = CreateCompositionEditor(QtBasicTextLayoutAdapter(), renderer).execute(
+        background, initial, layout
+    )
+
+    arc = ArcTextPath(PathPoint(20, 40), PathPoint(50, 18), PathPoint(80, 40))
+    replaced = replace(r1, path=arc)
+    result = editor.replace_layers_many([replaced])
+
+    assert result.layout.layer_by_id("r1").path == arc
+    assert result.layout.layer_by_id("r2") == r2
+    assert result.can_undo
+    undone = editor.undo()
+    assert undone.layout.layer_by_id("r1") == r1
+    assert not undone.can_undo
+
+
+def test_replace_text_clears_color_runs() -> None:
+    """文字内容变化后字符区间失效，replace_text 应清掉局部上色。"""
+    QApplication.instance() or QApplication(["color-runs-text-test"])
+    background = _background()
+    layer = TextLayer(
+        "r1",
+        "DOUBLE 11",
+        TextBox(90, 40, 150, 30),
+        TextStyle(resolve_system_font("en"), 18, (10, 20, 30), auto_fit=False),
+        color_runs=(ColorRun(0, 6, (220, 20, 30)),),
+    )
+    renderer = QtTextRenderer()
+    initial_layout = TextLayout((layer,))
+    initial = renderer.render(background, initial_layout)
+    editor = CreateCompositionEditor(
+        QtBasicTextLayoutAdapter(), renderer
+    ).execute(background, initial, initial_layout)
+
+    edited = editor.replace_text("r1", "SUMMER SALE")
+    assert edited.layout.layer_by_id("r1").text == "SUMMER SALE"
+    assert edited.layout.layer_by_id("r1").color_runs == ()
+    undone = editor.undo()
+    assert undone.layout.layer_by_id("r1").color_runs == (
+        ColorRun(0, 6, (220, 20, 30)),
+    )
+
+
+def test_replace_style_keeps_color_runs() -> None:
+    """改样式不动文字内容，局部上色应保留。"""
+    QApplication.instance() or QApplication(["color-runs-style-test"])
+    background = _background()
+    layer = TextLayer(
+        "r1",
+        "DOUBLE 11",
+        TextBox(90, 40, 150, 30),
+        TextStyle(resolve_system_font("en"), 18, (10, 20, 30), auto_fit=False),
+        color_runs=(ColorRun(0, 6, (220, 20, 30)),),
+    )
+    renderer = QtTextRenderer()
+    initial_layout = TextLayout((layer,))
+    initial = renderer.render(background, initial_layout)
+    editor = CreateCompositionEditor(
+        QtBasicTextLayoutAdapter(), renderer
+    ).execute(background, initial, initial_layout)
+
+    edited = editor.replace_style(
+        "r1",
+        TextStyle(
+            layer.style.font_family,
+            24,
+            layer.style.fill_rgb,
+            layer.style.alignment,
+            auto_fit=False,
+        ),
+        layer.box.rotation_degrees,
+    )
+    assert edited.layout.layer_by_id("r1").style.font_size == 24
+    assert edited.layout.layer_by_id("r1").color_runs == (
+        ColorRun(0, 6, (220, 20, 30)),
+    )
+
+
+def test_add_layer_at_click_position_and_clamped_to_canvas() -> None:
+    """新增文字按点击坐标定位；靠近画布边缘时框自动收进画布。"""
+    QApplication.instance() or QApplication(["add-layer-position-test"])
+    background = _background()  # 180x80
+    renderer = QtTextRenderer()
+    empty = TextLayout(())
+    initial = renderer.render(background, empty)
+    editor = CreateCompositionEditor(
+        QtBasicTextLayoutAdapter(), renderer
+    ).execute(background, initial, empty)
+
+    added = editor.add_layer("位置", center_x=100, center_y=40.0)
+    layer = added.layout.layer_by_id(added.affected_region_id)
+    assert layer.box.center_x == pytest.approx(100)
+    assert layer.box.center_y == pytest.approx(40)
+
+    # 点击画布左上角：框中心被收到 half_width/half_height 以内
+    added = editor.add_layer("角落", center_x=2, center_y=2)
+    layer = added.layout.layer_by_id(added.affected_region_id)
+    half_width = layer.box.width / 2
+    half_height = layer.box.height / 2
+    assert layer.box.center_x == pytest.approx(half_width)
+    assert layer.box.center_y == pytest.approx(half_height)

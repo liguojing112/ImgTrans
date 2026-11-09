@@ -15,6 +15,7 @@ from src import __version__
 from src.application.bootstrap import BootstrapApplication
 from src.application.batch import RunBatch
 from src.application.batch_export import ExportBatchSelection
+from src.application.ocr import BatchOcrWorkflow
 from src.application.activation import ActivationCoordinator
 from src.application.composition import CreateCompositionEditor
 from src.application.image_io import ExportImage, ImportImage
@@ -41,6 +42,7 @@ from src.infrastructure.image_limits_config import (
     HttpImageLimitsClient,
     JsonImageLimitsCache,
 )
+from src.infrastructure.portal_config_client import HttpPortalConfigClient
 from src.infrastructure.lama_onnx_adapter import LAMA_MODEL_FILENAME
 from src.infrastructure.activation_client import HttpActivationClient
 from src.infrastructure.mock_translator import MockTranslationAdapter
@@ -54,13 +56,17 @@ from src.infrastructure.rapidocr_models import InstalledRapidOcrModels
 from src.infrastructure.server_translation_adapter import ServerTranslationAdapter
 from src.infrastructure.text_renderer import QtBasicTextLayoutAdapter, QtTextRenderer
 from src.infrastructure.user_preferences import (
+    JsonAutoFontPreferences,
     JsonBrandTermsPreferences,
     JsonEcommercePreferences,
+    JsonFontMatchPreferences,
     JsonFontPreferences,
+    JsonLoadedFontPreferences,
     JsonModelTermsPreferences,
     JsonParagraphModePreferences,
     JsonTerminologyPreferences,
 )
+from src.platform.bundled_fonts import register_bundled_fonts
 from src.platform.paths import PlatformPaths
 from src.platform.credentials import create_platform_credential_store
 from src.platform.qt_runtime import QtRuntimeMonitor, configure_qt_runtime
@@ -141,6 +147,15 @@ def _create_quota_client(base_url: str):
         return None
     from src.infrastructure.quota_client import QuotaClient
     return QuotaClient(base_url)
+
+
+def _register_loaded_fonts(preferences) -> None:
+    """启动时注册用户上次载入的外部字体，保证「译文字体」里能直接选到。"""
+    from PySide6.QtGui import QFontDatabase
+
+    for path in preferences.load():
+        if path.is_file():
+            QFontDatabase.addApplicationFont(str(path))
 
 
 def _with_bundled_models(repository):
@@ -226,6 +241,12 @@ def create_main_window() -> MainWindow:
     erase_mask_builder = BuildEraseMask(PillowMaskRasterizer())
     repair = RepairTranslatedRegions(erase_mask_builder, inpainting)
     layout_adapter = QtBasicTextLayoutAdapter()
+    layout_adapter.set_match_source_font(
+        JsonFontMatchPreferences(preferences_path).load()
+    )
+    layout_adapter.set_preferred_font(
+        JsonAutoFontPreferences(preferences_path).load()
+    )
     renderer = QtTextRenderer()
     workflow = TranslateImage(
         recognize,
@@ -332,9 +353,6 @@ def _install_qt_translator(application: QApplication) -> None:
         application.installTranslator(translator)
 
 
-_shared_instance_memory = None
-
-
 # QtWebEngine 必须在 QApplication 创建之前导入；运行期置 True/False 供
 # 强化翻译功能判断降级（缺组件时保留手动粘链接路径）
 WEBENGINE_AVAILABLE = False
@@ -361,18 +379,44 @@ def _import_webengine() -> bool:
     return _m.WEBENGINE_AVAILABLE
 
 
-def _ensure_single_instance() -> bool:
-    """同一时间只允许一个客户端实例运行（双击多次只开一个窗口）。"""
-    global _shared_instance_memory
-    from PySide6.QtCore import QSharedMemory
+_INSTANCE_KEY = "ImgTransDesktopSingleInstance"
 
-    memory = QSharedMemory("ImgTransDesktopSingleInstance")
-    if memory.attach():
-        return False
-    if not memory.create(1):
-        return False
-    _shared_instance_memory = memory
-    return True
+
+def _start_instance_channel():
+    """单实例守护：重复启动只唤醒已有窗口，不再弹提示框。
+
+    返回 (是否继续启动, 监听对象)。Windows 的命名管道允许多个监听者，
+    因此「是否已有实例」要靠能否连上判断，而不是 listen() 的返回值。
+    """
+    from PySide6.QtNetwork import QLocalServer, QLocalSocket
+
+    socket = QLocalSocket()
+    socket.connectToServer(_INSTANCE_KEY)
+    if socket.waitForConnected(600):
+        socket.write(b"activate")
+        socket.flush()
+        socket.waitForBytesWritten(600)
+        socket.disconnectFromServer()
+        return False, None
+    server = QLocalServer()
+    server.setSocketOptions(QLocalServer.SocketOption.UserAccessOption)
+    server.listen(_INSTANCE_KEY)
+    return True, (server if server.isListening() else None)
+
+
+def _activate_on_request(server, window) -> None:
+    """第二个实例发来唤醒请求：把已打开的窗口带到前台（最小化时先还原）。"""
+    from PySide6.QtCore import Qt
+
+    while server.hasPendingConnections():
+        server.nextPendingConnection()
+    window.setWindowState(
+        (window.windowState() & ~Qt.WindowState.WindowMinimized)
+        | Qt.WindowState.WindowActive
+    )
+    window.show()
+    window.raise_()
+    window.activateWindow()
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -390,18 +434,23 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="launch the new editor UI (under development)",
     )
     args = parser.parse_args(list(argv) if argv is not None else None)
-    if not args.smoke_test and not _ensure_single_instance():
-        from PySide6.QtWidgets import QMessageBox
-
-        app = QApplication.instance() or QApplication(["imgtrans"])
-        QMessageBox.warning(None, "提示", "客户端已在运行，请切换到已打开的窗口")
-        return 0
     configure_qt_runtime()
     application = QApplication.instance() or QApplication(["imgtrans"])
     application.setApplicationName("优译图AI")
+    instance_server = None
+    if not args.smoke_test:
+        should_run, instance_server = _start_instance_channel()
+        if not should_run:
+            # 已有实例在运行：已请求它把窗口带到前台，本进程静默退出
+            return 0
     application.setApplicationVersion(__version__)
     application.setWindowIcon(_application_icon())
     _install_qt_translator(application)
+    try:
+        # 注册随包分发的客户字体，字体下拉里直接可选；失败不影响启动
+        register_bundled_fonts()
+    except Exception:
+        pass
     if args.editor:
         window = _create_editor_window()
     else:
@@ -410,6 +459,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     runtime_monitor.recovery_requested.connect(window.request_runtime_recovery)
     window._runtime_monitor = runtime_monitor
     window.show()
+    if instance_server is not None:
+        instance_server.newConnection.connect(
+            lambda: _activate_on_request(instance_server, window)
+        )
     if args.smoke_test:
         QTimer.singleShot(100, application.quit)
     exit_code = application.exec()
@@ -467,8 +520,20 @@ def _create_editor_window() -> EditorMainWindow:
     ecommerce_terms, ecommerce_prompt = ecommerce_prefs.load()
     font_prefs = JsonFontPreferences(preferences_path)
     saved_font = font_prefs.load()
+    loaded_fonts = JsonLoadedFontPreferences(preferences_path)
+    _register_loaded_fonts(loaded_fonts)
     paragraph_mode_prefs = JsonParagraphModePreferences(preferences_path)
     saved_paragraph_mode = paragraph_mode_prefs.load()
+    font_match_prefs = JsonFontMatchPreferences(preferences_path)
+    saved_match_source_font = font_match_prefs.load()
+    auto_font_prefs = JsonAutoFontPreferences(preferences_path)
+    saved_auto_font = auto_font_prefs.load()
+    portal_client = None
+    if backend_url:
+        try:
+            portal_client = HttpPortalConfigClient(backend_url)
+        except ValueError:
+            portal_client = None
 
     translation_adapter = _create_translation_adapter(
         backend_url,
@@ -534,6 +599,12 @@ def _create_editor_window() -> EditorMainWindow:
         batch_result_store,
         max_active_items=2,
     )
+    run_batch_ocr = RunBatch(
+        import_image,
+        BatchOcrWorkflow(recognize),
+        batch_result_store,
+        max_active_items=2,
+    )
     export_batch_selection = ExportBatchSelection(
         batch_result_store,
         export_image,
@@ -557,15 +628,22 @@ def _create_editor_window() -> EditorMainWindow:
         brand_terms_preferences=brand_terms_prefs,
         model_terms_preferences=model_terms_prefs,
         run_batch=run_batch,
+        run_batch_ocr=run_batch_ocr,
         batch_result_store=batch_result_store,
         export_batch_selection=export_batch_selection,
         terminology_catalog=terminology_catalog,
         terminology_preferences=terminology_prefs,
         ecommerce_preferences=ecommerce_prefs,
         font_preferences=font_prefs,
+        loaded_font_preferences=loaded_fonts,
         translation_font=saved_font,
         paragraph_mode=saved_paragraph_mode,
         paragraph_mode_preferences=paragraph_mode_prefs,
+        match_source_font=saved_match_source_font,
+        match_source_font_preferences=font_match_prefs,
+        auto_font=saved_auto_font,
+        auto_font_preferences=auto_font_prefs,
+        portal_client=portal_client,
         update_ecommerce_translation=getattr(
             translation_adapter,
             "set_ecommerce_override",

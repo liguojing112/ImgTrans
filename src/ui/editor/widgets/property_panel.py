@@ -9,20 +9,18 @@ from __future__ import annotations
 from math import cos, radians, sin
 
 from PySide6.QtCore import QEvent, Qt, Signal
-from PySide6.QtGui import QColor, QFont
 from PySide6.QtWidgets import (
     QApplication,
     QAbstractSpinBox,
     QCheckBox,
-    QColorDialog,
     QComboBox,
     QDoubleSpinBox,
-    QFontComboBox,
     QFormLayout,
     QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMessageBox,
     QPlainTextEdit,
     QPushButton,
     QScrollArea,
@@ -43,6 +41,8 @@ from src.domain.layout import (
     VerticalAlignment,
 )
 from src.domain.language import SUPPORTED_LANGUAGE_CODES
+from src.ui.color_picker_dialog import pick_color
+from src.ui.editor.widgets.translate_controls import translation_font_choices
 from src.ui.languages import LANGUAGE_LABELS
 
 _DEBOUNCE_MS = 300
@@ -68,13 +68,17 @@ class PropertyPanel(QFrame):
     style_brush_applied = Signal(str, str, dict)
     # 格式刷框选模式：True 时画布应进入拖拽框选状态，False 时退出
     style_brush_rect_mode_changed = Signal(bool)
+    # 片段上色：(region_id, start, end, 选中文本, rgb) — 给一句话里的局部字符换色
+    color_run_requested = Signal(str, int, int, str, object)
+    # 清除该文字图层上的全部片段颜色
+    clear_color_runs_requested = Signal(str)
 
     add_layer_requested = Signal(str)  # default text
 
     def __init__(self) -> None:
         super().__init__()
         self.setObjectName("propertyPanel")
-        self.setMinimumWidth(300)
+        self.setMinimumWidth(430)
         # 字段行最小宽约 580px；上限放至面板允许的 540 以减少横向截断
         self.setMaximumWidth(540)
 
@@ -83,17 +87,23 @@ class PropertyPanel(QFrame):
         self._suppress_signals = False
         self._pending_field: str | None = None
         self._pending_value: object = None
+        self._pending_region_id: str | None = None
         self._fill_rgb = (24, 32, 51)
         self._stroke_rgb = (255, 255, 255)
         self._shadow_rgb = (0, 0, 0)
         self._background_rgb = (255, 255, 255)
+        # 片段上色取色器的起点色（默认红，参考图里的强调色）
+        self._last_run_rgb = (220, 30, 30)
         self._image_w = 99999
         self._image_h = 99999
         self._current_box: TextBox | None = None
         self._last_path_mode = "straight"
         self._brush_armed = False
         self._brush_source_id: str | None = None
+        self._brush_applying = False
         self._brush_snapshot: dict[str, object] = {}
+        # 用户手动勾选/取消「自动适配字号」后跨图片沿用；None=还没手动操作过
+        self._auto_fit_user_choice: bool | None = None
 
         from PySide6.QtCore import QTimer
         self._debounce = QTimer(self)
@@ -108,7 +118,7 @@ class PropertyPanel(QFrame):
 
         content = QWidget()
         layout = QVBoxLayout(content)
-        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setContentsMargins(10, 12, 10, 12)
         layout.setSpacing(8)
 
         title = QLabel("属性")
@@ -133,11 +143,40 @@ class PropertyPanel(QFrame):
         self.source_text_edit.setMaximumHeight(56)
         self.apply_source_text_btn = QPushButton("更新 OCR 原文")
         self.apply_source_text_btn.clicked.connect(self._on_source_text_changed)
+        # 批量 OCR 后逐张改原文时，勾选它统一按同一个字号写回，避免每张图字号不一
+        self.fixed_font_check = QCheckBox("固定字号")
+        self.fixed_font_check.setToolTip(
+            "勾选后点「更新 OCR 原文」按此字号统一设置，不跟随各图识别出的字号"
+        )
+        self.fixed_font_spin = _dspin(1, 500, "")
+        # 隐藏上下箭头，避免窄输入框里数字被箭头挤掉（与其它数值框一致）
+        self.fixed_font_spin.setButtonSymbols(
+            QAbstractSpinBox.ButtonSymbols.NoButtons
+        )
+        self.fixed_font_spin.setDecimals(0)
+        self.fixed_font_spin.setValue(40)
+        self.fixed_font_spin.setToolTip("固定字号，单位：像素（px）")
+        self.fixed_font_spin.setEnabled(False)
+        self.fixed_font_check.toggled.connect(self._on_fixed_font_toggled)
+        source_action_row = QHBoxLayout()
+        source_action_row.setContentsMargins(0, 0, 0, 0)
+        source_action_row.setSpacing(4)
+        source_action_row.addWidget(self.fixed_font_check)
+        source_action_row.addWidget(
+            _wrap_spin(
+                self.fixed_font_spin,
+                width=52,
+                label="固定字号",
+                button_size=20,
+            )
+        )
+        source_action_row.addStretch(1)
         source_text_widget = QWidget()
         source_text_layout = QVBoxLayout(source_text_widget)
         source_text_layout.setContentsMargins(0, 0, 0, 0)
         source_text_layout.setSpacing(4)
         source_text_layout.addWidget(self.source_text_edit)
+        source_text_layout.addLayout(source_action_row)
         source_text_layout.addWidget(self.apply_source_text_btn)
 
         self.translated_text_edit = QPlainTextEdit()
@@ -247,14 +286,31 @@ class PropertyPanel(QFrame):
             widget.valueChanged.connect(self._on_path_changed)
 
         # ===== 文字样式 =====
-        self.font_family = QFontComboBox()
-        self.font_family.currentFontChanged.connect(lambda f: self._on_field_changed("font_family", f.family()))
+        self.font_family = QComboBox()
+        # 字体太多，输入字体名（可只打中间部分）即筛选；与译文字体下拉一致
+        self.font_family.setEditable(True)
+        self.font_family.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self.font_family.setToolTip("可直接输入字体名搜索")
+        font_completer = self.font_family.completer()
+        if font_completer is not None:
+            font_completer.setFilterMode(Qt.MatchFlag.MatchContains)
+            font_completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        for display, family in translation_font_choices():
+            self.font_family.addItem(display, family)
+        self.font_family.lineEdit().editingFinished.connect(
+            self._restore_font_edit_text
+        )
+        self.font_family.currentIndexChanged.connect(
+            lambda: self._on_field_changed(
+                "font_family", self.font_family.currentData()
+            )
+        )
         self.font_size_spin = _dspin(1, 500, " px")
+        # 与「格式刷」同排，限宽避免整行把面板撑出横向滚动条
+        self.font_size_spin.setFixedWidth(88)
         self.font_size_spin.valueChanged.connect(self._on_font_size_changed)
         self.auto_fit_check = QCheckBox("自动适配字号")
-        self.auto_fit_check.toggled.connect(
-            lambda value: self._on_field_changed("auto_fit", value)
-        )
+        self.auto_fit_check.toggled.connect(self._on_auto_fit_toggled)
         self.font_weight_combo = QComboBox()
         for label, value in (("正常 400", 400), ("半粗 600", 600), ("粗体 700", 700)):
             self.font_weight_combo.addItem(label, value)
@@ -394,6 +450,27 @@ class PropertyPanel(QFrame):
         style_title.setObjectName("propertyTitle")
         layout.addWidget(style_title)
         form.addRow("文字内容", self.text_edit)
+        self.color_run_btn = QPushButton("上色…")
+        self.color_run_btn.setToolTip(
+            "在上方「文字内容」里选中要改色的几个字，点此为这段字单独上色；"
+            "一句话里可以分多段上不同颜色"
+        )
+        self.color_run_btn.clicked.connect(self._on_color_run_clicked)
+        self.clear_color_runs_btn = QPushButton("清除")
+        self.clear_color_runs_btn.setToolTip(
+            "清除该文字上的所有片段颜色，恢复整体单色"
+        )
+        self.clear_color_runs_btn.clicked.connect(
+            lambda: self.clear_color_runs_requested.emit(self._region_id or "")
+        )
+        color_run_row = QWidget()
+        color_run_layout = QHBoxLayout(color_run_row)
+        color_run_layout.setContentsMargins(0, 0, 0, 0)
+        color_run_layout.setSpacing(6)
+        color_run_layout.addWidget(self.color_run_btn)
+        color_run_layout.addWidget(self.clear_color_runs_btn)
+        color_run_layout.addStretch()
+        form.addRow(_lbl("片段上色"), color_run_row)
         form.addRow(_lbl("字体"), self.font_family)
         self.format_brush_btn = QToolButton()
         self.format_brush_btn.setObjectName("formatBrushButton")
@@ -499,6 +576,18 @@ class PropertyPanel(QFrame):
 
         scroll.setWidget(content)
 
+        # 下拉框带长条目（如「简体中文（zh-Hans）」）时会把内容最小宽度撑出面板，
+        # 右侧出现横向滚动条、按钮被截断；统一按最小内容长度计算，随面板伸缩
+        for combo in content.findChildren(QComboBox):
+            combo.setSizeAdjustPolicy(
+                QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
+            )
+            combo.setMinimumContentsLength(3)
+            combo.setMinimumWidth(0)
+            combo.setSizePolicy(
+                QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+            )
+
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.addWidget(scroll)
@@ -510,8 +599,8 @@ class PropertyPanel(QFrame):
 
     def _on_format_brush_toggled(self, checked: bool) -> None:
         if checked:
-            if self._region_id is None or self._ocr_editing:
-                # 没有可捕获的文字图层 → 回弹取消
+            if self._region_id is None:
+                # 没有选中任何区域 → 回弹取消
                 self.format_brush_btn.blockSignals(True)
                 self.format_brush_btn.setChecked(False)
                 self.format_brush_btn.blockSignals(False)
@@ -553,14 +642,16 @@ class PropertyPanel(QFrame):
             app.removeEventFilter(self)
 
     def _capture_brush_snapshot(self) -> dict[str, object]:
-        """抓取当前图层的全部文字样式（不含位置/旋转/文字内容/路径/自适应）。
+        """抓取当前图层的全部文字样式（不含位置/旋转/文字内容/自适应）。
 
         不带 auto_fit：刷出的目标按源图层实际字号定值渲染。若把 auto_fit
         带进快照，源为自适应时目标会被 reflow 按自身框重算字号与拉伸，
-        画布上表现为「只有对齐和颜色刷上了，字号没变」。"""
-        return {
+        画布上表现为「只有对齐和颜色刷上了，字号没变」。
+        弧形弯曲度随刷套用（按目标自身文字框重算路径）；圆环依赖绝对圆心，
+        套到别的图层会跑位，因此不随刷。"""
+        snapshot: dict[str, object] = {
             "effect_preset": self.artistic_preset.currentData(),
-            "font_family": self.font_family.currentFont().family(),
+            "font_family": self.font_family.currentData(),
             "font_size": self.font_size_spin.value(),
             "font_weight": self.font_weight_combo.currentData(),
             "font_stretch": self.font_stretch_spin.value(),
@@ -581,18 +672,35 @@ class PropertyPanel(QFrame):
             "shadow_offset_y": self.shadow_y_spin.value(),
             "shadow_opacity": self.shadow_opacity_spin.value(),
         }
+        # 文字路径放在最后：先定好字号/换行，再按目标自身的框重建弧线
+        path_mode = str(self.path_mode.currentData())
+        if path_mode != "circle":
+            snapshot["text_path"] = {
+                "mode": path_mode,
+                "bend": self.arc_bend.value(),
+                "reverse": self.path_reverse.isChecked(),
+            }
+        return snapshot
 
     def _maybe_apply_brush_to(self, region_id: str) -> None:
-        if (
+        if not (
             self._brush_armed
             and region_id != self._brush_source_id
             and self._brush_snapshot
         ):
+            return
+        if self._brush_applying:
+            # 套用后面板会刷新并再次选中目标，避免同一次套用被反复触发
+            return
+        self._brush_applying = True
+        try:
             self.style_brush_applied.emit(
                 region_id,
                 self._brush_source_id or "",
                 dict(self._brush_snapshot),
             )
+        finally:
+            self._brush_applying = False
 
     def eventFilter(self, obj: object, event: object) -> bool:
         if (
@@ -638,6 +746,26 @@ class PropertyPanel(QFrame):
         text = self.source_text_edit.toPlainText().strip()
         if text:
             self.source_text_changed.emit(self._region_id, text)
+        # 「固定字号」勾选时跟着写回统一字号（固定值优先生效，关闭自动适配）
+        fixed_size = self.fixed_font_size()
+        if fixed_size is not None:
+            signal = (
+                self.ocr_property_changed
+                if self._ocr_editing
+                else self.layer_property_changed
+            )
+            signal.emit(self._region_id, "font_size", fixed_size)
+
+    def _on_fixed_font_toggled(self, checked: bool) -> None:
+        self.fixed_font_spin.setEnabled(checked)
+        if checked and self.font_size_spin.value() > 0:
+            # 以当前图层字号为起点，方便直接微调
+            self.fixed_font_spin.setValue(self.font_size_spin.value())
+
+    def fixed_font_size(self) -> float | None:
+        if not self.fixed_font_check.isChecked():
+            return None
+        return float(self.fixed_font_spin.value())
 
     def _on_translated_text_changed(self) -> None:
         if self._region_id is None:
@@ -702,7 +830,20 @@ class PropertyPanel(QFrame):
             self.auto_fit_check.blockSignals(True)
             self.auto_fit_check.setChecked(False)
             self.auto_fit_check.blockSignals(False)
+            # 手动定字号即表示要固定字号：换图后不要再自动勾回
+            self._auto_fit_user_choice = False
         self._on_field_changed("font_size", value)
+
+    def _on_auto_fit_toggled(self, checked: bool) -> None:
+        if self._suppress_signals:
+            return
+        # 记住用户的选择，切换图片/图层后沿用，直到用户再次明确改变
+        self._auto_fit_user_choice = bool(checked)
+        self._on_field_changed("auto_fit", checked)
+
+    def _apply_auto_fit_choice(self, layer_value: bool) -> None:
+        choice = self._auto_fit_user_choice
+        self.auto_fit_check.setChecked(layer_value if choice is None else choice)
 
     def _initialize_circle_controls(self) -> None:
         box = self._current_box
@@ -830,7 +971,12 @@ class PropertyPanel(QFrame):
                 translation_unit is not None and not is_manual
             )
 
-            if prev_id != layer.region_id:
+            if prev_id != layer.region_id or (
+                not self.text_edit.hasFocus()
+                and self.text_edit.toPlainText() != layer.text
+            ):
+                # 同区域但图层文字被外部改动（如「应用译文」）时同步内容，
+                # 否则「片段上色」按旧文本算出的字符区间会对不上
                 self.text_edit.setPlainText(layer.text)
 
             if prev_id != layer.region_id or not self.translated_text_edit.hasFocus():
@@ -891,9 +1037,9 @@ class PropertyPanel(QFrame):
             self._update_path_control_visibility(path_mode)
 
             style = layer.style
-            self.font_family.setCurrentFont(QFont(style.font_family))
+            self._set_font_family_value(style.font_family)
             self.font_size_spin.setValue(style.font_size)
-            self.auto_fit_check.setChecked(style.auto_fit)
+            self._apply_auto_fit_choice(style.auto_fit)
             idx_w = self.font_weight_combo.findData(style.font_weight)
             if idx_w >= 0:
                 self.font_weight_combo.setCurrentIndex(idx_w)
@@ -1028,7 +1174,7 @@ class PropertyPanel(QFrame):
                 self.font_weight_combo.setCurrentIndex(
                     max(0, self.font_weight_combo.findData(400))
                 )
-                self.auto_fit_check.setChecked(True)
+                self._apply_auto_fit_choice(True)
                 self.path_mode.setCurrentIndex(0)
                 self._last_path_mode = "straight"
                 self._update_path_control_visibility("straight")
@@ -1042,10 +1188,16 @@ class PropertyPanel(QFrame):
                 self._set_ocr_control_value(field, value)
         finally:
             self._suppress_signals = False
-        if translation_unit is None:
-            self._set_ocr_editable_fields(True)
+        # 有译文单元时也保持可编辑：找不到对应文字图层时（id 不一致等），
+        # 整块禁用会让用户以为功能坏了；但此时不要动「确认复核/保留原文」按钮
+        self._set_ocr_editable_fields(
+            True, disable_actions=translation_unit is None
+        )
+        self._maybe_apply_brush_to(self._region_id)
 
-    def _set_ocr_editable_fields(self, enabled: bool) -> None:
+    def _set_ocr_editable_fields(
+        self, enabled: bool, disable_actions: bool = True
+    ) -> None:
         """启用 OCR-only 可编辑字段，禁用必须依赖文字图层的操作。"""
         for widget in (
             self.text_edit, self.x_spin, self.y_spin, self.width_spin,
@@ -1061,8 +1213,12 @@ class PropertyPanel(QFrame):
             self.color_button, self.stroke_width_spin, self.stroke_color_button,
             self.shadow_check, self.shadow_x_spin, self.shadow_y_spin,
             self.shadow_opacity_spin, self.shadow_color_button,
+            # OCR 阶段也能用格式刷：把当前区域的样式刷给其它识别区域
+            self.format_brush_btn,
         ):
             widget.setEnabled(enabled)
+        if not disable_actions:
+            return
         for widget in (
             self.delete_btn, self.duplicate_btn, self.add_btn,
             self.restore_layout_btn,
@@ -1093,9 +1249,9 @@ class PropertyPanel(QFrame):
             if index >= 0:
                 self.font_weight_combo.setCurrentIndex(index)
         elif field == "font_family":
-            self.font_family.setCurrentFont(QFont(str(value)))
+            self._set_font_family_value(str(value))
         elif field == "auto_fit":
-            self.auto_fit_check.setChecked(bool(value))
+            self._apply_auto_fit_choice(bool(value))
         elif field == "text":
             self.text_edit.setPlainText(str(value))
         elif field == "wrap":
@@ -1135,11 +1291,36 @@ class PropertyPanel(QFrame):
 
     # —— 内部方法 ——
 
+    def _set_font_family_value(self, family: str) -> None:
+        """回显字体：列表缺失（系统没这个字体）时临时补一项，避免显示错位。"""
+        index = self.font_family.findData(family)
+        if index < 0:
+            self.font_family.addItem(family, family)
+            index = self.font_family.count() - 1
+        self.font_family.setCurrentIndex(index)
+
+    def _restore_font_edit_text(self) -> None:
+        """可编辑字体下拉：手输无效字体名后恢复为当前选中项。"""
+        text = self.font_family.currentText().strip()
+        match = (
+            self.font_family.findText(text, Qt.MatchFlag.MatchFixedString)
+            if text
+            else -1
+        )
+        if match >= 0:
+            if match != self.font_family.currentIndex():
+                self.font_family.setCurrentIndex(match)
+            return
+        index = self.font_family.currentIndex()
+        if index >= 0:
+            self.font_family.setEditText(self.font_family.itemText(index))
+
     def _on_field_changed(self, field: str, value: object) -> None:
         if self._suppress_signals or self._region_id is None:
             return
         self._pending_field = field
         self._pending_value = value
+        self._pending_region_id = self._region_id
         self._debounce.start(_DEBOUNCE_MS)
 
     def _flush_pending(self) -> None:
@@ -1147,10 +1328,39 @@ class PropertyPanel(QFrame):
             return
         field = self._pending_field
         value = self._pending_value
+        region_id = self._pending_region_id
         self._pending_field = None
         self._pending_value = None
+        self._pending_region_id = None
+        if region_id != self._region_id:
+            # 防抖窗口内已切到别的区域：丢弃，避免旧数值落到新选中的区域上
+            return
         signal = self.ocr_property_changed if self._ocr_editing else self.layer_property_changed
-        signal.emit(self._region_id, field, value)
+        signal.emit(region_id, field, value)
+
+    def _on_color_run_clicked(self) -> None:
+        if self._region_id is None:
+            return
+        text = self.text_edit.toPlainText()
+        cursor = self.text_edit.textCursor()
+        start, end = cursor.selectionStart(), cursor.selectionEnd()
+        if start >= end:
+            QMessageBox.information(
+                self, "片段上色", "请先在「文字内容」里选中要单独上色的那几个字。"
+            )
+            return
+        if self.path_mode.currentData() != "straight":
+            QMessageBox.information(
+                self, "片段上色", "弧线 / 圆环文字暂不支持片段上色。"
+            )
+            return
+        rgb = pick_color(self, self._last_run_rgb, "选择片段颜色")
+        if rgb is None:
+            return
+        self._last_run_rgb = rgb
+        self.color_run_requested.emit(
+            self._region_id, start, end, text[start:end], rgb
+        )
 
     def _choose_color(self, kind: str) -> None:
         current_rgb = {
@@ -1159,10 +1369,10 @@ class PropertyPanel(QFrame):
             "shadow": self._shadow_rgb,
             "background": self._background_rgb,
         }[kind]
-        selected = QColorDialog.getColor(QColor(*current_rgb), self, "选择颜色")
-        if not selected.isValid():
+        selected = pick_color(self, current_rgb, "选择颜色")
+        if selected is None:
             return
-        rgb = (selected.red(), selected.green(), selected.blue())
+        rgb = selected
         if kind == "fill":
             self._fill_rgb = rgb
             self._on_field_changed("fill_rgb", rgb)
@@ -1195,6 +1405,7 @@ class PropertyPanel(QFrame):
             self.text_edit, self.x_spin, self.y_spin, self.width_spin, self.height_spin,
             self.rotation_spin, self.font_family, self.font_size_spin, self.font_weight_combo,
             self.auto_fit_check, self.format_brush_btn,
+            self.color_run_btn, self.clear_color_runs_btn,
             self.path_mode, self.arc_bend, self.path_reverse, self.circle_center_x,
             self.circle_center_y, self.circle_radius, self.circle_start, self.circle_end,
             self.artistic_preset,
@@ -1223,7 +1434,7 @@ class PropertyPanel(QFrame):
             self.rotation_spin.setValue(0)
             self.path_mode.setCurrentIndex(0)
             self.font_size_spin.setValue(0)
-            self.auto_fit_check.setChecked(True)
+            self._apply_auto_fit_choice(True)
             self.font_weight_combo.setCurrentIndex(0)
             self.artistic_preset.setCurrentIndex(0)
             self.font_stretch_spin.setValue(100)
@@ -1266,7 +1477,10 @@ def _dspin(lo: float, hi: float, suffix: str) -> QDoubleSpinBox:
 
 
 def _wrap_spin(
-    spin: QAbstractSpinBox, width: int = 70, label: str = ""
+    spin: QAbstractSpinBox,
+    width: int = 104,
+    label: str = "",
+    button_size: int | None = None,
 ) -> QWidget:
     """把 ± 按钮移到输入框右侧外部（与图层状态面板一致），返回容器。"""
     spin.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
@@ -1278,11 +1492,15 @@ def _wrap_spin(
     hbox.setSpacing(2)
     hbox.addWidget(spin)
     smaller = QToolButton()
+    if button_size:
+        smaller.setFixedSize(button_size, button_size)
     smaller.setText("−")
     smaller.setToolTip(f"减小{label}")
     smaller.clicked.connect(spin.stepDown)
     hbox.addWidget(smaller)
     larger = QToolButton()
+    if button_size:
+        larger.setFixedSize(button_size, button_size)
     larger.setText("+")
     larger.setToolTip(f"增大{label}")
     larger.clicked.connect(spin.stepUp)

@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from PySide6.QtGui import QColor, QFont
+from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QCheckBox,
-    QColorDialog,
     QComboBox,
     QDoubleSpinBox,
     QFontComboBox,
@@ -25,6 +24,7 @@ from src.domain.layout import (
     VerticalAlignment,
 )
 from src.platform.font_candidates import recommend_system_fonts
+from src.ui.color_picker_dialog import pick_color
 
 
 class LayerStylePanel(QFrame):
@@ -229,10 +229,9 @@ class LayerStylePanel(QFrame):
             "stroke": self._stroke_rgb,
             "shadow": self._shadow_rgb,
         }[kind]
-        selected = QColorDialog.getColor(QColor(*current), self, "选择颜色")
-        if not selected.isValid():
+        value = pick_color(self, current, "选择颜色")
+        if value is None:
             return
-        value = (selected.red(), selected.green(), selected.blue())
         if kind == "fill":
             self._fill_rgb = value
         elif kind == "stroke":

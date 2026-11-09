@@ -7,7 +7,6 @@ from PySide6.QtGui import QColor, QFont
 from PySide6.QtWidgets import (
     QFrame,
     QCheckBox,
-    QColorDialog,
     QDoubleSpinBox,
     QFontComboBox,
     QFormLayout,
@@ -24,6 +23,7 @@ from PySide6.QtWidgets import (
 
 from src.domain.composition import WatermarkLayer
 from src.domain.layout import TextLayout
+from src.ui.color_picker_dialog import pick_color
 
 
 class LayerStatePanel(QFrame):
@@ -600,9 +600,14 @@ class LayerStatePanel(QFrame):
         current = QColor(self.watermark_color.text().strip())
         if not current.isValid():
             current = QColor("#FFFFFF")
-        selected = QColorDialog.getColor(current, self, "选择水印颜色")
-        if not selected.isValid():
+        rgb = pick_color(
+            self,
+            (current.red(), current.green(), current.blue()),
+            "选择水印颜色",
+        )
+        if rgb is None:
             return
+        selected = QColor(*rgb)
         self.watermark_color.setText(selected.name(QColor.NameFormat.HexRgb).upper())
         self.watermark_color.setStyleSheet(
             f"border-left: 18px solid {selected.name()};"

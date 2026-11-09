@@ -20,6 +20,7 @@ class EditorToolBar(QFrame):
         ("layers", "图层", "查看文字图层状态"),
         ("watermark", "水印", "添加或管理水印"),
         ("enhance_translate", "强化翻译", "内嵌AI处理艺术字等复杂图文"),
+        ("wanxiang_note", "万象笔记", "打开万象笔记网页（图文记录与分享）"),
     )
 
     def __init__(self) -> None:
@@ -84,6 +85,6 @@ class EditorToolBar(QFrame):
         return button
 
     def _activate(self, tool_id: str) -> None:
-        if tool_id in {"crop", "watermark", "enhance_translate"}:
+        if tool_id in {"crop", "watermark", "enhance_translate", "wanxiang_note"}:
             self.feature_requested.emit(tool_id)
         self.tool_changed.emit(tool_id)

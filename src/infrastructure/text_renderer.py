@@ -24,6 +24,7 @@ from src.domain.layout import (
     TextAlignment,
     ArcTextPath,
     CircularTextPath,
+    ColorRun,
     PathPoint,
     TextBox,
     TextLayer,
@@ -37,7 +38,11 @@ from src.domain.layout import (
 )
 from src.domain.ocr import OcrResult, TextRegion
 from src.domain.translation import TranslationResult, TranslationStatus, TranslationUnit
-from src.platform.fonts import resolve_system_font, resolve_system_font_details
+from src.platform.fonts import (
+    resolve_style_font_details,
+    resolve_system_font,
+    resolve_system_font_details,
+)
 
 
 _RTL_LANGUAGES = {"ar", "fa", "ur"}
@@ -50,9 +55,19 @@ _BOX_HEIGHT_RATIO_GUARD = 2.0
 class QtBasicTextLayoutAdapter:
     def __init__(self, font_family: str | None = None) -> None:
         self._font_family = font_family
+        # 自动匹配字体时，逐区域按原图文字风格（衬线/无衬线）选择字体族
+        self._match_source_font = True
+        # 自动匹配的首选字体（用户载入的外部字体）：无衬线场景优先使用
+        self._preferred_font: str | None = None
 
     def set_font_family(self, font_family: str | None) -> None:
         self._font_family = font_family
+
+    def set_match_source_font(self, enabled: bool) -> None:
+        self._match_source_font = bool(enabled)
+
+    def set_preferred_font(self, font_family: str | None) -> None:
+        self._preferred_font = font_family or None
 
     def layout(
         self,
@@ -113,12 +128,27 @@ class QtBasicTextLayoutAdapter:
                 if len(grouped_regions) > 1
                 else TextAlignment.CENTER
             )
-            resolution = (
-                None
-                if self._font_family is not None
-                else resolve_system_font_details(unit.target_language)
-            )
-            font_family = self._font_family or resolution.family
+            if self._font_family is not None:
+                resolution = None
+                font_family = self._font_family
+            else:
+                # 逐区域按原图文字风格选字体族（衬线类原图配衬线译文），
+                # 分类不可靠时保守回退无衬线默认字体
+                serif = self._match_source_font and _estimate_serif(source, region)
+                if serif:
+                    resolution = resolve_style_font_details(
+                        unit.target_language, True
+                    )
+                    font_family = resolution.family
+                elif self._preferred_font is not None:
+                    # 自动匹配首选字体（用户载入的外部字体）：无衬线场景优先使用
+                    resolution = None
+                    font_family = self._preferred_font
+                else:
+                    resolution = resolve_style_font_details(
+                        unit.target_language, False
+                    )
+                    font_family = resolution.family
             label_background = _vertical_colored_label_background(source, region)
             layer = self.reflow(
                 TextLayer(
@@ -321,51 +351,187 @@ class QtTextRenderer:
                 painter.fillRect(target, background)
             painter.setOpacity(layer.style.text_opacity)
             flags = _text_flags(layer.style, layer.text)
-            if layer.style.shadow_opacity > 0:
-                painter.save()
-                painter.translate(
-                    layer.style.shadow_offset_x / horizontal_scale,
-                    layer.style.shadow_offset_y,
-                )
-                shadow = QColor(*layer.style.shadow_rgb)
-                shadow.setAlphaF(layer.style.shadow_opacity)
-                painter.setPen(shadow)
-                painter.drawText(target, flags, layer.text)
-                painter.restore()
-            if layer.style.stroke_width > 0:
-                painter.setPen(QColor(*layer.style.stroke_rgb))
-                radius = max(1, round(layer.style.stroke_width))
-                for offset_x in range(-radius, radius + 1):
-                    for offset_y in range(-radius, radius + 1):
-                        if offset_x or offset_y:
-                            painter.drawText(
-                                target.translated(
-                                    offset_x / horizontal_scale,
-                                    offset_y,
-                                ),
-                                flags,
-                                layer.text,
-                            )
-            painter.setPen(QColor(*layer.style.fill_rgb))
-            if (
-                layer.style.line_height != 1
-                and layer.style.stroke_width == 0
-                and layer.style.shadow_opacity == 0
-            ):
-                _draw_text_with_line_height(
-                    painter,
-                    target,
-                    layer.text,
-                    font,
-                    layer.style,
+            if layer.color_runs and layer.text:
+                # 一句话里分段换色（品牌词上红字等）：阴影/描边/填充都按段绘制，
+                # 三层共用同一套行布局，避免逐段填充与整体阴影错位
+                _draw_colored_text(
+                    painter, target, layer, font, horizontal_scale
                 )
             else:
-                painter.drawText(target, flags, layer.text)
+                if layer.style.shadow_opacity > 0:
+                    painter.save()
+                    painter.translate(
+                        layer.style.shadow_offset_x / horizontal_scale,
+                        layer.style.shadow_offset_y,
+                    )
+                    shadow = QColor(*layer.style.shadow_rgb)
+                    shadow.setAlphaF(layer.style.shadow_opacity)
+                    painter.setPen(shadow)
+                    painter.drawText(target, flags, layer.text)
+                    painter.restore()
+                if layer.style.stroke_width > 0:
+                    painter.setPen(QColor(*layer.style.stroke_rgb))
+                    radius = max(1, round(layer.style.stroke_width))
+                    for offset_x in range(-radius, radius + 1):
+                        for offset_y in range(-radius, radius + 1):
+                            if offset_x or offset_y:
+                                painter.drawText(
+                                    target.translated(
+                                        offset_x / horizontal_scale,
+                                        offset_y,
+                                    ),
+                                    flags,
+                                    layer.text,
+                                )
+                painter.setPen(QColor(*layer.style.fill_rgb))
+                if (
+                    layer.style.line_height != 1
+                    and layer.style.stroke_width == 0
+                    and layer.style.shadow_opacity == 0
+                ):
+                    _draw_text_with_line_height(
+                        painter,
+                        target,
+                        layer.text,
+                        font,
+                        layer.style,
+                    )
+                else:
+                    painter.drawText(target, flags, layer.text)
             painter.restore()
         painter.end()
         rgba = _rgba_bytes(image, document.asset.width, document.asset.height)
         pixels = rgba if document.mode == "RGBA" else rgba[:, :, :3].copy()
         return ImageDocument(document.asset, document.mode, pixels.tobytes())
+
+
+def _draw_colored_text(
+    painter: QPainter,
+    target: QRectF,
+    layer: TextLayer,
+    font: QFont,
+    horizontal_scale: float,
+) -> None:
+    """按字符区间分段上色：支持自动换行与多行文本。
+
+    先用 QTextLayout 排好行（换行、对齐与其余渲染路径一致），再逐行把
+    文本按 color_runs 切成段，在行内基线上分别绘制；阴影、描边、填充
+    三层都走同样的分段坐标，保证相互对齐。
+    """
+    style = layer.style
+    text = layer.text
+    option = QTextOption()
+    option.setWrapMode(
+        QTextOption.WrapMode.WrapAtWordBoundaryOrAnywhere
+        if style.wrap
+        else QTextOption.WrapMode.NoWrap
+    )
+    option.setAlignment(
+        {
+            TextAlignment.LEFT: Qt.AlignmentFlag.AlignLeft,
+            TextAlignment.CENTER: Qt.AlignmentFlag.AlignHCenter,
+            TextAlignment.RIGHT: Qt.AlignmentFlag.AlignRight,
+        }[style.alignment]
+    )
+    layout = QTextLayout(text, font)
+    layout.setTextOption(option)
+    lines = []
+    layout.beginLayout()
+    while True:
+        line = layout.createLine()
+        if not line.isValid():
+            break
+        line.setLineWidth(target.width())
+        lines.append(line)
+    layout.endLayout()
+    if not lines:
+        return
+    metrics = QFontMetricsF(font)
+    step = metrics.height() * style.line_height
+    total_height = metrics.height() + step * (len(lines) - 1)
+    if style.vertical_alignment is VerticalAlignment.TOP:
+        top = target.top()
+    elif style.vertical_alignment is VerticalAlignment.BOTTOM:
+        top = target.bottom() - total_height
+    else:
+        top = target.center().y() - total_height / 2
+    runs = tuple(sorted(layer.color_runs, key=lambda item: item.start))
+    base_color = tuple(style.fill_rgb)
+    # 每段：(x, 基线 y, 文本, 颜色)
+    segments: list[tuple[float, float, str, tuple[int, int, int]]] = []
+    for index, line in enumerate(lines):
+        line_y = top + index * step
+        line_start = line.textStart()
+        line_end = line_start + line.textLength()
+        line_width = line.naturalTextWidth()
+        if style.alignment is TextAlignment.RIGHT:
+            line_x = target.right() - line_width
+        elif style.alignment is TextAlignment.CENTER:
+            line_x = target.left() + (target.width() - line_width) / 2
+        else:
+            line_x = target.left()
+        baseline = line_y + line.ascent()
+        for seg_start, seg_end, rgb in _colored_ranges(
+            runs, text, line_start, line_end, base_color
+        ):
+            # PySide6 把 cursorToX(int) 指针重载映射成 (x, cursorPos) 元组
+            x_offset = line.cursorToX(seg_start - line_start)[0]
+            segments.append((line_x + x_offset, baseline, text[seg_start:seg_end], rgb))
+
+    def draw_pass(color: QColor | None, dx: float, dy: float) -> None:
+        for x, baseline, segment, rgb in segments:
+            if color is not None:
+                painter.setPen(color)
+            else:
+                painter.setPen(QColor(*rgb))
+            painter.drawText(QPointF(x + dx, baseline + dy), segment)
+
+    if style.shadow_opacity > 0:
+        shadow = QColor(*style.shadow_rgb)
+        shadow.setAlphaF(style.shadow_opacity)
+        draw_pass(
+            shadow,
+            style.shadow_offset_x / horizontal_scale,
+            style.shadow_offset_y,
+        )
+    if style.stroke_width > 0:
+        stroke = QColor(*style.stroke_rgb)
+        radius = max(1, round(style.stroke_width))
+        for offset_x in range(-radius, radius + 1):
+            for offset_y in range(-radius, radius + 1):
+                if offset_x or offset_y:
+                    draw_pass(
+                        stroke,
+                        offset_x / horizontal_scale,
+                        offset_y,
+                    )
+    draw_pass(None, 0.0, 0.0)
+
+
+def _colored_ranges(
+    runs: tuple[ColorRun, ...],
+    text: str,
+    start: int,
+    end: int,
+    base_color: tuple[int, int, int],
+) -> tuple[tuple[int, int, tuple[int, int, int]], ...]:
+    """把一行内的字符区间 [start, end) 按 color_runs 切段，空隙用整体色填充。"""
+    if start >= end:
+        return ()
+    segments: list[tuple[int, int, tuple[int, int, int]]] = []
+    cursor = start
+    for run in runs:
+        run_start = max(cursor, min(end, run.start))
+        run_end = max(run_start, min(end, run.end))
+        if run_end <= run_start:
+            continue
+        if run_start > cursor:
+            segments.append((cursor, run_start, base_color))
+        segments.append((run_start, run_end, tuple(run.fill_rgb)))
+        cursor = run_end
+    if cursor < end:
+        segments.append((cursor, end, base_color))
+    return tuple(segments)
 
 
 def _qimage(document: ImageDocument) -> QImage:
@@ -2157,6 +2323,12 @@ def _requires_character_wrap(text: str) -> bool:
     )
 
 
+def draw_arc_layer_preview(painter: QPainter, layer: TextLayer) -> None:
+    """把单个弧形/圆环图层的文字画到 painter 上（场景坐标），供编辑预览复用。"""
+    font, horizontal_scale = _render_font_and_horizontal_scale(layer)
+    _render_arc_layer(painter, layer, font, horizontal_scale=horizontal_scale)
+
+
 def _render_arc_layer(
     painter: QPainter,
     layer: TextLayer,
@@ -2171,11 +2343,14 @@ def _render_arc_layer(
         horizontal_scale = _font_horizontal_scale(layer.style)
     lines = _arc_text_lines(layer.text, font, path, horizontal_scale)
     line_height = QFontMetricsF(font).height()
+    # 字形以基线贴在路径上，整块会偏高；沿法线下移半个行高，
+    # 与直排图层「文字在框内垂直居中」保持一致
+    baseline_shift = line_height / 2
     normal_offsets = (
-        (0.0,)
+        (baseline_shift,)
         if len(lines) == 1
         else tuple(
-            (index - (len(lines) - 1)) * line_height
+            baseline_shift + (index - (len(lines) - 1)) * line_height
             for index in range(len(lines))
         )
     )
@@ -2635,6 +2810,83 @@ def _vertical_colored_label_palette(
         tuple(int(round(value)) for value in foreground),
         tuple(int(round(value)) for value in background),
     )  # type: ignore[return-value]
+
+
+def _estimate_serif(
+    document: ImageDocument,
+    region: TextRegion,
+) -> bool:
+    """从原图文字区域估计是否为衬线（宋体/Time 类）风格。
+
+    衬线字体横画细、竖画粗：水平扫描线上的连续墨迹段（≈竖笔画宽度）
+    中位数明显大于垂直扫描线上的（≈横画厚度）。无衬线字体两者接近。
+    小字号量化噪声大，一律保守判为无衬线，避免误换字体。
+    """
+    channels = 4 if document.mode == "RGBA" else 3
+    pixels = np.frombuffer(document.pixels, dtype=np.uint8).reshape(
+        document.asset.height,
+        document.asset.width,
+        channels,
+    )[:, :, :3]
+    xs = [point.x for point in region.polygon]
+    ys = [point.y for point in region.polygon]
+    x0 = max(0, min(document.asset.width - 1, int(min(xs))))
+    x1 = max(x0 + 1, min(document.asset.width, int(max(xs)) + 1))
+    y0 = max(0, min(document.asset.height - 1, int(min(ys))))
+    y1 = max(y0 + 1, min(document.asset.height, int(max(ys)) + 1))
+    patch = pixels[y0:y1, x0:x1]
+    height, width = patch.shape[:2]
+    if height < 26 or width < 12:
+        return False
+    edge = max(1, min(height, width) // 8)
+    border = np.concatenate(
+        (
+            patch[:edge].reshape(-1, 3),
+            patch[-edge:].reshape(-1, 3),
+            patch[:, :edge].reshape(-1, 3),
+            patch[:, -edge:].reshape(-1, 3),
+        )
+    ).astype(np.float32)
+    background = np.median(border, axis=0)
+    foreground = np.asarray(
+        _estimate_foreground_color(document, region),
+        dtype=np.float32,
+    )
+    contrast = float(np.linalg.norm(foreground - background))
+    if contrast < 70:
+        return False
+    values = patch.astype(np.float32)
+    foreground_distance = np.linalg.norm(values - foreground, axis=2)
+    background_distance = np.linalg.norm(values - background, axis=2)
+    ink = (
+        (foreground_distance + 8 < background_distance)
+        & (background_distance > max(24, contrast * 0.18))
+    ).astype(np.uint8)
+    if not ink.any():
+        return False
+    horizontal = _median_run_length(ink, axis=1)
+    vertical = _median_run_length(ink, axis=0)
+    if horizontal <= 0 or vertical <= 0:
+        return False
+    return horizontal / vertical >= 1.5
+
+
+def _median_run_length(ink: np.ndarray, axis: int) -> float:
+    """沿扫描线统计连续墨迹段长度的中位数（粗估笔画厚度）。"""
+    scanned = ink if axis == 1 else ink.T
+    padded = np.zeros((scanned.shape[0], scanned.shape[1] + 2), dtype=np.int8)
+    padded[:, 1:-1] = scanned
+    diff = np.diff(padded, axis=1)
+    lengths: list[int] = []
+    for row_diff in diff:
+        starts = np.flatnonzero(row_diff == 1)
+        if not len(starts):
+            continue
+        ends = np.flatnonzero(row_diff == -1)
+        lengths.extend((ends - starts).tolist())
+    if not lengths:
+        return 0.0
+    return float(np.median(lengths))
 
 
 def _estimate_font_weight(

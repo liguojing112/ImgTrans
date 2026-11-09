@@ -11,7 +11,14 @@ from math import atan2, degrees, hypot
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, Qt, QTimer, Signal
-from PySide6.QtGui import QAction, QDragEnterEvent, QDropEvent, QShowEvent, QUndoStack
+from PySide6.QtGui import (
+    QAction,
+    QDragEnterEvent,
+    QDropEvent,
+    QPixmap,
+    QShowEvent,
+    QUndoStack,
+)
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -22,7 +29,7 @@ from PySide6.QtWidgets import (
 )
 
 from src.application.image_io import ExportImage, ImportImage
-from src.application.batch import RunBatch
+from src.application.batch import BatchEditableState, BatchOcrState, RunBatch
 from src.application.batch_export import (
     BatchExportOptions,
     BatchResizeMode,
@@ -38,7 +45,13 @@ from src.domain.job import ImageStage
 from src.domain.batch import BatchItemStatus, BatchSnapshot, BatchStatus
 from src.domain.inpainting import EraseMask, InpaintingResult
 from src.domain.composition import ImageTransform
-from src.domain.layout import CircularTextPath, TextBox, TextLayout, TextStyle
+from src.domain.layout import (
+    CircularTextPath,
+    TextBox,
+    TextLayer,
+    TextLayout,
+    TextStyle,
+)
 from src.domain.manual_region import ManualInputMode, ManualRegionSpec
 from src.domain.ocr import OcrResult, TextRegion
 from src.domain.translation import (
@@ -63,6 +76,9 @@ from src.ui.editor.editor_page import EditorPage
 from src.ui.editor.error_handler import classify_error
 from src.ui.enhance.prompt_builder import build_prompt
 from src.ui.editor.home_page import HomePage
+from src.ui.editor.store_page import StorePage
+from src.ui.portal_browser_window import PortalBrowserWindow
+from src.domain.portal import DEFAULT_WANXIANG_NOTE
 from src.ui.editor.services.editor_import_service import load_document
 from src.ui.editor.services.editor_export_service import export_document
 from src.ui.editor.theme import EDITOR_DARK_THEME
@@ -106,15 +122,22 @@ class EditorMainWindow(QMainWindow):
         brand_terms_preferences: object | None = None,
         model_terms_preferences: object | None = None,
         run_batch: RunBatch | None = None,
+        run_batch_ocr: RunBatch | None = None,
         batch_result_store: object | None = None,
         export_batch_selection: ExportBatchSelection | None = None,
         terminology_catalog: TerminologyCatalog | None = None,
         terminology_preferences: object | None = None,
         ecommerce_preferences: object | None = None,
         font_preferences: object | None = None,
+        loaded_font_preferences: object | None = None,
         translation_font: str | None = None,
         paragraph_mode: str | None = None,
         paragraph_mode_preferences: object | None = None,
+        match_source_font: bool = True,
+        match_source_font_preferences: object | None = None,
+        auto_font: str | None = None,
+        auto_font_preferences: object | None = None,
+        portal_client: object | None = None,
         update_ecommerce_translation: object | None = None,
         translation_service_label: str = "翻译服务：可用",
         translation_service_available: bool = True,
@@ -154,6 +177,8 @@ class EditorMainWindow(QMainWindow):
         self._brand_terms_preferences = brand_terms_preferences
         self._model_terms_preferences = model_terms_preferences
         self._run_batch = run_batch
+        self._run_batch_ocr = run_batch_ocr
+        self._active_batch: RunBatch | None = None
         self._batch_result_store = batch_result_store
         self._export_batch_selection = export_batch_selection
         self._batch_snapshot: BatchSnapshot | None = None
@@ -161,8 +186,16 @@ class EditorMainWindow(QMainWindow):
         self._terminology_preferences = terminology_preferences
         self._ecommerce_preferences = ecommerce_preferences
         self._font_preferences = font_preferences
+        self._loaded_font_preferences = loaded_font_preferences
         self._initial_translation_font = translation_font
         self._paragraph_mode_preferences = paragraph_mode_preferences
+        self._initial_match_source_font = bool(match_source_font)
+        self._match_source_font_preferences = match_source_font_preferences
+        self._initial_auto_font = auto_font
+        self._auto_font_preferences = auto_font_preferences
+        self._portal_client = portal_client
+        self._portal_module = DEFAULT_WANXIANG_NOTE
+        self._portal_window = None
         self._initial_paragraph_mode = paragraph_mode
         self._update_ecommerce_translation = update_ecommerce_translation
         self._terminology_entries: tuple[TerminologyEntry, ...] = ()
@@ -206,7 +239,8 @@ class EditorMainWindow(QMainWindow):
         self._model = EditorModel()
         self._undo_stack = QUndoStack(self)
 
-        self._home_page = HomePage(self._payment_client, self._task_runner)
+        self._home_page = HomePage()
+        self._store_page = StorePage(self._payment_client, self._task_runner)
         self._editor_page = EditorPage(self._undo_stack)
         self._toolbox_page = self._create_toolbox_page()
 
@@ -214,6 +248,7 @@ class EditorMainWindow(QMainWindow):
         self._stack.addWidget(self._home_page)
         self._stack.addWidget(self._editor_page)
         self._stack.addWidget(self._toolbox_page)
+        self._stack.addWidget(self._store_page)
         self.setCentralWidget(self._stack)
 
         self._build_menus()
@@ -224,6 +259,7 @@ class EditorMainWindow(QMainWindow):
         self._stack.setCurrentWidget(self._home_page)
 
         self._connect_signals()
+        QTimer.singleShot(0, self._load_portal_config)
 
         self.setStyleSheet(EDITOR_DARK_THEME)
 
@@ -582,7 +618,10 @@ class EditorMainWindow(QMainWindow):
         self._home_page.image_translation_requested.connect(self._enter_editor)
         self._home_page.product_detail_requested.connect(self._enter_product)
         self._home_page.toolbox_requested.connect(self._enter_toolbox)
-        self._home_page.purchase_requested.connect(self._open_purchase_for_plan)
+        self._home_page.portal_requested.connect(self._open_portal_window)
+        self._home_page.store_requested.connect(self._enter_store)
+        self._store_page.back_requested.connect(self._go_home)
+        self._store_page.purchase_requested.connect(self._open_purchase_for_plan)
 
         # EditorPage 核心
         self._editor_page.import_requested.connect(self._on_import)
@@ -601,6 +640,9 @@ class EditorMainWindow(QMainWindow):
             self._on_enhance_save_all
         )
         self._editor_page.tool_changed.connect(self._on_editor_tool_changed)
+        self._editor_page.scene.layer_selected.connect(
+            self._on_canvas_layer_selected
+        )
         self._editor_page.manual_region_requested.connect(
             self._on_manual_region_selected
         )
@@ -614,6 +656,9 @@ class EditorMainWindow(QMainWindow):
         )
         self._editor_page.watermark_image_requested.connect(
             self._on_add_image_watermark
+        )
+        self._editor_page.translate_controls.load_fonts_requested.connect(
+            self._on_load_fonts
         )
         self._editor_page.layer_state_requested.connect(
             self._on_layer_state_requested
@@ -662,6 +707,7 @@ class EditorMainWindow(QMainWindow):
         self._editor_page.delete_requested.connect(self._on_delete_layer)
         self._editor_page.duplicate_requested.connect(self._on_duplicate_layer)
         self._editor_page.add_layer_requested.connect(self._on_add_layer)
+        self._editor_page.add_layer_at_requested.connect(self._on_add_layer_at)
         self._editor_page.layer_edit_requested.connect(
             self._on_layer_edit_requested
         )
@@ -680,6 +726,9 @@ class EditorMainWindow(QMainWindow):
 
         # 属性编辑
         self._editor_page.edit_requested.connect(self._on_edit)
+        self._editor_page.style_brush_layer_requested.connect(
+            self._on_brush_layer_requested
+        )
         self._editor_page.style_brush_batch_requested.connect(
             self._on_style_brush_batch
         )
@@ -721,6 +770,17 @@ class EditorMainWindow(QMainWindow):
         controls.translation_font_changed.connect(
             self._on_translation_font_changed
         )
+        controls.set_match_source_font(self._initial_match_source_font)
+        controls.match_source_font_changed.connect(
+            self._on_match_source_font_changed
+        )
+        controls.set_auto_font(self._initial_auto_font)
+        controls.auto_font_changed.connect(self._on_auto_font_changed)
+        adapter = self._text_layout_adapter
+        if adapter is not None and hasattr(adapter, "set_match_source_font"):
+            adapter.set_match_source_font(self._initial_match_source_font)
+        if adapter is not None and hasattr(adapter, "set_preferred_font"):
+            adapter.set_preferred_font(self._initial_auto_font)
         controls.set_paragraph_mode(self._initial_paragraph_mode or "long")
         controls.paragraph_mode_changed.connect(
             self._on_paragraph_mode_changed
@@ -762,9 +822,11 @@ class EditorMainWindow(QMainWindow):
         batch.cancel_requested.connect(self._on_cancel_batch)
         batch.retry_failed_requested.connect(self._on_retry_failed_batch)
         batch.export_requested.connect(self._on_export_batch)
+        batch.export_text_requested.connect(self._on_export_batch_text)
         batch.preview_requested.connect(self._on_preview_batch_item)
         batch.send_to_editor_requested.connect(self._on_send_batch_to_editor)
-        batch.set_available(self._run_batch is not None, False)
+        batch.set_available(self._batch_runner() is not None, False)
+        batch.set_ocr_mode_available(self._run_batch_ocr is not None)
         self.batch_snapshot_changed.connect(
             self._on_batch_snapshot_changed,
             Qt.ConnectionType.QueuedConnection,
@@ -773,6 +835,7 @@ class EditorMainWindow(QMainWindow):
         self._editor_page.image_list_panel.document_activated.connect(
             self._on_activate_document
         )
+        self._editor_page.pin_document_requested.connect(self._on_pin_document)
         self._editor_page.remove_document_requested.connect(
             self._on_remove_document
         )
@@ -826,6 +889,41 @@ class EditorMainWindow(QMainWindow):
             )
         except Exception as error:
             self.statusBar().showMessage(f"无法保存译文字体设置：{error}", 5000)
+
+    def _on_match_source_font_changed(self, enabled: bool) -> None:
+        adapter = self._text_layout_adapter
+        if adapter is not None and hasattr(adapter, "set_match_source_font"):
+            adapter.set_match_source_font(bool(enabled))
+        if self._match_source_font_preferences is None:
+            return
+        try:
+            self._match_source_font_preferences.save(bool(enabled))
+            self.statusBar().showMessage(
+                "已开启：按原图匹配字体风格" if enabled else "已关闭：统一使用默认字体",
+                3000,
+            )
+        except Exception as error:
+            self.statusBar().showMessage(f"无法保存字体匹配设置：{error}", 5000)
+
+    def _on_auto_font_changed(self, value: object) -> None:
+        font_family = value if isinstance(value, str) else None
+        adapter = self._text_layout_adapter
+        if adapter is not None and hasattr(adapter, "set_preferred_font"):
+            adapter.set_preferred_font(font_family)
+        if self._auto_font_preferences is None:
+            return
+        try:
+            self._auto_font_preferences.save(font_family)
+            self.statusBar().showMessage(
+                "自动匹配首选字体已保存"
+                if font_family
+                else "自动匹配首选字体已清除",
+                3000,
+            )
+        except Exception as error:
+            self.statusBar().showMessage(
+                f"无法保存自动匹配首选字体：{error}", 5000
+            )
 
     def _on_paragraph_mode_changed(self, value: str) -> None:
         if self._paragraph_mode_preferences is None:
@@ -968,21 +1066,46 @@ class EditorMainWindow(QMainWindow):
             return
         self._editor_page.batch_panel.add_sources(sources)
 
+    def _batch_runner(self) -> RunBatch | None:
+        """当前批处理模式对应的调度器（翻译 / 仅 OCR）。"""
+        return (
+            self._run_batch_ocr
+            if self._editor_page.batch_panel.ocr_only
+            else self._run_batch
+        )
+
     def _on_start_batch(self) -> None:
-        if self._run_batch is None or self._task_runner is None:
+        runner = self._batch_runner()
+        if runner is None or self._task_runner is None:
             return
         panel = self._editor_page.batch_panel
         sources = panel.sources
         if not sources:
             return
-        if not self._check_translation_access():
+        ocr_only = panel.ocr_only
+        if not ocr_only and not self._check_translation_access():
             return
         ctrl = self._editor_page.translate_controls
         selection = self._translation_selection(panel.selected_target_language)
+        self._active_batch = runner
         panel.set_available(True, True)
-        self.statusBar().showMessage(f"正在批量处理 {len(sources)} 张图片…")
-        self._task_runner.submit(
-            lambda: self._run_batch.execute(
+        self.statusBar().showMessage(
+            f"正在批量识别 {len(sources)} 张图片…"
+            if ocr_only
+            else f"正在批量处理 {len(sources)} 张图片…"
+        )
+        if ocr_only:
+            operation = lambda: runner.execute(
+                sources,
+                ctrl.selected_ocr_language,
+                selection,
+                ctrl.configured_protection_terms,
+                self.batch_snapshot_changed.emit,
+                ocr_mode=panel.selected_ocr_mode,
+                high_recall_options=ctrl.configured_high_recall_options,
+            )
+        else:
+            operation = lambda: runner.execute(
                 sources,
                 ctrl.selected_ocr_language,
                 selection,
@@ -997,7 +1120,9 @@ class EditorMainWindow(QMainWindow):
                 preserve_numbers=ctrl.should_preserve_numbers,
                 ocr_mode=panel.selected_ocr_mode,
                 high_recall_options=ctrl.configured_high_recall_options,
-            ),
+            )
+        self._task_runner.submit(
+            operation,
             self._on_batch_finished,
             self._on_batch_failed,
         )
@@ -1008,7 +1133,7 @@ class EditorMainWindow(QMainWindow):
         self._batch_snapshot = value
         self._editor_page.batch_panel.set_snapshot(value)
         self._editor_page.batch_panel.set_available(
-            self._run_batch is not None,
+            self._batch_runner() is not None,
             value.status
             in {
                 BatchStatus.RUNNING,
@@ -1019,6 +1144,7 @@ class EditorMainWindow(QMainWindow):
 
     def _on_batch_finished(self, value: object) -> None:
         self._on_batch_snapshot_changed(value)
+        self._active_batch = None
         if isinstance(value, BatchSnapshot):
             self.statusBar().showMessage(
                 f"批量完成：成功 {value.completed_count}，失败 {value.failed_count}，"
@@ -1027,25 +1153,29 @@ class EditorMainWindow(QMainWindow):
 
     def _on_batch_failed(self, error: Exception) -> None:
         panel = self._editor_page.batch_panel
+        self._active_batch = None
         panel.set_available(
-            self._run_batch is not None, False
+            self._batch_runner() is not None, False
         )
         panel.set_error(str(error) or type(error).__name__)
         self.statusBar().showMessage(f"批量处理失败：{error}", 8000)
 
     def _on_cancel_batch(self) -> None:
-        if self._run_batch is not None:
-            self._run_batch.cancel()
+        runner = self._active_batch or self._batch_runner()
+        if runner is not None:
+            runner.cancel()
             self.statusBar().showMessage("正在取消剩余批量任务…")
 
     def _on_pause_batch(self) -> None:
-        if self._run_batch is not None:
-            self._run_batch.pause()
+        runner = self._active_batch or self._batch_runner()
+        if runner is not None:
+            runner.pause()
             self.statusBar().showMessage("当前图片完成后将暂停批次…")
 
     def _on_resume_batch(self) -> None:
-        if self._run_batch is not None:
-            self._run_batch.resume()
+        runner = self._active_batch or self._batch_runner()
+        if runner is not None:
+            runner.resume()
             self.statusBar().showMessage("批量任务已恢复")
 
     def _on_retry_failed_batch(self) -> None:
@@ -1174,6 +1304,57 @@ class EditorMainWindow(QMainWindow):
         else:
             QMessageBox.information(self, "批量导出成功", summary)
 
+    def _on_export_batch_text(self) -> None:
+        """仅 OCR 批次：把勾选成功项的识别文本按图片导出为 .txt。"""
+        if (
+            self._batch_snapshot is None
+            or self._batch_result_store is None
+            or self._task_runner is None
+        ):
+            return
+        panel = self._editor_page.batch_panel
+        selected = set(panel.selected_result_ids)
+        items = [
+            item
+            for item in self._batch_snapshot.items
+            if item.item_id in selected
+            and item.status is BatchItemStatus.COMPLETED
+            and item.result_ref
+        ]
+        if not items:
+            self.statusBar().showMessage("请先勾选要导出的成功项", 6000)
+            return
+        directory_value = QFileDialog.getExistingDirectory(
+            self, "选择识别文本导出目录"
+        )
+        if not directory_value:
+            return
+        directory = Path(directory_value)
+
+        def work() -> int:
+            written = 0
+            for item in items:
+                state = self._batch_result_store.load_editable(item.result_ref)
+                ocr = getattr(state, "ocr", None)
+                if ocr is None:
+                    continue
+                text = "\n".join(region.text for region in ocr.regions)
+                (directory / f"{item.source.stem}.txt").write_text(
+                    text, encoding="utf-8"
+                )
+                written += 1
+            return written
+
+        self._task_runner.submit(
+            work,
+            lambda written: self.statusBar().showMessage(
+                f"已导出 {written} 份识别文本到 {directory}", 8000
+            ),
+            lambda error: self.statusBar().showMessage(
+                f"导出识别文本失败：{error}", 8000
+            ),
+        )
+
     def _on_preview_batch_item(self, item_id: str) -> None:
         if (
             self._batch_snapshot is None
@@ -1231,8 +1412,8 @@ class EditorMainWindow(QMainWindow):
     def _on_send_batch_to_editor(self) -> None:
         """将批量面板中的图片逐张送入工作台编辑。
 
-        批量翻译已完成的图片送入译文成品（原图保留为对比图）；
-        未翻译或失败的图片送入原图。
+        批量翻译已完成的图片送入译文成品，并带回 OCR、译文与文字图层，
+        可直接继续编辑；未翻译或失败的图片送入原图。
         """
         batch = self._editor_page.batch_panel
         sources = batch.sources
@@ -1265,6 +1446,7 @@ class EditorMainWindow(QMainWindow):
                 try:
                     doc = self._import_usecase.execute(source)
                     rendered = None
+                    editable = None
                     result_ref = result_refs.get(source)
                     if result_ref is not None:
                         try:
@@ -1273,7 +1455,17 @@ class EditorMainWindow(QMainWindow):
                             print(
                                 f"[BatchToEditor] 加载译文失败 {source.name}: {exc}"
                             )
-                    loaded.append((source, doc, rendered))
+                        if rendered is not None:
+                            try:
+                                editable = self._batch_result_store.load_editable(
+                                    result_ref
+                                )
+                            except Exception as exc:
+                                print(
+                                    f"[BatchToEditor] 加载编辑状态失败 "
+                                    f"{source.name}: {exc}"
+                                )
+                    loaded.append((source, doc, rendered, editable))
                 except Exception as exc:
                     print(f"[BatchToEditor] 加载失败 {source.name}: {exc}")
             return loaded
@@ -1283,10 +1475,13 @@ class EditorMainWindow(QMainWindow):
                 from PySide6.QtWidgets import QMessageBox
                 QMessageBox.warning(self, "发送到工作台", "图片加载失败，请检查文件。")
                 return
-            for source, doc, rendered in loaded:
+            for source, doc, rendered, editable in loaded:
                 self._model.add_document(
                     source, doc, name=source.name, rendered_document=rendered
                 )
+                # add_document 后该文档即活动文档，写入的模型状态会在下一次
+                # 快照时归属到它，切回即可继续编辑文字图层。
+                self._restore_batch_editable(rendered, doc, editable)
             # 切换到第一张
             first = self._model.documents()[0].doc_id
             self._model.set_active_document(first)
@@ -1303,11 +1498,72 @@ class EditorMainWindow(QMainWindow):
 
         self._task_runner.submit(operation, on_success, on_error)
 
+    def _restore_batch_editable(
+        self,
+        rendered: ImageDocument | None,
+        source_document: ImageDocument,
+        state: object,
+    ) -> None:
+        """把批量翻译的 OCR/译文/图层恢复成工作台可编辑状态。"""
+        if rendered is None or not isinstance(
+            state, (BatchEditableState, BatchOcrState)
+        ):
+            return
+        if isinstance(state, BatchOcrState):
+            # 仅 OCR 批次：只带回识别结果，画布仍是原图
+            self._model.ocr_result = state.ocr
+            self._ocr_preview_layers.clear()
+            self._ocr_original_texts = {
+                region.region_id: region.text for region in state.ocr.regions
+            }
+            self._ocr_preview_boxes = {
+                region.region_id: self._ocr_preview_box(region)
+                for region in state.ocr.regions
+            }
+            return
+        self._model.ocr_result = state.ocr
+        self._model.translation_result = TranslateImageResult(
+            document=rendered,
+            ocr=state.ocr,
+            translation=state.translation,
+            repair=state.repair,
+            layout=state.layout,
+            job=None,
+        )
+        self._model.text_layout = state.layout
+        self._model.repaired_background = state.repair.result.document
+        if self._create_composition_editor is None:
+            return
+        try:
+            self._model.composition_editor = self._create_composition_editor.execute(
+                state.repair.result.document,
+                rendered,
+                state.layout,
+                source_document,
+                record_initial_translation=True,
+            )
+        except Exception:
+            logging.getLogger("imgtrans").warning(
+                "批量图片创建编辑会话失败", exc_info=True
+            )
+
     def _on_activate_document(self, doc_id: str) -> None:
         """点击左侧图片列表切换工作台文档。"""
         self._model.set_active_document(doc_id)
         self._load_active_document()
         self._on_enhance_document_activated()
+
+    def _on_pin_document(self, doc_id: str) -> None:
+        """把图片置顶到工作台列表最前面。"""
+        before = [doc.doc_id for doc in self._model.documents()]
+        self._model.pin_document(doc_id)
+        if not before or before[0] == doc_id:
+            return
+        name = next(
+            (doc.name for doc in self._model.documents() if doc.doc_id == doc_id),
+            "图片",
+        )
+        self.statusBar().showMessage(f"已置顶：{name}", 4000)
 
     def _on_remove_document(self, doc_id: str) -> None:
         """从工作台移除一张图片（不影响磁盘文件）。"""
@@ -1381,6 +1637,18 @@ class EditorMainWindow(QMainWindow):
             controls.set_preparing()
             self.statusBar().showMessage("另一张图片正在后台翻译，可切回查看进度")
 
+    def _rebuild_ocr_preview_state(self) -> None:
+        """按当前图片的 OCR 结果重建预览层/原始文本缓存。"""
+        self._ocr_preview_layers.clear()
+        ocr_result = self._model.ocr_result
+        regions = getattr(ocr_result, "regions", ())
+        self._ocr_preview_boxes = {
+            region.region_id: self._ocr_preview_box(region) for region in regions
+        }
+        self._ocr_original_texts = {
+            region.region_id: region.text for region in regions
+        }
+
     def _load_active_document(self) -> None:
         """把当前活动文档加载到画布（编辑状态已由模型快照恢复）。"""
         ref = self._model.active_document()
@@ -1394,6 +1662,9 @@ class EditorMainWindow(QMainWindow):
         self._model.showing_original = False
         self._model.preview_mode = "layers"
         self._hold_preview_mode = None
+        # 换图必须重建 OCR 预览缓存：旧图的图层 id 留在缓存里，
+        # 再改这张图的原文就会拿失效 id 去查图层（KeyError: manual-…）
+        self._rebuild_ocr_preview_state()
         self._quick_save_path = None
         self._source_undo.clear()
         self._source_redo.clear()
@@ -1404,8 +1675,14 @@ class EditorMainWindow(QMainWindow):
         self._editor_page.set_split_view(False)
         self._editor_page.set_slider_compare(False)
         self._editor_page.set_text_layout(self._model.text_layout)
+        self._editor_page.restore_ocr_regions()
         self._editor_page.clear_layer_selection()
         self._editor_page.translate_controls.reset_progress()
+        layers = self._model.text_layout.layers
+        if layers:
+            # 换到已有译文的图片时默认选中首个文字图层：否则「文字属性」整块
+            # 被禁用（自动适配字号等字段点不动），用户会以为功能坏了
+            self._model.selected_layer_id = layers[0].region_id
 
         result = self._model.translation_result
         if isinstance(result, TranslateImageResult):
@@ -1450,6 +1727,11 @@ class EditorMainWindow(QMainWindow):
     def _go_home(self) -> None:
         self._stack.setCurrentWidget(self._home_page)
         self.statusBar().showMessage("就绪")
+
+    def _enter_store(self) -> None:
+        self._store_page.reload_plans()
+        self._stack.setCurrentWidget(self._store_page)
+        self.statusBar().showMessage("商店")
 
     @property
     def _product_window(self) -> object | None:
@@ -1548,25 +1830,127 @@ class EditorMainWindow(QMainWindow):
         page.back_requested.connect(self._go_home)
         return page
 
+    # —— 万象笔记门户入口 ——
+
+    def _load_portal_config(self) -> None:
+        """拉取服务端门户配置（如网络失败保持内置默认，不打扰用户）。"""
+        if self._portal_client is None:
+            return
+        if self._task_runner is not None:
+            self._task_runner.submit(
+                self._portal_client.fetch,
+                self._apply_portal_modules,
+                lambda _error: None,
+            )
+            return
+        try:
+            self._apply_portal_modules(self._portal_client.fetch())
+        except Exception:
+            pass
+
+    def _apply_portal_modules(self, modules) -> None:
+        module = next(
+            (
+                item
+                for item in getattr(modules, "__iter__", lambda: ())()
+                if getattr(item, "module_key", "") == "wanxiang_note"
+            ),
+            None,
+        )
+        if module is None:
+            return
+        self._portal_module = module
+        self._home_page.set_portal_module(
+            getattr(module, "title", None) or DEFAULT_WANXIANG_NOTE.title,
+            getattr(module, "description", None)
+            or DEFAULT_WANXIANG_NOTE.description,
+        )
+        image_url = getattr(module, "image_url", "") or ""
+        if image_url:
+            self._load_portal_image(image_url)
+
+    def _load_portal_image(self, url: str) -> None:
+        from src.infrastructure.doubao_share import download_image
+
+        def apply(payload) -> None:
+            image = QPixmap()
+            if image.loadFromData(payload):
+                self._home_page.set_portal_module(
+                    self._portal_module.title,
+                    self._portal_module.description,
+                    image=image,
+                )
+
+        if self._task_runner is not None:
+            self._task_runner.submit(
+                lambda: download_image(url), apply, lambda _error: None
+            )
+            return
+        try:
+            apply(download_image(url))
+        except Exception:
+            pass
+
+    def _open_portal_window(self) -> None:
+        """打开万象笔记网页窗口（首页卡片与编辑器工具栏共用）。"""
+        url = getattr(self._portal_module, "link_url", "") or ""
+        if not url:
+            self.statusBar().showMessage(
+                "万象笔记入口尚未配置链接，请联系管理员在后台设置", 6000
+            )
+            return
+        if self._portal_window is None:
+            self._portal_window = PortalBrowserWindow(self)
+        self._portal_window.load_url(url)
+        self._portal_window.show()
+        self._portal_window.raise_()
+        self._portal_window.activateWindow()
+
     def _enter_toolbox(self) -> None:
         self._stack.setCurrentWidget(self._toolbox_page)
         self.statusBar().showMessage("图片工具箱：导入图片开始操作")
 
     # —— 导入 ——
 
-    def _on_import(self, source: Path) -> None:
-        # 检查未保存修改
-        if self._model.is_dirty:
-            from PySide6.QtWidgets import QMessageBox
-            reply = QMessageBox.question(
-                self, "未保存的修改",
-                "当前项目有未导出的修改。导入新图片会丢失这些修改。\n\n确定要导入新图片吗？",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No,
-            )
-            if reply != QMessageBox.StandardButton.Yes:
-                return
+    def _on_load_fonts(self) -> None:
+        """载入外部字体文件（ttf/otf/ttc），注册后可立即在「译文字体」中选用。"""
+        from PySide6.QtGui import QFontDatabase
 
+        paths, _ = QFileDialog.getOpenFileNames(
+            self,
+            "载入字体文件",
+            "",
+            "字体文件 (*.ttf *.otf *.ttc *.otc)",
+        )
+        if not paths:
+            return
+        loaded: list[Path] = []
+        added_families: list[str] = []
+        failed: list[str] = []
+        for value in paths:
+            font_id = QFontDatabase.addApplicationFont(value)
+            if font_id < 0:
+                failed.append(Path(value).name)
+                continue
+            loaded.append(Path(value))
+            added_families.extend(QFontDatabase.applicationFontFamilies(font_id))
+        if self._loaded_font_preferences is not None and loaded:
+            existing = list(self._loaded_font_preferences.load())
+            for path in loaded:
+                if path not in existing:
+                    existing.append(path)
+            self._loaded_font_preferences.save(tuple(existing))
+        self._editor_page.translate_controls.refresh_translation_font_choices()
+        if added_families:
+            self.statusBar().showMessage(
+                f"已载入字体：{'、'.join(sorted(set(added_families)))}", 8000
+            )
+        elif failed:
+            self.statusBar().showMessage(
+                f"字体载入失败：{'、'.join(failed)}", 8000
+            )
+
+    def _on_import(self, source: Path) -> None:
         if self._task_runner is not None:
             self.statusBar().showMessage(f"正在导入 {source.name}…")
             self._task_runner.submit(
@@ -2111,8 +2495,12 @@ class EditorMainWindow(QMainWindow):
             enable_properties = True
         if doc is not None:
             self._editor_page.set_document(doc)
+        # set_document 会清空所有图层次；任何模式下都重建，成品图模式下隐藏，
+        # 这样在成品图上点到文字仍能命中图层（否则切图后完全选不中、没有控制点）
+        self._editor_page.set_text_layout(self._model.text_layout)
         if show_layers:
-            self._editor_page.set_text_layout(self._model.text_layout)
+            # 编辑模式要能点识别框：set_document 会清空它们，这里重建
+            self._editor_page.restore_ocr_regions()
             if self._model.composition_editor is not None:
                 self._editor_page.scene.set_watermarks(
                     self._model.composition_editor.watermarks
@@ -2131,6 +2519,18 @@ class EditorMainWindow(QMainWindow):
         self._editor_page.top_bar.set_preview_mode(mode)
 
     # —— 显示/隐藏文字图层 ——
+
+    def _on_canvas_layer_selected(self, region_id: str) -> None:
+        """成品图模式下点到文字：切到图层模式，控制点（含旋转点）才可见可拖。"""
+        if self._model.preview_mode != "translated":
+            return
+        if not any(
+            layer.region_id == region_id
+            for layer in self._model.text_layout.layers
+        ):
+            return
+        self._apply_preview_mode("layers")
+        self._editor_page.scene.select_layer(region_id)
 
     def _on_toggle_layers(self) -> None:
         if self._model.preview_mode == "layers":
@@ -2186,6 +2586,10 @@ class EditorMainWindow(QMainWindow):
             self.statusBar().showMessage("请在图片上拖动框选漏翻文字区域")
 
     def _on_feature_requested(self, feature_id: str) -> None:
+        if feature_id == "wanxiang_note":
+            self._open_portal_window()
+            self._editor_page.toolbar.set_active_tool("select")
+            return
         labels = {
             "crop": "裁剪",
             "watermark": "水印",
@@ -2263,35 +2667,74 @@ class EditorMainWindow(QMainWindow):
 
     def _watermark_quota_precheck(self, amount: int) -> str | None:
         """强化翻译每日额度预检（GUI 线程）；通过返回 None，否则返回中文提示。"""
+        log = logging.getLogger("imgtrans")
         if self._quota_client is None:
-            return None  # 未配置用量服务，不强制
+            # 未配置用量服务时既不拦截也不扣减，留痕便于判断客户机是否属此情况
+            log.warning("watermark_quota_skip reason=no_quota_client")
+            return None
         token = self._access_token() if self._access_token else None
         if not token:
+            log.warning("watermark_quota_skip reason=no_access_token")
             return "请先激活应用，再使用强化翻译"
         try:
             info = self._quota_client.get_watermark(token)
         except Exception as error:
+            log.warning("watermark_quota_get_failed error=%s", error, exc_info=True)
             return f"无法获取强化翻译额度：{error}"
+        log.info(
+            "watermark_quota_precheck limit=%s used=%s remaining=%s amount=%s",
+            info.daily_limit,
+            info.used_today,
+            info.remaining,
+            amount,
+        )
         if info.daily_limit <= 0:
             return "当前套餐不含强化翻译次数，请购买含强化翻译的套餐后使用"
         if info.remaining < amount:
             return f"今日强化翻译次数不足：剩余 {info.remaining} 张，需要 {amount} 张"
         return None
 
-    def _consume_watermark_quota(self, amount: int) -> None:
-        """原子扣减每日强化翻译额度（工作线程调用）；失败抛错中止下载。"""
+    def _consume_watermark_quota(self, amount: int) -> object:
+        """原子扣减每日强化翻译额度（工作线程调用）；失败抛错中止下载。
+
+        返回服务端确认后的 WatermarkQuota，供界面回显今日已用张数。
+        """
+        log = logging.getLogger("imgtrans")
         if self._quota_client is None:
-            return
+            log.warning("watermark_consume_skip reason=no_quota_client")
+            return None
         token = self._access_token() if self._access_token else None
         if not token:
             raise RuntimeError("请先激活应用，再使用强化翻译")
         info = self._quota_client.consume_watermark(token, amount)
         if not info.consumed:
+            log.warning(
+                "watermark_consume_rejected limit=%s used=%s remaining=%s amount=%s",
+                info.daily_limit,
+                info.used_today,
+                info.remaining,
+                amount,
+            )
             if info.daily_limit <= 0:
                 raise RuntimeError("当前套餐不含强化翻译次数，请购买含强化翻译的套餐后使用")
             raise RuntimeError(
                 f"今日强化翻译次数不足：剩余 {info.remaining} 张，需要 {amount} 张"
             )
+        log.info(
+            "watermark_consumed amount=%s used=%s limit=%s",
+            amount,
+            info.used_today,
+            info.daily_limit,
+        )
+        return info
+
+    @staticmethod
+    def _watermark_usage_suffix(quota: object) -> str:
+        used = getattr(quota, "used_today", None)
+        limit = getattr(quota, "daily_limit", None)
+        if used is None or limit is None:
+            return ""
+        return f"（强化翻译今日 {used}/{limit}）"
 
     def _on_enhance_import(self, image) -> None:
         dialog = self._editor_page.enhance_panel
@@ -2302,13 +2745,17 @@ class EditorMainWindow(QMainWindow):
             return
         dialog.set_status("正在下载原图…")
 
-        def succeeded(path: object) -> None:
-            dialog.set_status(f"已取到无水印原图：{Path(path).name}")
+        def succeeded(value: object) -> None:
+            path, quota = value
+            dialog.set_status(
+                f"已取到无水印原图：{Path(path).name}"
+                f"{self._watermark_usage_suffix(quota)}"
+            )
             self._on_import(Path(path))
 
         def work() -> object:
-            self._consume_watermark_quota(1)
-            return self._save_share_image(image, _share_cache_dir())
+            quota = self._consume_watermark_quota(1)
+            return self._save_share_image(image, _share_cache_dir()), quota
 
         self._task_runner.submit(
             work,
@@ -2327,15 +2774,19 @@ class EditorMainWindow(QMainWindow):
         dialog.set_status(f"正在下载 {amount} 张原图…")
         target_dir = Path(directory)
 
-        def succeeded(paths) -> None:
-            dialog.set_status(f"已保存 {len(paths)} 张到 {target_dir}")
+        def succeeded(value: object) -> None:
+            paths, quota = value
+            dialog.set_status(
+                f"已保存 {len(paths)} 张到 {target_dir}"
+                f"{self._watermark_usage_suffix(quota)}"
+            )
             self.statusBar().showMessage(
                 f"强化翻译：已保存 {len(paths)} 张无水印原图到 {target_dir}", 6000
             )
 
         def work() -> object:
-            self._consume_watermark_quota(amount)
-            return self._save_share_images(images, target_dir)
+            quota = self._consume_watermark_quota(amount)
+            return self._save_share_images(images, target_dir), quota
 
         self._task_runner.submit(
             work,
@@ -2613,11 +3064,18 @@ class EditorMainWindow(QMainWindow):
         document = self._model.document or self._model.source_document
         if document is None or self._create_composition_editor is None:
             return False
+        # 底图必须用「去字修复后」的背景：拿成品图当底图，重新渲染时译文会叠在
+        # 已经烘焙进图片的文字上，任何一次编辑都会变成重影。
+        background = (
+            self._model.repaired_background
+            or self._model.source_document
+            or document
+        )
         editor = self._create_composition_editor.execute(
+            background,
             document,
-            document,
-            TextLayout(()),
-            self._model.source_document or document,
+            self._model.text_layout,
+            self._model.source_document or background,
         )
         self._model.composition_editor = editor
         self._model.text_layout = editor.layout
@@ -3280,8 +3738,13 @@ class EditorMainWindow(QMainWindow):
         elif kind == "box":
             op = lambda: editor.replace_box(region_id, after_layer.box)
         elif kind == "style":
-            if after_layer.box != before_layer.box:
-                # 对齐调整同时移动了框（左边缘对齐 OCR），需连同框一起应用
+            if (
+                after_layer.box != before_layer.box
+                or after_layer.path != before_layer.path
+                or after_layer.color_runs != before_layer.color_runs
+            ):
+                # 对齐调整会移动框、格式刷会改文字路径（弧线）、片段上色改
+                # color_runs，replace_style 只带 style+rotation，都要整层替换
                 op = lambda: editor.replace_layer(after_layer)
             else:
                 op = lambda: editor.replace_style(
@@ -3298,6 +3761,52 @@ class EditorMainWindow(QMainWindow):
             lambda e: self.statusBar().showMessage(f"编辑失败：{e}"),
         )
 
+    def _on_brush_layer_requested(self, region_id: str, layer: object) -> None:
+        """格式刷落到原文未擦除的区域：先补背景（擦掉原字），再写入新样式图层。"""
+        editor = self._model.composition_editor
+        if (
+            editor is None
+            or self._task_runner is None
+            or not isinstance(layer, TextLayer)
+        ):
+            return
+        region = self._find_region_for(region_id)
+        mask = self._ocr_preview_mask(region) if region is not None else None
+
+        def operation():
+            repaired_document = None
+            if mask is not None and self._repair_selection is not None:
+                repaired = self._repair_selection.execute(
+                    editor.background_document, mask
+                )
+                repaired_document = repaired.document
+            if repaired_document is not None:
+                return editor.replace_region_from_manual(
+                    region_id, repaired_document, layer, mask
+                )
+            return editor.replace_layer(layer)
+
+        self._task_runner.submit(
+            operation,
+            self._editor_page.apply_edit_result,
+            lambda error: self.statusBar().showMessage(
+                f"格式刷应用失败：{error}", 6000
+            ),
+        )
+
+    def _find_region_for(self, region_id: str):
+        """按区域 id 找 OCR 识别结果（译文结果优先，其次当前 OCR 结果）。"""
+        result = self._model.translation_result
+        candidates = []
+        if isinstance(result, TranslateImageResult):
+            candidates.append(getattr(result, "ocr", None))
+        candidates.append(self._model.ocr_result)
+        for ocr in candidates:
+            for region in getattr(ocr, "regions", ()) or ():
+                if region.region_id == region_id:
+                    return region
+        return None
+
     def _on_style_brush_batch(self, updates) -> None:
         """格式刷框选：把捕获样式批量套用到多个区域，单次后台渲染。"""
         editor = self._model.composition_editor
@@ -3305,7 +3814,7 @@ class EditorMainWindow(QMainWindow):
             return
         self.statusBar().showMessage("正在应用格式刷…")
         self._task_runner.submit(
-            lambda: editor.replace_style_many(updates),
+            lambda: editor.replace_layers_many(updates),
             self._editor_page.apply_edit_result,
             lambda e: self.statusBar().showMessage(f"编辑失败：{e}"),
         )
@@ -3352,6 +3861,15 @@ class EditorMainWindow(QMainWindow):
         source = self._model.source_document
         if source is None:
             return None
+        # 预览阶段按识别框多边形整块擦掉原文：只擦字形时，艺术字/描边字/旋转文字
+        # 常留下残影，预览文字叠上去就成了「重影」。正式翻译仍走精细蒙版。
+        if self._mask_rasterizer is not None:
+            return self._mask_rasterizer.rasterize(
+                source.asset.width,
+                source.asset.height,
+                (tuple((point.x, point.y) for point in region.polygon),),
+                2,
+            )
         if self._erase_mask_builder is not None:
             ocr_result, translation_result = self._ocr_preview_pipeline_inputs(region)
             return self._erase_mask_builder.execute(
@@ -3359,14 +3877,7 @@ class EditorMainWindow(QMainWindow):
                 ocr_result,
                 translation_result,
             )
-        if self._mask_rasterizer is None:
-            return None
-        return self._mask_rasterizer.rasterize(
-            source.asset.width,
-            source.asset.height,
-            (tuple((point.x, point.y) for point in region.polygon),),
-            1,
-        )
+        return None
 
     def _ocr_preview_pipeline_inputs(
         self, region: TextRegion
@@ -3449,6 +3960,12 @@ class EditorMainWindow(QMainWindow):
         editor = self._model.composition_editor
         if editor is None:
             return
+        if existing_id is not None and not any(
+            layer.region_id == existing_id for layer in editor.layout.layers
+        ):
+            # 预览图层可能已被删除/恢复原文/切图，缓存里的 id 失效 → 按新建处理
+            self._ocr_preview_layers.pop(region_id, None)
+            existing_id = None
 
         if (
             original_text is not None
@@ -3480,86 +3997,78 @@ class EditorMainWindow(QMainWindow):
             return
 
         repair_mask = self._ocr_preview_mask(region)
+        field_order = (
+            "center_x", "center_y", "width", "height",
+            "rotation_degrees", "font_family", "font_weight",
+            "font_size", "auto_fit", "font_stretch", "wrap",
+            "alignment", "vertical_alignment", "line_height",
+            "letter_spacing", "text_opacity", "background_rgb",
+            "background_opacity", "fill_rgb", "stroke_width",
+            "stroke_rgb", "shadow_enabled", "shadow_offset_x",
+            "shadow_offset_y", "shadow_opacity", "shadow_rgb",
+            "effect_preset", "text_path",
+        )
 
         def operation():
-            layer_id = existing_id
-            if layer_id is None:
-                if (
-                    repair_mask is not None
-                    and self._repair_selection is not None
-                ):
-                    repaired = self._repair_selection.execute(
-                        editor.background_document,
-                        repair_mask,
-                    )
-                    editor.apply_background_repair(repaired.document, repair_mask)
-                last_edit = editor.add_layer(region.text)
-                layer_id = last_edit.affected_region_id
-                if layer_id is None:
-                    return last_edit
-                self._ocr_preview_layers[region_id] = layer_id
-                base_layer = self._ocr_preview_base_layer(region)
-                if base_layer is not None:
-                    last_edit = editor.replace_layer(
-                        replace(base_layer, region_id=layer_id)
-                    )
-                    self._ocr_preview_boxes[region_id] = base_layer.box
-                else:
-                    box = self._ocr_preview_box(region)
-                    layer = editor.layout.layer_by_id(layer_id)
-                    style = replace(
-                        layer.style,
+            # 先把最终图层算好，再用一次「补背景 + 写图层」提交：
+            # 一次属性修改只产生一条撤销记录，撤回时不会出现半截错位或要连点多次
+            layer = self._ocr_preview_base_layer(region)
+            if layer is not None:
+                self._ocr_preview_boxes[region_id] = layer.box
+            else:
+                box = self._ocr_preview_box(region)
+                layer = TextLayer(
+                    region_id,
+                    region.text,
+                    box,
+                    TextStyle(
+                        resolve_system_font("zh-Hans"),
+                        max(6.0, min(160.0, box.height * 0.85)),
+                        (24, 32, 51),
                         auto_fit=False,
-                        font_size=max(6.0, min(160.0, box.height * 0.85)),
                         font_weight=(
                             600
                             if any(ord(char) > 0x2E80 for char in region.text)
-                            else layer.style.font_weight
+                            else 400
                         ),
-                    )
-                    last_edit = editor.replace_style(
-                        layer_id,
-                        style,
-                        box.rotation_degrees,
-                    )
-                    last_edit = editor.replace_box(layer_id, box)
-            else:
-                last_edit = editor.replace_text(layer_id, region.text)
-
-            field_order = (
-                "center_x", "center_y", "width", "height",
-                "rotation_degrees", "font_family", "font_weight",
-                "font_size", "auto_fit", "font_stretch", "wrap",
-                "alignment", "vertical_alignment", "line_height",
-                "letter_spacing", "text_opacity", "background_rgb",
-                "background_opacity", "fill_rgb", "stroke_width",
-                "stroke_rgb", "shadow_enabled", "shadow_offset_x",
-                "shadow_offset_y", "shadow_opacity", "shadow_rgb",
-                "effect_preset", "text_path",
-            )
+                    ),
+                )
+            layer = replace(layer, region_id=region_id, text=region.text)
             for field in field_order:
                 if field not in overrides:
                     continue
-                before = editor.layout.layer_by_id(layer_id)
-                after = self._editor_page._apply_field_change(
-                    before, field, overrides[field]
+                candidate = self._editor_page._apply_field_change(
+                    layer, field, overrides[field]
                 )
-                if after is None or after == before:
-                    continue
-                if field in {
-                    "center_x", "center_y", "width", "height",
-                    "rotation_degrees",
-                }:
-                    last_edit = editor.replace_box(layer_id, after.box)
-                elif field == "text_path":
-                    last_edit = editor.replace_path(layer_id, after.path)
-                else:
-                    last_edit = editor.replace_style(
-                        layer_id,
-                        after.style,
-                        after.box.rotation_degrees,
-                    )
-            return last_edit
+                if candidate is not None:
+                    layer = candidate
+
+            repaired_document = None
+            if repair_mask is not None and self._repair_selection is not None:
+                repaired = self._repair_selection.execute(
+                    editor.background_document, repair_mask
+                )
+                repaired_document = repaired.document
+
+            has_layer = any(
+                item.region_id == region_id for item in editor.layout.layers
+            )
+            if repaired_document is not None:
+                edit = editor.replace_region_from_manual(
+                    region_id, repaired_document, layer, repair_mask
+                )
+                self._ocr_preview_layers[region_id] = region_id
+            elif has_layer:
+                edit = editor.replace_layer(layer)
+                self._ocr_preview_layers[region_id] = region_id
+            else:
+                edit = editor.add_layer(region.text)
+                new_id = edit.affected_region_id
+                if new_id is None:
+                    return edit
+                edit = editor.replace_layer(replace(layer, region_id=new_id))
+                self._ocr_preview_layers[region_id] = new_id
+            return edit
 
         def on_success(edit):
             self._editor_page.apply_edit_result(edit)
@@ -3629,6 +4138,20 @@ class EditorMainWindow(QMainWindow):
         )
 
     def _on_add_layer(self, default_text: str) -> None:
+        self._submit_add_layer(default_text)
+
+    def _on_add_layer_at(
+        self, default_text: str, center_x: float, center_y: float
+    ) -> None:
+        """在画布点击位置创建文字框（点击哪里，文字框就出现在哪里）。"""
+        self._submit_add_layer(default_text, center_x, center_y)
+
+    def _submit_add_layer(
+        self,
+        default_text: str,
+        center_x: float | None = None,
+        center_y: float | None = None,
+    ) -> None:
         if self._task_runner is None:
             return
         # 新增文字是独立功能：导入图片后即可使用，不必先完成自动翻译
@@ -3638,7 +4161,7 @@ class EditorMainWindow(QMainWindow):
         editor = self._model.composition_editor
         self.statusBar().showMessage("正在新增文字图层…")
         self._task_runner.submit(
-            lambda: editor.add_layer(default_text),
+            lambda: editor.add_layer(default_text, center_x, center_y),
             self._on_layer_created,
             lambda e: self.statusBar().showMessage(f"新增失败：{e}"),
         )

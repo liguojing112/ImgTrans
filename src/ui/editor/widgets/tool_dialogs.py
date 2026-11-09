@@ -169,6 +169,10 @@ class EraseToolDialog(QDialog):
             else "蒙版橡皮擦已启用，请涂抹要移出蒙版的部分。"
         )
 
+    def reapply_current_mode(self) -> None:
+        """消除完成后重新激活当前方式：矩形框选可以连续框，画笔恢复涂抹。"""
+        self.activate_mode(self._current_mode)
+
     def _emit_current_brush(self) -> None:
         if self._current_mode in {"paint", "erase"}:
             self.brush_changed.emit(
@@ -197,7 +201,7 @@ class EraseToolDialog(QDialog):
         self.apply_button.setEnabled(False)
         self.undo_button.setEnabled(True)
         self.mask_status.setText(
-            f"AI 消除完成（{backend_id}）。可继续涂抹、撤销消除或新增文字。"
+            f"AI 消除完成（{backend_id}）。可继续当前方式再选区域、撤销消除或新增文字。"
         )
 
     def set_failed(self, message: str) -> None:

@@ -35,6 +35,7 @@ from src.domain.layout import (
     ArcTextPath,
     ArtisticPreset,
     CircularTextPath,
+    ColorRun,
     PathPoint,
     TextAlignment,
     TextBox,
@@ -133,11 +134,15 @@ class EditorPage(QWidget):
     delete_requested = Signal(str)  # region_id
     duplicate_requested = Signal(str)  # region_id
     add_layer_requested = Signal(str)  # default text
+    add_layer_at_requested = Signal(str, float, float)  # default text, center_x, center_y
     layer_edit_requested = Signal(str)  # 双击画布文字请求编辑
     restore_layout_requested = Signal(str)
     source_text_changed = Signal(str, str)
     translated_text_changed = Signal(str, str)
     remove_document_requested = Signal(str)  # doc_id
+    pin_document_requested = Signal(str)  # doc_id
+    # 格式刷落到「未擦除原文」的区域（保护/跳过）：需要先擦原字再写图层
+    style_brush_layer_requested = Signal(str, object)
     retranslate_requested = Signal(str)
     keep_original_requested = Signal(str)
     confirm_review_requested = Signal(str)
@@ -213,7 +218,7 @@ class EditorPage(QWidget):
         # 右侧翻译与属性面板
         self.right_panel = QFrame()
         self.right_panel.setObjectName("editorRightPanel")
-        self.right_panel.setMinimumWidth(380)
+        self.right_panel.setMinimumWidth(430)
         self.right_panel.setMaximumWidth(540)
         right_layout = QVBoxLayout(self.right_panel)
         right_layout.setContentsMargins(0, 0, 0, 0)
@@ -267,6 +272,9 @@ class EditorPage(QWidget):
         self.image_list_panel.remove_requested.connect(
             self.remove_document_requested.emit
         )
+        self.image_list_panel.pin_requested.connect(
+            self.pin_document_requested.emit
+        )
         center_layout.addWidget(self.image_list_panel)
 
         self.main_splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -288,6 +296,7 @@ class EditorPage(QWidget):
         self.original_view.setVisible(False)
 
         self._sidebar_visible = False
+        self._image_list_hidden_for_split = False
 
         self.view.bind_sync(self.original_view)
         self.view.transform_synced.connect(self.original_view.sync_transform)
@@ -352,7 +361,7 @@ class EditorPage(QWidget):
         self.comparison_slider_bar.setVisible(self._slider_compare and not on)
 
     def _connect_signals(self) -> None:
-        self.toolbar.add_text_requested.connect(self._on_add_text_requested)
+        self.toolbar.add_text_requested.connect(self._on_place_text_requested)
         self.toolbar.tool_changed.connect(self._on_toolbar_tool_changed)
         self.toolbar.feature_requested.connect(self.feature_requested.emit)
         self.scene.layer_selected.connect(self._on_scene_selection)
@@ -372,6 +381,8 @@ class EditorPage(QWidget):
         self.scene.area_selection_cleared.connect(
             self._on_area_selection_cleared
         )
+        self.scene.add_text_at.connect(self._on_add_text_at)
+        self.scene.layer_delete_requested.connect(self.delete_requested.emit)
         self.property_panel.layer_property_changed.connect(self._on_property_changed)
         self.property_panel.ocr_property_changed.connect(
             self._on_ocr_property_changed
@@ -382,9 +393,17 @@ class EditorPage(QWidget):
         self.property_panel.style_brush_rect_mode_changed.connect(
             self._on_brush_rect_mode_changed
         )
+        self.property_panel.color_run_requested.connect(
+            self._on_color_run_requested
+        )
+        self.property_panel.clear_color_runs_requested.connect(
+            self._on_clear_color_runs
+        )
         self.property_panel.delete_layer_requested.connect(self.delete_requested.emit)
         self.property_panel.duplicate_layer_requested.connect(self.duplicate_requested.emit)
-        self.property_panel.add_layer_requested.connect(self.add_layer_requested.emit)
+        self.property_panel.add_layer_requested.connect(
+            self._on_place_text_requested
+        )
         self.property_panel.restore_layout_requested.connect(
             self.restore_layout_requested.emit
         )
@@ -486,7 +505,13 @@ class EditorPage(QWidget):
         self.export_settings.export_requested.connect(self._on_export_clicked)
         self.view.zoom_changed.connect(self._on_zoom_changed)
         self.manual_region_panel.select_requested.connect(
-            lambda: self.scene.set_area_selection_mode("manual_translate")
+            self.open_manual_region_dialog
+        )
+        self.manual_region_panel.geometry_changed.connect(
+            self._refresh_manual_preview
+        )
+        self.scene.manual_selection_box_changed.connect(
+            self.manual_region_panel.set_selection_box
         )
         self.manual_region_panel.process_requested.connect(
             lambda: self.manual_region_requested.emit(
@@ -656,6 +681,9 @@ class EditorPage(QWidget):
             self.erase_dialog.set_mask_ready(False)
             self.scene.set_area_selection_mode("ai_erase")
             return
+        # 消除期间暂停框选/涂抹：这段时间新画的蒙版会在完成时被清空，容易误以为没生效
+        self.scene.set_area_selection_mode(None)
+        self.scene.set_mask_brush(None)
         self.erase_dialog.set_running(True)
         self.ai_erase_requested.emit(mask)
 
@@ -679,12 +707,20 @@ class EditorPage(QWidget):
         self.scene.clear_edit_mask()
         self.scene.set_edit_mask_visible(True)
         self._show_layer_tool("ai_erase")
-        self.erase_dialog.activate_mode("paint")
+        # 不切回涂抹画笔：用户选的是矩形框选就保持矩形，方便连框多个区域
         self.erase_dialog.set_completed(backend_id)
+        self._restore_erase_mode()
 
     def fail_ai_erase(self, message: str) -> None:
         self._show_layer_tool("ai_erase")
         self.erase_dialog.set_failed(message)
+        self._restore_erase_mode()
+
+    def _restore_erase_mode(self) -> None:
+        """消除完成/失败后恢复当前方式：矩形框选可连续框，画笔恢复涂抹。"""
+        if self.toolbar.active_tool != "ai_erase":
+            return
+        self.erase_dialog.reapply_current_mode()
 
     def set_model(self, model) -> None:
         self._model = model
@@ -700,8 +736,12 @@ class EditorPage(QWidget):
         model.active_document_changed.connect(self._sync_active_document)
 
     def _sync_image_list(self) -> None:
-        """同步左侧图片列表。"""
-        self.image_list_panel.set_documents(self._model.documents())
+        """同步左侧图片列表，并保持当前编辑图片的高亮。"""
+        model = getattr(self, "_model", None)
+        documents = model.documents() if model is not None else []
+        self.image_list_panel.set_documents(documents)
+        if model is not None:
+            self.image_list_panel.set_active(model.active_document_id)
 
     def _sync_active_document(self, doc_id: str) -> None:
         self.image_list_panel.set_active(doc_id)
@@ -717,7 +757,16 @@ class EditorPage(QWidget):
 
         setVisible 会触发 splitter 重排并覆盖同步 setSizes，因此尺寸
         计算延迟到下一个事件循环（_apply_split_sizes）。
+        分屏时收起左侧图片列表，把宽度让给两幅对比图（否则各占一半宽，
+        图上的字会小到看不清）；右侧属性面板保持可用，退出分屏恢复列表。
         """
+        if enabled and not self._sidebar_visible:
+            self._image_list_hidden_for_split = self.image_list_panel.isVisible()
+            self.image_list_panel.setVisible(False)
+        elif not enabled and self._sidebar_visible:
+            if self._image_list_hidden_for_split:
+                self.image_list_panel.setVisible(True)
+                self._image_list_hidden_for_split = False
         self._sidebar_visible = enabled
         self.original_view.setVisible(enabled)
         QTimer.singleShot(0, self._apply_split_sizes)
@@ -896,6 +945,8 @@ class EditorPage(QWidget):
             self.scene.set_edit_mask_visible(False)
         if tool_id not in {"ai_erase", "crop", "manual_translate"}:
             self.scene.set_area_selection_mode(None)
+        if tool_id != "manual_translate":
+            self.scene.set_manual_selection_preview(None)
         tab_by_tool = {
             "text_regions": 1,
             "layers": 3,
@@ -923,8 +974,21 @@ class EditorPage(QWidget):
             ),
         )
 
+    def _refresh_manual_preview(self) -> None:
+        panel = self.manual_region_panel
+        box = None
+        if panel.has_selection:
+            try:
+                box = panel.spec.text_box
+            except ValueError:
+                box = None  # 数值还没填完整（宽高为 0）时先不画
+        self.scene.set_manual_selection_preview(box)
+
     def _on_manual_selection(self, box: TextBox) -> None:
         self.manual_region_panel.set_selection(box)
+        self.scene.set_manual_selection_preview(
+            self.manual_region_panel.spec.text_box
+        )
         self.manual_region_panel.set_available(True)
         self.manual_region_dialog.show()
         self.manual_region_dialog.raise_()
@@ -953,6 +1017,22 @@ class EditorPage(QWidget):
         self.toolbar.set_active_tool("add_text")
         self.right_tabs.setCurrentIndex(2)
         self.add_layer_requested.emit("新文本")
+
+    def _on_place_text_requested(self) -> None:
+        """「新增文字」：进入点击放置模式，点画布哪里就在哪里创建文本框。
+
+        工具栏按钮和属性面板「新增文字图层」共用；创建完自动退回选择工具。
+        """
+        self.scene.set_mask_brush(None)
+        self.scene.set_edit_mask_visible(False)
+        self.scene.set_area_selection_mode("add_text")
+        self.toolbar.set_active_tool("add_text")
+        self.right_tabs.setCurrentIndex(2)
+
+    def _on_add_text_at(self, point) -> None:
+        # 放置完成：工具按钮复位为「选择」，避免误以为还在放置模式
+        self.toolbar.set_active_tool("select")
+        self.add_layer_at_requested.emit("新文本", float(point.x()), float(point.y()))
 
     def _on_layer_visibility_changed(
         self,
@@ -1000,9 +1080,43 @@ class EditorPage(QWidget):
             return
         self.edit_requested.emit(region_id, "box", after, before)
 
+    def _layer_for_ocr_region(self, region_id: str, ocr_region: object):
+        """按区域 id 找对应文字图层；id 对不上时按中心点落框匹配。"""
+        model = getattr(self, "_model", None)
+        layout = getattr(model, "text_layout", None)
+        if layout is None:
+            return None
+        for layer in layout.layers:
+            if layer.region_id == region_id:
+                return layer
+        points = tuple(getattr(ocr_region, "polygon", ()))
+        if not points:
+            return None
+        center_x = sum(point.x for point in points) / len(points)
+        center_y = sum(point.y for point in points) / len(points)
+        for layer in layout.layers:
+            box = layer.box
+            if (
+                abs(center_x - box.center_x) <= max(box.width, 24.0) / 2 + 8
+                and abs(center_y - box.center_y) <= max(box.height, 24.0) / 2 + 8
+            ):
+                return layer
+        text = str(getattr(ocr_region, "text", "") or "").strip()
+        if text:
+            matched = [
+                layer
+                for layer in layout.layers
+                if layer.text.strip() == text
+            ]
+            if len(matched) == 1:
+                return matched[0]
+        return None
+
     def _on_ocr_region_selected(self, region_id: str) -> None:
         """OCR 面板点击行 → 画布选中对应 OCR 区域。"""
         has_layer = False
+        layer = None
+        ocr_region = self._find_ocr_region(region_id)
         if hasattr(self, "_model") and self._model is not None:
             ocr_result = getattr(self._model, "ocr_result", None)
             if ocr_result is not None:
@@ -1010,36 +1124,27 @@ class EditorPage(QWidget):
                 self.scene.set_regions_visible(
                     self.ocr_result_panel.show_regions.isChecked()
                 )
-            try:
-                self._model.text_layout.layer_by_id(region_id)
-            except KeyError:
-                pass
-            else:
+            layer = self._layer_for_ocr_region(region_id, ocr_region)
+            if layer is not None:
                 has_layer = True
-                self._model.selected_layer_id = region_id
+                self._model.selected_layer_id = layer.region_id
         region_rect = self.scene.highlight_ocr_region(region_id)
         if region_rect is not None:
             self.view.ensureVisible(region_rect, 80, 80)
-        ocr_region = self._find_ocr_region(region_id)
         if ocr_region is not None and not has_layer:
             self.property_panel.set_ocr_region(
                 ocr_region,
                 self._find_translation_unit(region_id),
                 self._ocr_property_overrides.get(region_id),
             )
-        elif has_layer:
-            # 翻译后点选识别框：该区域已有文字图层，切换到图层编辑模式
+        elif has_layer and layer is not None:
+            # 翻译后点选识别框：该区域已有文字图层，切到图层编辑模式
             # （改对齐/样式立即生效），而不是停留在 OCR 待应用模式。
-            try:
-                layer = self._model.text_layout.layer_by_id(region_id)
-            except KeyError:
-                layer = None
-            if layer is not None:
-                self.property_panel.set_layer(
-                    layer,
-                    ocr_region,
-                    self._find_translation_unit(region_id),
-                )
+            self.property_panel.set_layer(
+                layer,
+                ocr_region,
+                self._find_translation_unit(layer.region_id),
+            )
         # OCR-only 模式直接打开属性页编辑；翻译完成后点选行不跳转标签页，
         # 由「重新翻译选中区域」按钮等显式操作才跳转到文字属性。
         has_translation = bool(
@@ -1133,18 +1238,97 @@ class EditorPage(QWidget):
         try:
             target = self._model.text_layout.layer_by_id(region_id)
         except KeyError:
+            target = None
+        if target is None:
+            # OCR-only 区域还没有文字图层：样式先写进覆盖，生成预览/图层时生效
+            region = self._find_ocr_region(region_id)
+            if region is None:
+                return
+            overrides = self._ocr_property_overrides.setdefault(region_id, {})
+            overrides.update(snapshot)
+            self.ocr_preview_changed.emit(region_id, region)
             return
         after = target
         for field, value in snapshot.items():
             candidate = self._apply_field_change(after, field, value)
             if candidate is not None:
                 after = candidate
-        if after != target:
-            self.edit_requested.emit(region_id, "style", after, target)
+        if after == target:
+            return
+        if self._needs_erase_before_style(region_id):
+            # 该区域原文当初没被擦掉（保护/跳过/未翻译），直接重绘会出现重影
+            self.style_brush_layer_requested.emit(region_id, after)
+            return
+        self.edit_requested.emit(region_id, "style", after, target)
+
+    def _needs_erase_before_style(self, region_id: str) -> bool:
+        """该区域的原文是否还在底图里（没被翻译管线擦掉）。"""
+        result = getattr(self._model, "translation_result", None)
+        if result is None:
+            # 没有译文信息（OCR 阶段 / 测试夹具）：按原行为直接重绘图层
+            return False
+        unit = next(
+            (
+                item
+                for item in getattr(result.translation, "units", ())
+                if item.region_id == region_id
+            ),
+            None,
+        )
+        return unit is None or not unit.should_erase_source
 
     def _on_brush_rect_mode_changed(self, enabled: bool) -> None:
         """面板格式刷开/关 → 切换画布框选模式。"""
         self.scene.set_area_selection_mode("format_brush" if enabled else None)
+
+    def _on_color_run_requested(
+        self, region_id: str, start: int, end: int, substring: str, rgb
+    ) -> None:
+        """给一句话里的局部字符上色：合并进图层的 color_runs 后整层替换。"""
+        if not hasattr(self, "_model") or self._model is None:
+            return
+        try:
+            before = self._model.text_layout.layer_by_id(region_id)
+        except KeyError:
+            return
+        text = before.text
+        if not (0 <= start <= end <= len(text)) or text[start:end] != substring:
+            # 面板文本可能滞后于图层（如刚点过「应用译文」），按选中内容重新定位
+            pos = text.find(substring)
+            if pos < 0:
+                return
+            start, end = pos, pos + len(substring)
+        if start >= end:
+            return
+        runs: list[ColorRun] = []
+        for run in before.color_runs:
+            # 与新区间重叠的旧片段裁掉重叠部分，保留两端剩余
+            if run.end <= start or run.start >= end:
+                runs.append(run)
+                continue
+            if run.start < start:
+                runs.append(ColorRun(run.start, min(run.end, start), run.fill_rgb))
+            if run.end > end:
+                runs.append(ColorRun(max(run.start, end), run.end, run.fill_rgb))
+        runs.append(ColorRun(start, end, tuple(rgb)))
+        runs.sort(key=lambda item: item.start)
+        after = replace(before, color_runs=tuple(runs))
+        if after == before:
+            return
+        self.edit_requested.emit(region_id, "style", after, before)
+
+    def _on_clear_color_runs(self, region_id: str) -> None:
+        if not hasattr(self, "_model") or self._model is None:
+            return
+        try:
+            before = self._model.text_layout.layer_by_id(region_id)
+        except KeyError:
+            return
+        if not before.color_runs:
+            return
+        self.edit_requested.emit(
+            region_id, "style", replace(before, color_runs=()), before
+        )
 
     def _apply_brush_rect(self, box: TextBox) -> None:
         """格式刷框选：把捕获的样式一次性套用到框内所有文字图层。
@@ -1156,7 +1340,8 @@ class EditorPage(QWidget):
         source_id = self.property_panel.brush_source_id()
         model = getattr(self, "_model", None)
         layout = getattr(model, "text_layout", None) if model is not None else None
-        updates: list[tuple[str, object, float]] = []
+        updates: list[TextLayer] = []
+        erase_requests: list[TextLayer] = []
         if snapshot and layout is not None:
             for layer in layout.layers:
                 if layer.region_id == source_id or not _textbox_intersects(
@@ -1169,13 +1354,48 @@ class EditorPage(QWidget):
                     if candidate is not None:
                         after = candidate
                 if after != layer:
-                    updates.append(
-                        (after.region_id, after.style, after.box.rotation_degrees)
-                    )
+                    if self._needs_erase_before_style(after.region_id):
+                        erase_requests.append(after)
+                    else:
+                        updates.append(after)
+        # OCR-only 区域还没有文字图层：样式先写进覆盖，再触发预览
+        ocr_result = getattr(model, "ocr_result", None) if model is not None else None
+        layer_ids = {layer.region_id for layer in layout.layers} if layout else set()
+        ocr_previews = []
+        if snapshot and ocr_result is not None:
+            for region in getattr(ocr_result, "regions", ()):
+                if region.region_id == source_id or region.region_id in layer_ids:
+                    continue
+                if not _textbox_intersects(self._ocr_region_box(region), box):
+                    continue
+                self._ocr_property_overrides.setdefault(
+                    region.region_id, {}
+                ).update(snapshot)
+                ocr_previews.append(region)
         # 框选套用后保持刷状态：与单个点选一致，可连续框选/点选多个区域，
         # 由 Esc 或再次点击「格式刷」按钮退出（画布框选模式同样保持）。
         if updates:
             self.style_brush_batch_requested.emit(updates)
+        for layer in erase_requests:
+            self.style_brush_layer_requested.emit(layer.region_id, layer)
+        for region in ocr_previews:
+            self.ocr_preview_changed.emit(region.region_id, region)
+
+    @staticmethod
+    def _ocr_region_box(region) -> TextBox:
+        points = tuple(getattr(region, "polygon", ()))
+        xs = [float(point.x) for point in points] or [0.0]
+        ys = [float(point.y) for point in points] or [0.0]
+        return TextBox(
+            (min(xs) + max(xs)) / 2,
+            (min(ys) + max(ys)) / 2,
+            max(1.0, max(xs) - min(xs)),
+            max(1.0, max(ys) - min(ys)),
+        )
+
+    def restore_ocr_regions(self) -> None:
+        """切换图片/预览模式后重建识别框（set_document 会清空图元）。"""
+        self._restore_ocr_regions()
 
     def _restore_ocr_regions(self) -> None:
         """从当前 OCR 结果重建识别框（set_document 会清空 _ocr_items）。"""

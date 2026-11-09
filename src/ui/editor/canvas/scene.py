@@ -7,6 +7,7 @@ from PySide6.QtGui import (
     QBrush,
     QColor,
     QImage,
+    QKeyEvent,
     QPainter,
     QPainterPath,
     QPen,
@@ -27,6 +28,7 @@ from src.domain.ocr import TextRegion
 
 from .image_item import BackgroundImageItem
 from .layer_item import TextLayerItem, WatermarkLayerItem
+from .manual_selection_item import ManualSelectionItem
 from .ocr_item import OcrRegionItem
 
 
@@ -41,9 +43,14 @@ class EditorScene(QGraphicsScene):
     mask_brush_finished = Signal()  # 涂抹松手（自动触发 AI 消除）
     selection_cleared = Signal()
     manual_region_selected = Signal(object)
+    manual_selection_box_changed = Signal(object)
     area_selected = Signal(str, object)
     area_selection_cleared = Signal(str)
     edit_mask_changed = Signal(object)
+    # 点击放置模式：「新增文字」时点画布任意位置，发出该场景坐标用于创建文本框
+    add_text_at = Signal(object)
+    # Delete 键删除当前选中的文字图层
+    layer_delete_requested = Signal(str)
 
     def __init__(self, readonly: bool = False) -> None:
         super().__init__()
@@ -65,6 +72,7 @@ class EditorScene(QGraphicsScene):
         self._selection_mode: str | None = None
         self._selection_aspect_ratio: float | None = None
         self._crop_selection_rect: QRectF | None = None
+        self._manual_preview_item = None
         self._crop_move_origin: QPointF | None = None
         self._crop_move_start_rect: QRectF | None = None
         self._edit_mask = bytearray(self._scene_width * self._scene_height)
@@ -104,6 +112,7 @@ class EditorScene(QGraphicsScene):
         self._crop_move_origin = None
         self._crop_move_start_rect = None
         self.clear()
+        self._manual_preview_item = None
         self._background = None
         self._comparison_clip = None
         self._layer_items.clear()
@@ -386,6 +395,24 @@ class EditorScene(QGraphicsScene):
         self._edit_mask_visible = mode is not None or self._edit_mask_visible
         self.update()
 
+    def set_manual_selection_preview(self, box) -> None:
+        """常驻显示手动框选区域：可直接拖动移动、拖四角改大小（随旋转角）。"""
+        if box is None:
+            if self._manual_preview_item is not None:
+                self.removeItem(self._manual_preview_item)
+                self._manual_preview_item = None
+            return
+        item = self._manual_preview_item
+        if not isinstance(item, ManualSelectionItem):
+            if item is not None:
+                self.removeItem(item)
+            item = ManualSelectionItem(box)
+            item.box_changed.connect(self.manual_selection_box_changed.emit)
+            self.addItem(item)
+            self._manual_preview_item = item
+            return
+        item.set_box(box)
+
     def set_edit_mask_visible(self, visible: bool) -> None:
         self._edit_mask_visible = visible
         self.update()
@@ -413,6 +440,16 @@ class EditorScene(QGraphicsScene):
         self._refresh_edit_mask()
 
     # —— QGraphicsScene 重写 ——
+
+    def keyPressEvent(self, event: QKeyEvent) -> None:
+        # Delete 键删除选中的文字图层（正在编辑文字时焦点在输入框，不会走到这里）
+        if event.key() == Qt.Key.Key_Delete:
+            for item in self._layer_items.values():
+                if item.isSelected():
+                    self.layer_delete_requested.emit(item.region_id)
+                    event.accept()
+                    return
+        super().keyPressEvent(event)
 
     def drawForeground(self, painter: QPainter, rect) -> None:
         """在场景顶层绘制擦除蒙版（半透明紫色覆盖）。"""
@@ -448,6 +485,26 @@ class EditorScene(QGraphicsScene):
     # —— 鼠标事件 ——
 
     def mousePressEvent(self, event: QGraphicsSceneMouseEvent) -> None:
+        # 新增文字放置模式：点在哪里就在哪里创建，点完退出该模式
+        if (
+            self._selection_mode == "add_text"
+            and event.button() is Qt.MouseButton.LeftButton
+        ):
+            point = self._clamp_to_scene(event.scenePos())
+            self.set_area_selection_mode(None)
+            self.add_text_at.emit(point)
+            event.accept()
+            return
+        # 常驻框选区域优先接管：点它时直接交给图形项拖动，不再触发选中下方文字
+        overlay = self._manual_preview_item
+        if (
+            overlay is not None
+            and not self._manual_selection_enabled
+            and event.button() is Qt.MouseButton.LeftButton
+            and overlay.contains(overlay.mapFromScene(event.scenePos()))
+        ):
+            super().mousePressEvent(event)
+            return
         if (
             self._manual_selection_enabled
             and event.button() is Qt.MouseButton.LeftButton
@@ -467,8 +524,12 @@ class EditorScene(QGraphicsScene):
             self._manual_selection_origin = point
             self._clear_manual_selection_item()
             self._manual_selection_item = QGraphicsRectItem()
-            self._manual_selection_item.setPen(QPen(QColor("#2d9cff"), 2))
-            self._manual_selection_item.setBrush(QBrush(QColor(45, 156, 255, 35)))
+            # 线宽按屏幕像素算（cosmetic）：缩放到 30%~40% 时普通画笔只剩不到 1px，
+            # 用户会以为「拖了没反应」，看不到框选矩形
+            pen = QPen(QColor("#1b6ef3"), 2)
+            pen.setCosmetic(True)
+            self._manual_selection_item.setPen(pen)
+            self._manual_selection_item.setBrush(QBrush(QColor(45, 156, 255, 60)))
             self._manual_selection_item.setZValue(10000)
             self.addItem(self._manual_selection_item)
             event.accept()
@@ -489,12 +550,31 @@ class EditorScene(QGraphicsScene):
                 clicked = item
                 clicked_kind = "watermark"
                 break
-        for item in self._layer_items.values():
-            if clicked is not None:
-                break
-            if item.contains(item.mapFromScene(pos)):
-                clicked = item
-                break
+        # 已选中的图层优先（含它的旋转/角点手柄）：重叠时点手柄不能被上面的图层抢走
+        selected_layer = next(
+            (
+                item
+                for item in self._layer_items.values()
+                if item.isSelected()
+            ),
+            None,
+        )
+        if (
+            clicked is None
+            and selected_layer is not None
+            and selected_layer.contains(selected_layer.mapFromScene(pos))
+        ):
+            clicked = selected_layer
+        if clicked is None:
+            # 未选中的情况按叠放顺序（z、插入顺序）取最上面的一层
+            for item in sorted(
+                self._layer_items.values(),
+                key=lambda candidate: (candidate.zValue(), candidate.index),
+                reverse=True,
+            ):
+                if item.contains(item.mapFromScene(pos)):
+                    clicked = item
+                    break
         if clicked is None:
             # 点击 OCR 区域框 → 高亮该区域并联动右侧列表/属性
             for item in self._ocr_items.values():
@@ -514,8 +594,9 @@ class EditorScene(QGraphicsScene):
                 self.watermark_selected.emit(clicked.region_id)
             elif clicked_kind == "ocr":
                 pass  # 已高亮并联动
-            else:
+            elif not clicked.isSelected():
                 self._emit_selection(clicked)
+            # 已选中就保持：把按下事件交给图形项，才能拖动手柄旋转/缩放
         super().mousePressEvent(event)
 
     def mouseReleaseEvent(self, event: QGraphicsSceneMouseEvent) -> None:

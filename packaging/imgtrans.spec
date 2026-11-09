@@ -47,6 +47,14 @@ if bundled_models_dir.is_dir():
                         (str(file), f"bundled_models/{model_dir.name}")
                     )
 
+# 随包分发的字体（客户提供）：启动时自动注册到应用字体库
+bundled_fonts_datas = []
+bundled_fonts_dir = root / "packaging" / "bundled_fonts"
+if bundled_fonts_dir.is_dir():
+    for file in bundled_fonts_dir.iterdir():
+        if file.is_file() and file.suffix.lower() in {".ttf", ".otf", ".ttc", ".otc"}:
+            bundled_fonts_datas.append((str(file), "bundled_fonts"))
+
 # Playwright chromium（1688/淘宝等需浏览器渲染的链接解析）
 playwright_datas = []
 if sys.platform == "win32":
@@ -64,7 +72,7 @@ analysis = Analysis(
     [str(root / "src" / "__main__.py")],
     pathex=[str(root)],
     binaries=[*rapidocr_binaries, *onnx_binaries],
-    datas=[*rapidocr_datas, *bundled_datas, *playwright_datas, (str(root / "packaging" / "assets" / "imgtrans.png"), "assets")],
+    datas=[*rapidocr_datas, *bundled_datas, *bundled_fonts_datas, *playwright_datas, (str(root / "packaging" / "assets" / "imgtrans.png"), "assets")],
     hiddenimports=[
         *rapidocr_hidden,
         "onnxruntime",

@@ -174,6 +174,9 @@ class EditComposition:
         with self._lock:
             before = self._session.layout.layer_by_id(region_id)
             after = self._layout_adapter.reflow(before, text)
+            if after.text != before.text:
+                # 局部上色按字符区间偏移，换文字后区间失效
+                after = replace(after, color_runs=())
             if after == before:
                 return self._result(region_id)
             command = ReplaceLayerCommand(before, after)
@@ -311,16 +314,49 @@ class EditComposition:
             )
             return self._commit_state(before_state, after_state)
 
-    def add_layer(self, text: str = "新译文") -> CompositionEditResult:
+    def replace_layers_many(
+        self, layers: list[TextLayer]
+    ) -> CompositionEditResult:
+        """批量替换整个图层（含文字路径/弧线），一次撤销记录。"""
+        with self._lock:
+            mapping = {layer.region_id: layer for layer in layers}
+            if not mapping:
+                return self._result()
+            before = self._session.state
+            for layer in before.layout.layers:
+                replacement = mapping.get(layer.region_id)
+                if (
+                    replacement is not None
+                    and layer.locked
+                    and replacement != layer
+                ):
+                    raise ValueError("Locked text layer cannot be edited")
+            after_layers = tuple(
+                mapping.get(layer.region_id, layer)
+                for layer in before.layout.layers
+            )
+            if after_layers == before.layout.layers:
+                return self._result()
+            after = replace(before, layout=TextLayout(after_layers))
+            return self._commit_state(before, after)
+
+    def add_layer(
+        self,
+        text: str = "新译文",
+        center_x: float | None = None,
+        center_y: float | None = None,
+    ) -> CompositionEditResult:
         with self._lock:
             region_id = f"manual-{uuid4().hex}"
             document = self.background_document
             box = TextBox(
-                document.asset.width / 2,
-                document.asset.height / 2,
+                document.asset.width / 2 if center_x is None else float(center_x),
+                document.asset.height / 2 if center_y is None else float(center_y),
                 max(40, document.asset.width * 0.4),
                 max(24, min(80, document.asset.height * 0.15)),
             )
+            # 点击位置靠近边缘时把框收进画布内，避免文本框大半在画布外
+            box = _bound_box(box, document)
             layer = self._layout_adapter.create_layer(region_id, text, box)
             command = AddLayerCommand(layer, len(self._session.layout.layers))
             candidate_state = command.apply(self._session.state)

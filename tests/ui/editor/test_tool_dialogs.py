@@ -174,3 +174,54 @@ def test_erase_dialog_disables_add_text_while_running(qtbot) -> None:
     dialog.set_failed("模拟失败")
     assert dialog.add_text_button.isEnabled()
     assert dialog.apply_button.isEnabled()
+
+
+def test_ai_erase_keeps_rectangle_mode_after_auto_erase(qtbot) -> None:
+    """矩形框选自动消除完成后，不自动跳回涂抹画笔，方便连续框选。"""
+    from PySide6.QtGui import QUndoStack
+
+    from src.ui.editor.editor_page import EditorPage
+
+    page = EditorPage(QUndoStack())
+    qtbot.addWidget(page)
+    page.show()
+
+    page.open_erase_dialog()
+    dialog = page.erase_dialog
+    assert dialog._current_mode == "paint"
+
+    dialog.rectangle_button.click()
+    assert dialog._current_mode == "rectangle"
+    assert page.scene._selection_mode == "ai_erase"
+
+    page.complete_ai_erase("opencv-text-fill")
+
+    assert dialog._current_mode == "rectangle"
+    assert dialog.rectangle_button.isChecked()
+    assert page.scene._selection_mode == "ai_erase"
+
+
+def test_ai_erase_rectangle_mode_frames_multiple_boxes(qtbot) -> None:
+    """点一次「矩形框选」后可以连续框：消除期间暂停，完成后自动恢复框选。"""
+    from PySide6.QtGui import QUndoStack
+
+    from src.domain.layout import TextBox
+    from src.ui.editor.editor_page import EditorPage
+
+    page = EditorPage(QUndoStack())
+    qtbot.addWidget(page)
+    page.show()
+    page.toolbar.set_active_tool("ai_erase")
+    page.open_erase_dialog()
+    page.erase_dialog.rectangle_button.click()
+    assert page.scene._selection_mode == "ai_erase"
+
+    page._on_area_selected("ai_erase", TextBox(50, 50, 40, 20))
+    # 消除执行中不再接受新的框选（避免画了又被清空）
+    assert page.scene._selection_mode is None
+
+    page.complete_ai_erase("opencv-text-fill")
+    # 完成后自动回到矩形框选，无需再点按钮
+    assert page.erase_dialog._current_mode == "rectangle"
+    assert page.scene._selection_mode == "ai_erase"
+    assert page.scene._manual_selection_enabled

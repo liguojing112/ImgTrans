@@ -22,7 +22,10 @@ _KNOWN_FIELDS = {
     "ecommerce_terms",
     "ecommerce_llm_prompt",
     "translation_font",
+    "loaded_font_paths",
     "translation_paragraph_mode",
+    "translation_match_source_font",
+    "translation_auto_font",
 }
 
 
@@ -309,6 +312,75 @@ class JsonFontPreferences:
             payload.pop("translation_font", None)
         else:
             payload["translation_font"] = value.strip()
+        self._file.save(payload)
+
+
+class JsonLoadedFontPreferences:
+    """用户手动载入的外部字体文件路径（ttf/otf/ttc），下次启动自动注册。"""
+
+    _KEY = "loaded_font_paths"
+
+    def __init__(self, path: Path) -> None:
+        self._file = _JsonPreferencesFile(path)
+
+    def load(self) -> tuple[Path, ...]:
+        value = self._file.load().get(self._KEY)
+        if not isinstance(value, list):
+            return ()
+        paths = []
+        for item in value:
+            if isinstance(item, str) and item.strip():
+                paths.append(Path(item))
+        return tuple(paths)
+
+    def save(self, paths: tuple[Path, ...]) -> None:
+        payload = self._file.load()
+        cleaned = [str(path) for path in paths if str(path).strip()]
+        if cleaned:
+            payload[self._KEY] = cleaned
+        else:
+            payload.pop(self._KEY, None)
+        self._file.save(payload)
+
+
+class JsonAutoFontPreferences:
+    """自动匹配字体的首选字体族：None 表示完全按语言/原图风格自动选择。"""
+
+    _KEY = "translation_auto_font"
+
+    def __init__(self, path: Path) -> None:
+        self._file = _JsonPreferencesFile(path)
+
+    def load(self) -> str | None:
+        value = self._file.load().get(self._KEY)
+        if not isinstance(value, str) or not value.strip():
+            return None
+        return value.strip()
+
+    def save(self, value: str | None) -> None:
+        payload = self._file.load()
+        if value is None or not value.strip():
+            payload.pop(self._KEY, None)
+        else:
+            payload[self._KEY] = value.strip()
+        self._file.save(payload)
+
+
+class JsonFontMatchPreferences:
+    """按原图匹配字体风格开关（衬线/无衬线）；默认开启。"""
+
+    _KEY = "translation_match_source_font"
+
+    def __init__(self, path: Path) -> None:
+        self._file = _JsonPreferencesFile(path)
+
+    def load(self) -> bool:
+        value = self._file.load().get(self._KEY)
+        return value if isinstance(value, bool) else True
+
+    def save(self, enabled: bool) -> None:
+        payload = self._file.load()
+        payload[self._KEY] = bool(enabled)
         self._file.save(payload)
 
 

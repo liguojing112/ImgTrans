@@ -167,3 +167,49 @@ def test_window_applies_direct_translation_and_undoes_repair_and_layer(tmp_path:
     assert window._composition_editor.layout.layers == ()
     assert window.current_document.pixels == document.pixels
     window.close()
+
+
+def test_manual_region_rotation_applies_to_all_boxes() -> None:
+    """框选整体旋转：框选 / 擦除 / 译文区域一起转，擦除不会连带周围背景。"""
+    from src.ui.manual_region_panel import ManualRegionPanel
+
+    QApplication.instance() or QApplication(["manual-region-rotation-test"])
+    panel = ManualRegionPanel()
+    try:
+        panel.set_selection(TextBox(100, 80, 120, 30))
+        panel.selection_rotation.setValue(-20)
+
+        spec = panel.spec
+        assert spec.selection_box.rotation_degrees == -20
+        assert spec.erase_box.rotation_degrees == -20
+        assert spec.text_box.rotation_degrees == -20
+
+        # 再次框选时沿用当前旋转角
+        panel.set_selection(TextBox(200, 150, 60, 20))
+        assert panel.spec.erase_box.rotation_degrees == -20
+    finally:
+        panel.deleteLater()
+
+
+def test_manual_region_emits_geometry_changes_for_preview() -> None:
+    """调整框选旋转/区域尺寸时发出 geometry_changed，供画布同步预览框。"""
+    from src.ui.manual_region_panel import ManualRegionPanel
+
+    QApplication.instance() or QApplication(["manual-region-geometry-test"])
+    panel = ManualRegionPanel()
+    try:
+        panel.set_selection(TextBox(100, 80, 120, 30))
+        changes: list[int] = []
+        panel.geometry_changed.connect(lambda: changes.append(1))
+
+        panel.selection_rotation.setValue(15)
+        assert changes
+
+        before = len(changes)
+        panel.erase_fields.width.setValue(140)
+        assert len(changes) > before
+
+        panel.clear_selection()
+        assert len(changes) > before + 1
+    finally:
+        panel.deleteLater()

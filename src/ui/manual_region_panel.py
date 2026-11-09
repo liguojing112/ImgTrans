@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from math import atan2, degrees, hypot
 
 from PySide6.QtCore import Signal
@@ -33,6 +34,7 @@ from src.ui.languages import LANGUAGE_LABELS
 class ManualRegionPanel(QFrame):
     select_requested = Signal()
     process_requested = Signal()
+    geometry_changed = Signal()
 
     def __init__(self) -> None:
         super().__init__()
@@ -114,6 +116,19 @@ class ManualRegionPanel(QFrame):
         self.selection_label.setObjectName("manualSelectionLabel")
         layout.addWidget(self.select_button)
         layout.addWidget(self.selection_label)
+        # 斜排文字：框选整体旋转（框选/擦除/译文区域一起转，擦除只覆盖斜框内部，
+        # 不会把周围背景一起抹掉）
+        self.selection_rotation = _angle_spin("manualSelectionRotation")
+        self.selection_rotation.valueChanged.connect(
+            self._on_selection_rotation_changed
+        )
+        rotation_row = QHBoxLayout()
+        rotation_row.addWidget(QLabel("框选旋转"))
+        rotation_row.addWidget(
+            wrap_spin(self.selection_rotation, width=110, label="框选旋转")
+        )
+        rotation_row.addStretch(1)
+        layout.addLayout(rotation_row)
 
         self.source_text = QPlainTextEdit()
         self.source_text.setObjectName("manualSourceText")
@@ -126,8 +141,10 @@ class ManualRegionPanel(QFrame):
         layout.addWidget(self.source_text)
         layout.addWidget(self.translated_text)
 
-        self.erase_fields = _BoxFields(False)
+        self.erase_fields = _BoxFields(True)
         self.text_fields = _BoxFields(True)
+        self.erase_fields.changed.connect(self.geometry_changed.emit)
+        self.text_fields.changed.connect(self.geometry_changed.emit)
         erase_form = QFormLayout()
         erase_form.addRow("擦除区域", self.erase_fields)
         text_form = QFormLayout()
@@ -248,9 +265,13 @@ class ManualRegionPanel(QFrame):
         )
 
     def set_selection(self, box: TextBox) -> None:
-        self._selection_box = box
-        self.erase_fields.set_box(box)
-        self.text_fields.set_box(box)
+        rotated = replace(
+            box, rotation_degrees=self.selection_rotation.value()
+        )
+        # 先填数值再记框：字段刷新会触发 geometry_changed，此时还没有可用的框
+        self.erase_fields.set_box(rotated)
+        self.text_fields.set_box(rotated)
+        self._selection_box = rotated
         self.selection_label.setText(
             f"已框选：{box.width:.0f} × {box.height:.0f} px"
         )
@@ -264,16 +285,37 @@ class ManualRegionPanel(QFrame):
         else:
             self._fit_circle_angles(box)
 
+    def _on_selection_rotation_changed(self, value: float) -> None:
+        if self._selection_box is None:
+            return
+        rotated = replace(self._selection_box, rotation_degrees=float(value))
+        self._selection_box = rotated
+        self.erase_fields.set_box(rotated)
+        self.text_fields.set_box(rotated)
+        self.geometry_changed.emit()
+
     def set_circle_center(self, center_x: float, center_y: float) -> None:
         self.circle_center_x.setValue(center_x)
         self.circle_center_y.setValue(center_y)
         if self._selection_box is not None:
             self._fit_circle_angles(self._selection_box)
 
+    def set_selection_box(self, box: TextBox) -> None:
+        """画布上拖动框选区域后同步数值（不再回发 geometry_changed，避免来回同步）。"""
+        if self._selection_box is None:
+            return
+        self.erase_fields.set_box(box)
+        self.text_fields.set_box(box)
+        self._selection_box = box
+        self.selection_label.setText(
+            f"已框选：{box.width:.0f} × {box.height:.0f} px"
+        )
+
     def clear_selection(self) -> None:
         self._selection_box = None
         self.selection_label.setText("尚未框选")
         self.status_label.setText("导入图片后可以框选漏翻区域")
+        self.geometry_changed.emit()
 
     def set_available(self, available: bool, busy: bool = False) -> None:
         self.select_button.setEnabled(available and not busy)
@@ -305,6 +347,8 @@ class ManualRegionPanel(QFrame):
 
 
 class _BoxFields(QWidget):
+    changed = Signal()
+
     def __init__(self, allow_rotation: bool) -> None:
         super().__init__()
         grid = QGridLayout(self)
@@ -324,6 +368,14 @@ class _BoxFields(QWidget):
             ("宽", self.width),
             ("高", self.height),
         )
+        for control in (
+            self.center_x,
+            self.center_y,
+            self.width,
+            self.height,
+            self.rotation,
+        ):
+            control.valueChanged.connect(lambda _value: self.changed.emit())
         for index, (label, control) in enumerate(controls):
             grid.addWidget(QLabel(label), index // 2, (index % 2) * 2)
             grid.addWidget(

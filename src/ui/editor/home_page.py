@@ -1,33 +1,31 @@
-"""首页 — 三个入口卡片（倒品字形布局）。"""
+"""首页 — 入口卡片（图片翻译 / 商品详情生成 / 万象笔记 / 商店 / 图片工具箱）。"""
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
     QStyle,
     QVBoxLayout,
-    QWidget,
 )
 
 from src.ui.editor.icons import standard_icon
 
 
 class HomePage(QFrame):
-    """首页，提供"图片翻译"、"商品详情生成"和"图片工具箱"三个入口。"""
+    """首页，提供五个入口卡片。"""
 
     image_translation_requested = Signal()
     product_detail_requested = Signal()
     toolbox_requested = Signal()
-    purchase_requested = Signal(object)
+    portal_requested = Signal()
+    store_requested = Signal()
 
-    def __init__(self, payment_client=None, task_runner=None) -> None:
+    def __init__(self) -> None:
         super().__init__()
         self.setProperty("editorStyle", True)
-        self._payment_client = payment_client
-        self._task_runner = task_runner
 
         layout = QVBoxLayout(self)
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -73,6 +71,28 @@ class HomePage(QFrame):
         cards_bottom.setSpacing(24)
         cards_bottom.addStretch()
 
+        self._portal_card = self._make_card(
+            "万象笔记",
+            "记录图文灵感\n上传图文，一键生成分享内容",
+            enabled=True,
+            width=220,
+            height=170,
+            icon_pix=QStyle.StandardPixmap.SP_FileDialogDetailedView,
+        )
+        self._portal_card.mousePressEvent = lambda e: self.portal_requested.emit()
+        cards_bottom.addWidget(self._portal_card)
+
+        self._store_card = self._make_card(
+            "商店",
+            "时长包 / 次数包 / 组合套餐\n按分类购买，即刻生效",
+            enabled=True,
+            width=220,
+            height=170,
+            icon_pix=QStyle.StandardPixmap.SP_FileDialogListView,
+        )
+        self._store_card.mousePressEvent = lambda e: self.store_requested.emit()
+        cards_bottom.addWidget(self._store_card)
+
         toolbox_card = self._make_card(
             "图片工具箱",
             "裁剪 / 旋转 / 翻转\n水印 / 压缩 / 格式转换",
@@ -87,100 +107,22 @@ class HomePage(QFrame):
         cards_bottom.addStretch()
         layout.addLayout(cards_bottom)
 
-        # 套餐区
-        plans_title = QLabel("购买套餐")
-        plans_title.setObjectName("homeSubtitle")
-        plans_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(plans_title)
-        self._plans_row = QHBoxLayout()
-        self._plans_row.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._plans_row.setSpacing(12)
-        layout.addLayout(self._plans_row)
+    def set_portal_module(self, title: str, description: str, image=None) -> None:
+        """按服务端门户配置更新「万象笔记」卡片的标题、说明与图标。
 
-        if self._payment_client is not None:
-            QTimer.singleShot(0, self._load_plans)
-
-    def _load_plans(self) -> None:
-        if self._task_runner is not None:
-            self._task_runner.submit(
-                self._payment_client.list_plans,
-                self._plans_loaded,
-                self._plans_failed,
+        image 为已下载好的 QPixmap；None 保持默认图标。
+        """
+        self._portal_card._title_label.setText(title)
+        self._portal_card._desc_label.setText(description)
+        if image is not None and not image.isNull():
+            self._portal_card._icon_label.setPixmap(
+                image.scaled(
+                    64,
+                    64,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
             )
-            return
-        try:
-            self.set_plans(self._payment_client.list_plans())
-        except Exception:
-            pass
-
-    def _plans_loaded(self, result) -> None:
-        if isinstance(result, list):
-            self.set_plans(result)
-
-    def _plans_failed(self, error) -> None:
-        while self._plans_row.count():
-            item = self._plans_row.takeAt(0)
-            widget = item.widget()
-            if widget is not None:
-                widget.deleteLater()
-        note = QLabel(f"套餐加载失败：{error}")
-        note.setObjectName("homeCardDesc")
-        note.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._plans_row.addWidget(note)
-
-    def set_plans(self, plans) -> None:
-        while self._plans_row.count():
-            item = self._plans_row.takeAt(0)
-            widget = item.widget()
-            if widget is not None:
-                widget.deleteLater()
-        for plan in plans:
-            self._plans_row.addWidget(self._make_plan_card(plan))
-        if not plans:
-            note = QLabel("暂无可购买套餐")
-            note.setObjectName("homeCardDesc")
-            note.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            self._plans_row.addWidget(note)
-
-    def _make_plan_card(self, plan):
-        if plan.plan_type == "combo":
-            spec = f"{plan.duration_hours} 小时 + {plan.quota} 次"
-        elif plan.plan_type == "quota":
-            spec = f"{plan.quota} 次"
-        else:
-            spec = f"{plan.duration_hours} 小时"
-        price = (
-            plan.sale_amount_minor
-            if plan.is_on_sale and plan.sale_amount_minor
-            else plan.amount_minor
-        )
-        card = QFrame()
-        card.setObjectName("homeCard")
-        card.setProperty("editorStyle", True)
-        card.setFixedSize(200, 130)
-        card.setCursor(Qt.CursorShape.PointingHandCursor)
-
-        inner = QVBoxLayout(card)
-        inner.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        inner.setSpacing(8)
-
-        name = QLabel(plan.name)
-        name.setObjectName("homeCardTitle")
-        name.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        price_label = QLabel(f"¥{price / 100:.2f}")
-        price_label.setObjectName("homeCardTitle")
-        price_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        spec_label = QLabel(spec)
-        spec_label.setObjectName("homeCardDesc")
-        spec_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        inner.addWidget(name)
-        inner.addWidget(price_label)
-        inner.addWidget(spec_label)
-        card.mousePressEvent = lambda e, p=plan: self.purchase_requested.emit(p)
-        return card
 
     def _make_card(
         self,
@@ -229,4 +171,8 @@ class HomePage(QFrame):
         inner.addWidget(t)
         inner.addWidget(d)
 
+        # 供「万象笔记」卡片按服务端配置动态更新
+        card._icon_label = icon_label
+        card._title_label = t
+        card._desc_label = d
         return card

@@ -59,6 +59,62 @@ def _select_font(
     raise LayoutError("font_unavailable", "系统中没有可用于渲染译文的合法字体")
 
 
+def resolve_style_font_details(
+    language_code: str,
+    serif: bool,
+) -> FontResolution:
+    """按原图文字风格解析译文字体：衬线类优先衬线字体族，缺失时回退默认匹配。
+
+    serif=True 来自原图文字的粗略分类（横细竖粗、笔画端部有装饰）；
+    分类不可靠时调用方应传 False，保持无衬线默认，避免字体观感变差。
+    """
+    if not serif:
+        return resolve_system_font_details(language_code)
+    _register_system_fonts()
+    return _select_style_font(
+        language_code,
+        platform.system(),
+        tuple(QFontDatabase.families()),
+    )
+
+
+def _select_style_font(
+    language_code: str,
+    system: str,
+    available_families: tuple[str, ...],
+) -> FontResolution:
+    available = {family.casefold(): family for family in available_families}
+    for preferred in _serif_families(language_code, system):
+        if preferred.casefold() in available:
+            return FontResolution(
+                language_code,
+                available[preferred.casefold()],
+                False,
+                None,
+            )
+    return _select_font(language_code, system, available_families)
+
+
+def _serif_families(language_code: str, system: str) -> tuple[str, ...]:
+    if system == "Windows":
+        if language_code in {"zh-Hans", "zh-Hant"}:
+            return ("SimSun", "宋体", "NSimSun", "Songti SC", "STSong", "KaiTi", "楷体")
+        if language_code == "ja":
+            return ("Yu Mincho", "MS Mincho", "YuMincho")
+        if language_code == "ko":
+            return ("Batang", "BatangChe")
+        return ("Times New Roman", "Georgia", "Cambria", "Constantia")
+    if system == "Darwin":
+        if language_code in {"zh-Hans", "zh-Hant"}:
+            return ("Songti SC", "STSong", "Songti TC")
+        if language_code == "ja":
+            return ("Hiragino Mincho ProN", "YuMincho")
+        if language_code == "ko":
+            return ("AppleMyungjo",)
+        return ("Times New Roman", "Georgia", "New York")
+    return ("Noto Serif", "Noto Serif CJK SC", "DejaVu Serif")
+
+
 def _register_system_fonts() -> None:
     global _REGISTERED
     with _LOCK:

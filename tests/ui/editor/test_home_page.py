@@ -36,3 +36,20 @@ def test_home_page_signals(qtbot) -> None:
 
     page.product_detail_requested.emit()
     assert clicked == ["translate", "detail"]
+
+
+def test_home_page_portal_card_emits_and_updates(qtbot) -> None:
+    """万象笔记卡片：可点击，且能按服务端配置更新标题/说明。"""
+    QApplication.instance() or QApplication(["home-portal-test"])
+    page = HomePage()
+    qtbot.addWidget(page)
+    page.show()
+
+    received: list = []
+    page.portal_requested.connect(lambda: received.append(1))
+    page._portal_card.mousePressEvent(None)
+    assert received == [1]
+
+    page.set_portal_module("万象笔记（新）", "新的说明文字")
+    assert page._portal_card._title_label.text() == "万象笔记（新）"
+    assert page._portal_card._desc_label.text() == "新的说明文字"

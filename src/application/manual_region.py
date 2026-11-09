@@ -281,9 +281,14 @@ class ProcessManualRegion:
 
 
 def _validate_box(document: ImageDocument, box: TextBox) -> None:
-    for point in box_to_quad(box):
-        if not 0 <= point.x <= document.asset.width or not 0 <= point.y <= document.asset.height:
-            raise ManualRegionError("manual_box_outside", "手动区域必须位于图片范围内")
+    # 允许旋转后的四角略出画布边缘（裁剪会按图片边界夹紧），只要求中心在图内
+    if box.width <= 0 or box.height <= 0:
+        raise ManualRegionError("manual_box_invalid", "手动区域尺寸必须大于 0")
+    if not (
+        0 <= box.center_x <= document.asset.width
+        and 0 <= box.center_y <= document.asset.height
+    ):
+        raise ManualRegionError("manual_box_outside", "手动区域必须位于图片范围内")
 
 
 def _embed_crop_on_canvas(

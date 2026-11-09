@@ -4,6 +4,7 @@
 """
 
 import os
+import time
 from dataclasses import replace
 from types import SimpleNamespace
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -18,7 +19,6 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QApplication,
-    QColorDialog,
     QDoubleSpinBox,
     QMessageBox,
     QPushButton,
@@ -937,7 +937,7 @@ def test_editor_left_toolbar_has_comfortable_click_targets():
     try:
         assert toolbar.width() == 88
         buttons = toolbar.findChildren(QPushButton, "toolButton")
-        assert len(buttons) == 9
+        assert len(buttons) == 10
         assert "matting" not in toolbar.buttons
         assert all(button.width() == 72 and button.height() == 44 for button in buttons)
         assert list(toolbar.buttons) == [
@@ -950,6 +950,7 @@ def test_editor_left_toolbar_has_comfortable_click_targets():
             "layers",
             "watermark",
             "enhance_translate",
+            "wanxiang_note",
         ]
     finally:
         toolbar.close()
@@ -1571,9 +1572,8 @@ def test_watermark_toolbar_and_dialog_buttons_complete_the_ui_flow(monkeypatch):
         assert editor.watermarks[0].text == "内部资料"
 
         monkeypatch.setattr(
-            QColorDialog,
-            "getColor",
-            lambda *_args, **_kwargs: QColor("#33AA66"),
+            "src.ui.editor.widgets.layer_state_panel.pick_color",
+            lambda *_args, **_kwargs: (51, 170, 102),
         )
         panel.watermark_color_button.click()
         assert editor.watermarks[0].style.fill_rgb == (51, 170, 102)
@@ -1833,7 +1833,13 @@ def test_editing_text_property_updates_rendered_layer():
         window._editor_page._on_model_selection_changed(layer)
         panel = window._editor_page.property_panel
         panel.text_edit.setPlainText("DIRECT EDIT")
-        QTest.qWait(400)
+        # 属性面板是 300ms 防抖，固定等待在机器繁忙时会偶发超时；改成轮询到生效
+        deadline = time.monotonic() + 3.0
+        while (
+            window._model.text_layout.layer_by_id("high").text != "DIRECT EDIT"
+            and time.monotonic() < deadline
+        ):
+            QTest.qWait(50)
 
         assert window._model.text_layout.layer_by_id("high").text == "DIRECT EDIT"
         assert window._model.composition_editor.can_undo
@@ -2744,6 +2750,20 @@ def test_send_batch_to_editor_uses_translated_result_for_completed_items():
     source_b = Path("b.png").resolve()
     original_a = _document()
     original_b = _document(w=200, h=80)
+def test_send_batch_to_editor_uses_translated_result_for_completed_items():
+    """批量翻译成功后发送到工作台应是译文成品；失败项仍送原图。"""
+    QApplication.instance() or QApplication(["send-batch-translated-test"])
+    from src.domain.batch import (
+        BatchItemSnapshot,
+        BatchItemStatus,
+        BatchSnapshot,
+        BatchStatus,
+    )
+
+    source_a = Path("a.png").resolve()
+    source_b = Path("b.png").resolve()
+    original_a = _document()
+    original_b = _document(w=200, h=80)
     rendered_b = _document(w=200, h=80)
 
     class _Import:
@@ -2754,6 +2774,10 @@ def test_send_batch_to_editor_uses_translated_result_for_completed_items():
         def load(self, ref):
             assert ref == "cache/b.png"
             return rendered_b
+
+        def load_editable(self, ref):
+            assert ref == "cache/b.png"
+            return None
 
     window = EditorMainWindow(
         import_image=_Import(),
@@ -2793,6 +2817,17 @@ def test_send_batch_to_editor_uses_translated_result_for_completed_items():
         assert window._model.source_document is original_b
     finally:
         window.close()
+        from PySide6.QtWidgets import QDialog
+
+        return QDialog.DialogCode.Accepted
+
+    @property
+    def selected_directory(self):
+        return Path("FAKE_OUT")
+
+    @property
+    def selected_suffix(self):
+        return self.suffix
 
 
 class _FakeBatchExportDialog:
@@ -3664,5 +3699,824 @@ def test_format_brush_click_works_in_translated_preview():
         low = window._model.text_layout.layer_by_id("low")
         assert low.style.font_size == pytest.approx(14)
         assert low.style.auto_fit is False
+    finally:
+        window.close()
+def test_format_brush_click_works_in_translated_preview():
+    """回归：translated（合成图）预览下画布无图层项，点击应回退命中 OCR 框。
+
+    历史缺陷：_hit_layer_at 只遍历场景图层项，而图层项仅在图层预览模式
+    存在；默认 translated 模式下点击文字永远落空，用户表现为「点击不起
+    作用」。OCR 框（region_id 与图层一致）在两种模式下都存在，作为回退。"""
+    QApplication.instance() or QApplication(["format-brush-click-translated-test"])
+    window = _translation_window()
+    try:
+        page = window._editor_page
+        scene = page.scene
+        # translated 模式下图层项存在但隐藏（保留命中区域，便于点选进入编辑）
+        assert set(scene._layer_items) == {"high", "low"}
+        assert not any(item.isVisible() for item in scene._layer_items.values())
+        assert "low" in scene._ocr_items
+        panel = page.property_panel
+        page._model.selected_layer_id = "high"
+
+        panel.format_brush_btn.click()
+        applied = []
+        panel.style_brush_applied.connect(
+            lambda rid, sid, snap: applied.append(rid)
+        )
+
+        _scene_click_at(scene, 48, 33)  # low 的文字位置（OCR 框内）
+        assert applied == ["low"], applied
+        low = window._model.text_layout.layer_by_id("low")
+        assert low.style.font_size == pytest.approx(14)
+        assert low.style.auto_fit is False
+    finally:
+        window.close()
+
+
+def test_send_batch_to_editor_restores_editable_layers():
+    """批量成品连同 OCR/译文/图层一起进工作台，可继续编辑文字。"""
+    QApplication.instance() or QApplication(["send-batch-editable-test"])
+    from src.application.batch import BatchEditableState
+    from src.domain.batch import (
+        BatchItemSnapshot,
+        BatchItemStatus,
+        BatchSnapshot,
+        BatchStatus,
+    )
+
+    source_a = Path("a.png").resolve()
+    source_b = Path("b.png").resolve()
+    original_a = _document()
+    original_b = _document(w=200, h=80)
+    rendered_b = _document(w=200, h=80)
+    full = FakeTranslateImage().execute(
+        original_b, "en", TranslationSelection(TranslationMode.ALL, "zh-Hans")
+    )
+    state = BatchEditableState(
+        full.ocr, full.translation, full.layout, full.repair
+    )
+
+    class _Import:
+        def execute(self, source):
+            return original_a if Path(source).name == "a.png" else original_b
+
+    class _Store:
+        def load(self, ref):
+            assert ref == "cache/b.png"
+            return rendered_b
+
+        def load_editable(self, ref):
+            assert ref == "cache/b.png"
+            return state
+
+    window = EditorMainWindow(
+        import_image=_Import(),
+        task_runner=ImmediateTaskRunner(),
+        batch_result_store=_Store(),
+        create_composition_editor=CreateCompositionEditor(
+            QtBasicTextLayoutAdapter("Arial"),
+            QtTextRenderer(),
+        ),
+    )
+    try:
+        window._editor_page.batch_panel.add_sources((source_a, source_b))
+        window._batch_snapshot = BatchSnapshot(
+            batch_id="batch-test1234",
+            status=BatchStatus.COMPLETED,
+            items=(
+                BatchItemSnapshot(
+                    "item-0", source_a, BatchItemStatus.FAILED, error="boom"
+                ),
+                BatchItemSnapshot(
+                    "item-1",
+                    source_b,
+                    BatchItemStatus.COMPLETED,
+                    result_ref="cache/b.png",
+                ),
+            ),
+            max_active_items=1,
+        )
+        window._on_send_batch_to_editor()
+
+        # 失败项仍只有原图，没有可编辑状态
+        first = window._model.documents()[0]
+        assert first.name == "a.png"
+        assert first.translation_result is None
+
+        # 成品项切回后带着 OCR、译文与文字图层
+        by_name = {ref.name: ref for ref in window._model.documents()}
+        window._model.set_active_document(by_name["b.png"].doc_id)
+        window._load_active_document()
+        assert window._model.document is rendered_b
+        assert window._model.ocr_result is not None
+        assert isinstance(window._model.translation_result, TranslateImageResult)
+        assert len(window._model.text_layout.layers) == 2
+        assert window._model.composition_editor is not None
+        assert by_name["b.png"].repaired_background is not None
+    finally:
+        window.close()
+
+
+def test_switching_back_to_translated_document_keeps_property_panel_editable():
+    """换图回来时默认选中首个文字图层，属性面板（自动适配字号）不能是灰的。"""
+    QApplication.instance() or QApplication(["switch-back-selection-test"])
+    window = EditorMainWindow(
+        import_image=object(),
+        task_runner=ImmediateTaskRunner(),
+        create_composition_editor=CreateCompositionEditor(
+            QtBasicTextLayoutAdapter("Arial"),
+            QtTextRenderer(),
+        ),
+    )
+    try:
+        source_a = _document()
+        window._on_image_loaded(source_a)
+        result = FakeTranslateImage().execute(
+            source_a, "en", TranslationSelection(TranslationMode.ALL, "zh-Hans")
+        )
+        window._on_translation_succeeded(result)
+        id_a = window._model.active_document_id
+
+        window._on_image_loaded(_document(w=200, h=80))
+        window._model.set_active_document(id_a)
+        window._load_active_document()
+
+        panel = window._editor_page.property_panel
+        assert window._model.selected_layer_id == "high"
+        assert panel.auto_fit_check.isEnabled()
+    finally:
+        window.close()
+
+
+def test_translated_mode_keeps_layer_hit_areas_and_click_switches_to_layers():
+    """翻译完成后成品图上的文字仍可点选：点中即切到图层模式，控制点（含旋转点）出现。"""
+    from PySide6.QtCore import QPointF
+
+    QApplication.instance() or QApplication(["translated-mode-hit-test"])
+    window = EditorMainWindow(
+        import_image=object(),
+        task_runner=ImmediateTaskRunner(),
+        create_composition_editor=CreateCompositionEditor(
+            QtBasicTextLayoutAdapter("Arial"),
+            QtTextRenderer(),
+        ),
+    )
+    try:
+        source = _document()
+        window._on_image_loaded(source)
+        result = FakeTranslateImage().execute(
+            source, "en", TranslationSelection(TranslationMode.ALL, "zh-Hans")
+        )
+        window._on_translation_succeeded(result)
+
+        scene = window._editor_page.scene
+        assert window._model.preview_mode == "translated"
+        item = scene._layer_items["high"]
+        # 成品图模式下辅助层隐藏，但仍保留命中区域
+        assert not item.isVisible()
+        layer = window._model.text_layout.layer_by_id("high")
+        center = QPointF(layer.box.center_x, layer.box.center_y)
+        assert item.contains(item.mapFromScene(center))
+
+        # 点中文字 → 自动进入图层模式并选中，控制点可见
+        window._on_canvas_layer_selected("high")
+        assert window._model.preview_mode == "layers"
+        assert scene._layer_items["high"].isVisible()
+        assert scene._layer_items["high"].isSelected()
+    finally:
+        window.close()
+
+
+def test_split_compare_hides_image_list_to_enlarge_images():
+    """左右分屏对比时收起左侧图片列表，把宽度让给两幅对比图（字太小的问题）。"""
+    app = QApplication.instance() or QApplication(["split-hide-right-panel-test"])
+    source = _document()
+    result = FakeTranslateImage().execute(
+        source, "en", TranslationSelection(TranslationMode.ALL, "zh-Hans")
+    )
+    window = EditorMainWindow(
+        import_image=object(),
+        task_runner=ImmediateTaskRunner(),
+        create_composition_editor=CreateCompositionEditor(
+            QtBasicTextLayoutAdapter("Arial"),
+            QtTextRenderer(),
+        ),
+    )
+    try:
+        window.resize(1600, 900)
+        window._enter_editor()
+        window.show()
+        window._model.source_document = source
+        window._on_translation_succeeded(result)
+        window._on_toggle_split_compare()
+        app.processEvents()
+        app.processEvents()
+
+        page = window._editor_page
+        assert page.is_split_view()
+        assert not page.image_list_panel.isVisible()
+        assert page.right_panel.isVisible()  # 右侧属性面板保持可用
+        sizes = page.main_splitter.sizes()
+        assert sizes[2] > 0
+        assert sizes[0] > 450 and sizes[1] > 450
+
+        window._on_toggle_split_compare()
+        app.processEvents()
+        app.processEvents()
+        assert page.image_list_panel.isVisible()
+    finally:
+        window.close()
+
+
+def test_importing_new_image_does_not_ask_about_unsaved_changes(monkeypatch):
+    """导入新图片不再弹「未保存的修改」确认框（多文档工作台不会丢编辑）。"""
+    from PySide6.QtWidgets import QMessageBox
+
+    QApplication.instance() or QApplication(["import-no-unsaved-dialog-test"])
+    asked: list = []
+    monkeypatch.setattr(
+        QMessageBox,
+        "question",
+        lambda *args, **kwargs: asked.append(args) or QMessageBox.StandardButton.No,
+    )
+    monkeypatch.setattr(
+        "src.ui.editor.main_window.load_document",
+        lambda source, import_usecase, codec: _document(),
+    )
+    window = EditorMainWindow(
+        import_image=object(),
+        task_runner=ImmediateTaskRunner(),
+    )
+    try:
+        window._model.is_dirty = True
+        window._on_import(Path("new.png"))
+        assert asked == []
+        assert window._model.documents()
+    finally:
+        window.close()
+
+
+def test_ocr_source_update_recovers_when_preview_layer_was_removed():
+    """预览图层被删除/恢复原文后再改 OCR 原文，不应报 KeyError，而是重新生成图层。"""
+    from src.application.batch import BatchOcrState
+
+    QApplication.instance() or QApplication(["ocr-preview-stale-id-test"])
+    window = EditorMainWindow(
+        import_image=object(),
+        task_runner=ImmediateTaskRunner(),
+        create_composition_editor=CreateCompositionEditor(
+            QtBasicTextLayoutAdapter("Arial"),
+            QtTextRenderer(),
+        ),
+    )
+    try:
+        source = _document()
+        window._on_image_loaded(source)
+        ocr = FakeOcrAdapter().recognize(source, "en")
+        window._restore_batch_editable(source, source, BatchOcrState(ocr))
+        # 批量 OCR 状态应把原始文本记下来，未改动时不额外生成预览层
+        assert window._ocr_original_texts["low"] == "SUMMER"
+
+        region_id = "low"
+        window._on_source_text_changed(region_id, "NEW1")
+        editor = window._model.composition_editor
+        assert editor is not None
+        layer_id = window._ocr_preview_layers[region_id]
+        editor.delete_layer(layer_id)
+
+        window._on_source_text_changed(region_id, "NEW2")
+        # 被删掉后再更新会自动重建（没有修复服务时按新建图层处理）
+        rebuilt_id = window._ocr_preview_layers[region_id]
+        assert any(
+            layer.region_id == rebuilt_id
+            for layer in window._model.text_layout.layers
+        )
+    finally:
+        window.close()
+
+
+def test_switching_images_resets_ocr_preview_cache():
+    """换图后不能沿用上一张图的预览层 id，否则改原文会报 KeyError manual-…。"""
+    from src.application.batch import BatchOcrState
+
+    QApplication.instance() or QApplication(["ocr-preview-switch-test"])
+    window = EditorMainWindow(
+        import_image=object(),
+        task_runner=ImmediateTaskRunner(),
+        create_composition_editor=CreateCompositionEditor(
+            QtBasicTextLayoutAdapter("Arial"),
+            QtTextRenderer(),
+        ),
+    )
+    try:
+        first = _document()
+        window._on_image_loaded(first)
+        ocr_a = FakeOcrAdapter().recognize(first, "en")
+        window._restore_batch_editable(first, first, BatchOcrState(ocr_a))
+        window._on_source_text_changed("low", "NEW1")
+        assert "low" in window._ocr_preview_layers
+
+        # 换到第二张图（批量 OCR 送进来的图）
+        second = _document(w=200, h=80)
+        window._model.add_document(Path("b.png"), second, name="b.png")
+        ocr_b = FakeOcrAdapter().recognize(second, "en")
+        window._model.ocr_result = ocr_b
+        window._load_active_document()
+
+        assert window._ocr_preview_layers == {}
+        assert window._ocr_original_texts["low"] == "SUMMER"
+
+        window._on_source_text_changed("low", "NEW2")
+        assert any(
+            layer.region_id == window._ocr_preview_layers["low"]
+            for layer in window._model.text_layout.layers
+        )
+    finally:
+        window.close()
+
+
+def test_batch_ocr_workspace_shows_region_boxes_and_keeps_them_after_edit():
+    """批量 OCR 送进工作台后，识别框应直接显示；改原文后也不能消失。"""
+    from src.application.batch import BatchOcrState
+
+    QApplication.instance() or QApplication(["batch-ocr-regions-visible-test"])
+    window = EditorMainWindow(
+        import_image=object(),
+        task_runner=ImmediateTaskRunner(),
+        create_composition_editor=CreateCompositionEditor(
+            QtBasicTextLayoutAdapter("Arial"),
+            QtTextRenderer(),
+        ),
+    )
+    try:
+        source = _document()
+        window._on_image_loaded(source)
+        ocr = FakeOcrAdapter().recognize(source, "en")
+        window._restore_batch_editable(source, source, BatchOcrState(ocr))
+        window._load_active_document()
+
+        scene = window._editor_page.scene
+        expected = {region.region_id for region in ocr.regions}
+        assert set(scene._ocr_items) == expected
+        assert all(item.isVisible() for item in scene._ocr_items.values())
+
+        window._on_source_text_changed("low", "NEW")
+        assert set(scene._ocr_items) == expected
+        assert all(item.isVisible() for item in scene._ocr_items.values())
+    finally:
+        window.close()
+
+
+def test_format_brush_copies_arc_bend_through_edit_dispatch():
+    """单点套用格式刷时，弧形弯曲度要真正落到目标图层（整层替换，不丢 path）。"""
+    from src.domain.layout import ArcTextPath, PathPoint
+
+    QApplication.instance() or QApplication(["brush-arc-dispatch-test"])
+    window = EditorMainWindow(
+        import_image=object(),
+        task_runner=ImmediateTaskRunner(),
+        create_composition_editor=CreateCompositionEditor(
+            QtBasicTextLayoutAdapter("Arial"),
+            QtTextRenderer(),
+        ),
+    )
+    try:
+        source = _document()
+        window._on_image_loaded(source)
+        result = FakeTranslateImage().execute(
+            source, "en", TranslationSelection(TranslationMode.ALL, "zh-Hans")
+        )
+        window._on_translation_succeeded(result)
+
+        editor = window._model.composition_editor
+        assert editor is not None
+        arc = ArcTextPath(PathPoint(20, 30), PathPoint(50, 10), PathPoint(80, 30))
+        window._editor_page.apply_edit_result(editor.replace_path("high", arc))
+
+        page = window._editor_page
+        page._on_model_selection_changed(editor.layout.layer_by_id("high"))
+        page.property_panel.format_brush_btn.click()
+        page._on_model_selection_changed(editor.layout.layer_by_id("low"))
+
+        assert isinstance(editor.layout.layer_by_id("low").path, ArcTextPath)
+    finally:
+        window.close()
+
+
+def test_ocr_preview_mask_erases_whole_region_polygon():
+    """OCR 预览按整块识别框擦除原文，避免只擦字形留下残影造成重影。"""
+    from src.infrastructure.pillow_mask_rasterizer import PillowMaskRasterizer
+
+    QApplication.instance() or QApplication(["ocr-preview-mask-test"])
+    window = EditorMainWindow(
+        import_image=object(),
+        mask_rasterizer=PillowMaskRasterizer(),
+    )
+    try:
+        source = _document()
+        window._on_image_loaded(source)
+        ocr = FakeOcrAdapter().recognize(source, "en")
+        window._model.ocr_result = ocr
+        region = ocr.regions[0]
+
+        mask = window._ocr_preview_mask(region)
+        assert mask is not None and not mask.is_empty
+        center_x = sum(point.x for point in region.polygon) / 4
+        center_y = sum(point.y for point in region.polygon) / 4
+        assert mask.pixels[int(center_y) * mask.width + int(center_x)] > 0
+    finally:
+        window.close()
+
+
+def test_pin_button_reorders_workspace_documents():
+    """点击图片列表的「置顶」后，该图片排到最前，当前编辑的图片不变。"""
+    QApplication.instance() or QApplication(["pin-document-flow-test"])
+    window = EditorMainWindow(import_image=object())
+    try:
+        ids = [
+            window._model.add_document(Path(f"{name}.png"), _document(), name=f"{name}.png")
+            for name in ("a", "b", "c")
+        ]
+        window._model.set_active_document(ids[1])
+
+        panel = window._editor_page.image_list_panel
+        canvas_before = window._model.document
+        panel.set_active(ids[2])
+        panel._pin_btn.click()
+
+        order = [doc.doc_id for doc in window._model.documents()]
+        assert order[0] == ids[2]
+        # 置顶只改顺序：当前编辑的图片与画布内容都不变
+        assert window._model.active_document_id == ids[1]
+        assert window._model.document is canvas_before
+    finally:
+        window.close()
+
+
+def test_ocr_stage_arc_preview_renders_single_copy_and_is_exportable():
+    """OCR 阶段改弧线：擦掉原文、按弧线重绘（画面上只有一份文字），
+    且改动进入合成文档，不翻译也能导出这个效果。"""
+    from src.application.inpainting import RepairSelection
+    from src.domain.layout import ArcTextPath
+    from src.domain.inpainting import InpaintingResult
+    from src.infrastructure.pillow_mask_rasterizer import PillowMaskRasterizer
+
+    class _NoopInpaint:
+        def inpaint(self, request):
+            return InpaintingResult(request.document, "noop", 0)
+
+    QApplication.instance() or QApplication(["ocr-arc-raster-preview-test"])
+    window = EditorMainWindow(
+        import_image=object(),
+        task_runner=ImmediateTaskRunner(),
+        create_composition_editor=CreateCompositionEditor(
+            QtBasicTextLayoutAdapter("Arial"),
+            QtTextRenderer(),
+        ),
+        mask_rasterizer=PillowMaskRasterizer(),
+        repair_selection=RepairSelection(_NoopInpaint()),
+    )
+    try:
+        source = _document()
+        window._on_image_loaded(source)
+        ocr = FakeOcrAdapter().recognize(source, "en")
+        window._model.ocr_result = ocr
+        page = window._editor_page
+        page.ocr_result_panel.set_result(ocr)
+        page.scene.set_regions(ocr.regions)
+        page._on_ocr_region_selected("high")
+
+        panel = page.property_panel
+        panel.path_mode.setCurrentIndex(panel.path_mode.findData("arc"))
+        QTest.qWait(600)
+
+        # 生成了弧线预览图层（OCR 阶段就能看到弧线效果）
+        layer_id = window._ocr_preview_layers.get("high")
+        assert layer_id is not None
+        layer = window._model.text_layout.layer_by_id(layer_id)
+        assert isinstance(layer.path, ArcTextPath)
+        assert layer.text == "SALE"
+        # 改动进了合成文档：导出取的就是它（不翻译也能导出弧线效果）
+        assert window._model.composition_editor is not None
+        assert window._model.rendered_document is not None
+        assert window._model.rendered_document is not source
+    finally:
+        window.close()
+
+
+
+
+def test_ocr_preview_update_is_single_undo_step():
+    """OCR 阶段改属性只产生一条撤销记录：撤一次就完全复原，不会偏位。"""
+    from src.application.inpainting import RepairSelection
+    from src.domain.inpainting import InpaintingResult
+    from src.infrastructure.pillow_mask_rasterizer import PillowMaskRasterizer
+
+    class _NoopInpaint:
+        def inpaint(self, request):
+            return InpaintingResult(request.document, "noop", 0)
+
+    QApplication.instance() or QApplication(["ocr-preview-single-undo-test"])
+    window = EditorMainWindow(
+        import_image=object(),
+        task_runner=ImmediateTaskRunner(),
+        create_composition_editor=CreateCompositionEditor(
+            QtBasicTextLayoutAdapter("Arial"),
+            QtTextRenderer(),
+        ),
+        mask_rasterizer=PillowMaskRasterizer(),
+        repair_selection=RepairSelection(_NoopInpaint()),
+    )
+    try:
+        source = _document()
+        window._on_image_loaded(source)
+        ocr = FakeOcrAdapter().recognize(source, "en")
+        window._model.ocr_result = ocr
+        page = window._editor_page
+        page.ocr_result_panel.set_result(ocr)
+        page.scene.set_regions(ocr.regions)
+        page._on_ocr_region_selected("high")
+
+        page.property_panel.font_size_spin.setValue(44)
+        QTest.qWait(500)
+
+        editor = window._model.composition_editor
+        assert editor is not None
+        assert any(item.region_id == "high" for item in editor.layout.layers)
+
+        editor.undo()
+        assert not any(
+            item.region_id == "high" for item in editor.layout.layers
+        )
+        assert not editor.can_undo
+    finally:
+        window.close()
+
+
+def test_ensure_composition_editor_uses_repaired_background_and_layout():
+    """补建编辑会话时要用去字后的底图与现有图层，否则重渲染会把文字画两遍。"""
+    from src.domain.layout import TextBox, TextLayer, TextLayout, TextStyle
+
+    QApplication.instance() or QApplication(["compose-editor-repair-bg-test"])
+    window = EditorMainWindow(
+        import_image=object(),
+        task_runner=ImmediateTaskRunner(),
+        create_composition_editor=CreateCompositionEditor(
+            QtBasicTextLayoutAdapter("Arial"),
+            QtTextRenderer(),
+        ),
+    )
+    try:
+        source = _document()
+        rendered = _document(w=200, h=80)
+        repaired = _document()
+        window._on_image_loaded(source)
+        layer = TextLayer(
+            "r1", "X", TextBox(50, 40, 60, 20), TextStyle("Arial", 14, (0, 0, 0))
+        )
+        window._model.document = rendered
+        window._model.rendered_document = rendered
+        window._model.repaired_background = repaired
+        window._model.text_layout = TextLayout((layer,))
+        window._model.composition_editor = None
+
+        assert window._ensure_composition_editor()
+        editor = window._model.composition_editor
+        assert editor.layout.layer_by_id("r1").text == "X"
+        assert editor.background_document.pixels == repaired.pixels
+    finally:
+        window.close()
+
+
+def test_brush_onto_unerased_region_erases_original_first():
+    """刷到原文没被擦掉的区域（保护/待复核）时，先补背景再写图层，避免重影。"""
+    from src.application.inpainting import RepairSelection
+    from src.domain.inpainting import InpaintingResult
+    from src.infrastructure.pillow_mask_rasterizer import PillowMaskRasterizer
+
+    class _NoopInpaint:
+        def inpaint(self, request):
+            return InpaintingResult(request.document, "noop", 0)
+
+    QApplication.instance() or QApplication(["brush-erase-first-test"])
+    window = EditorMainWindow(
+        import_image=object(),
+        task_runner=ImmediateTaskRunner(),
+        create_composition_editor=CreateCompositionEditor(
+            QtBasicTextLayoutAdapter("Arial"),
+            QtTextRenderer(),
+        ),
+        mask_rasterizer=PillowMaskRasterizer(),
+        repair_selection=RepairSelection(_NoopInpaint()),
+    )
+    try:
+        source = _document()
+        window._on_image_loaded(source)
+        result = FakeTranslateImage().execute(
+            source, "en", TranslationSelection(TranslationMode.ALL, "zh-Hans")
+        )
+        window._on_translation_succeeded(result)
+        editor = window._model.composition_editor
+        assert editor is not None
+
+        page = window._editor_page
+        page._on_model_selection_changed(editor.layout.layer_by_id("high"))
+        page.property_panel.format_brush_btn.click()
+        page._on_model_selection_changed(editor.layout.layer_by_id("low"))
+
+        # low 是待复核区域（原文没擦），应补背景后再写图层
+        assert editor.patch_count >= 1
+        assert (
+            editor.layout.layer_by_id("low").style.fill_rgb
+            == editor.layout.layer_by_id("high").style.fill_rgb
+        )
+    finally:
+        window.close()
+
+
+def test_ocr_row_selection_falls_back_to_overlapping_layer():
+    """区域 id 与图层 id 不一致时，按位置匹配到图层并进入可编辑状态（面板不灰）。"""
+    from src.domain.layout import TextLayout
+
+    QApplication.instance() or QApplication(["ocr-row-overlap-fallback-test"])
+    window = EditorMainWindow(
+        import_image=object(),
+        task_runner=ImmediateTaskRunner(),
+        create_composition_editor=CreateCompositionEditor(
+            QtBasicTextLayoutAdapter("Arial"),
+            QtTextRenderer(),
+        ),
+    )
+    try:
+        source = _document()
+        window._on_image_loaded(source)
+        result = FakeTranslateImage().execute(
+            source, "en", TranslationSelection(TranslationMode.ALL, "zh-Hans")
+        )
+        window._on_translation_succeeded(result)
+        layout = window._model.text_layout
+        high = layout.layer_by_id("high")
+        low = layout.layer_by_id("low")
+        # 模拟「图层 id 与 OCR 区域 id 不同」（如手动/框选生成的图层）
+        window._model.text_layout = TextLayout(
+            (replace(high, region_id="manual-abc"), low)
+        )
+
+        page = window._editor_page
+        page._on_ocr_region_selected("high")
+
+        panel = page.property_panel
+        assert panel._ocr_editing is False
+        assert panel.font_size_spin.isEnabled()
+        assert panel.x_spin.isEnabled()
+    finally:
+        window.close()
+
+
+def test_color_run_edit_dispatches_to_replace_layer():
+    """片段上色走 style 分发：color_runs 变化必须整层替换并进撤销历史。
+
+    replace_style 只带 style+rotation，若分发错走 replace_style，
+    color_runs 会被丢掉，下面的断言就会失败。
+    """
+    from src.domain.layout import ColorRun
+
+    QApplication.instance() or QApplication(["color-run-dispatch-test"])
+    result = FakeTranslateImage().execute(
+        _document(),
+        "en",
+        TranslationSelection(TranslationMode.ALL, "zh-Hans"),
+    )
+    window = EditorMainWindow(
+        import_image=object(),
+        task_runner=ImmediateTaskRunner(),
+        create_composition_editor=CreateCompositionEditor(
+            QtBasicTextLayoutAdapter("Arial"),
+            QtTextRenderer(),
+        ),
+    )
+    try:
+        window._on_translation_succeeded(result)
+        layer = window._model.text_layout.layer_by_id("high")
+        text = layer.text
+        assert text, "夹具图层应有文字"
+
+        window._editor_page._on_color_run_requested(
+            "high", 0, len(text), text, (220, 20, 30)
+        )
+
+        after = window._model.text_layout.layer_by_id("high")
+        assert after.color_runs == (ColorRun(0, len(text), (220, 20, 30)),)
+
+        window._editor_page.top_bar.undo_btn.click()
+        assert window._model.text_layout.layer_by_id("high").color_runs == ()
+    finally:
+        window.close()
+
+
+def test_add_text_creates_layer_at_click_position():
+    """「新增文字」在画布点击处创建文本图层（不再固定在图片中央）。"""
+    QApplication.instance() or QApplication(["add-text-position-test"])
+    window = EditorMainWindow(
+        import_image=object(),
+        task_runner=ImmediateTaskRunner(),
+        create_composition_editor=CreateCompositionEditor(
+            QtBasicTextLayoutAdapter("Arial"),
+            QtTextRenderer(),
+        ),
+    )
+    try:
+        window._on_image_loaded(_document())  # 190x72
+        assert window._ensure_composition_editor()
+
+        window._on_add_layer_at("新文本", 90.0, 40.0)
+
+        layers = [
+            layer
+            for layer in window._model.text_layout.layers
+            if layer.region_id.startswith("manual-")
+        ]
+        assert len(layers) == 1
+        assert layers[0].box.center_x == pytest.approx(90)
+        assert layers[0].box.center_y == pytest.approx(40)
+
+        # 左上角点击：框自动收进画布内（中心 = 半宽/半高）
+        window._on_add_layer_at("角落", 2.0, 2.0)
+        manual_layers = [
+            layer
+            for layer in window._model.text_layout.layers
+            if layer.region_id.startswith("manual-")
+        ]
+        corner = manual_layers[-1]
+        assert corner.box.center_x == pytest.approx(corner.box.width / 2)
+        assert corner.box.center_y == pytest.approx(corner.box.height / 2)
+    finally:
+        window.close()
+
+
+def test_auto_font_preference_updates_adapter_and_persists():
+    """「自动匹配首选」变更 → 适配器首选字体更新并持久化。"""
+    from src.infrastructure.text_renderer import QtBasicTextLayoutAdapter
+
+    QApplication.instance() or QApplication(["auto-font-adapter-test"])
+    adapter = QtBasicTextLayoutAdapter()
+    saved: list = []
+
+    class _Prefs:
+        def save(self, value):
+            saved.append(value)
+
+    window = EditorMainWindow(
+        import_image=object(),
+        text_layout_adapter=adapter,
+        auto_font_preferences=_Prefs(),
+    )
+    try:
+        window._on_auto_font_changed("CustomFont")
+        assert adapter._preferred_font == "CustomFont"
+        assert saved == ["CustomFont"]
+
+        window._on_auto_font_changed(None)
+        assert adapter._preferred_font is None
+        assert saved == ["CustomFont", None]
+    finally:
+        window.close()
+
+
+def test_portal_entry_opens_window_with_configured_link():
+    """万象笔记入口：未配置链接只提示；配置后打开浏览器窗口；工具栏按钮在强化翻译之后。"""
+    from src.domain.portal import PortalModule
+
+    QApplication.instance() or QApplication(["portal-entry-test"])
+    window = EditorMainWindow(import_image=object())
+    try:
+        labels = [
+            button.text()
+            for button in window._editor_page.toolbar.buttons.values()
+        ]
+        assert labels.index("万象笔记") == labels.index("强化翻译") + 1
+
+        window._open_portal_window()
+        assert window._portal_window is None, "未配置链接时不应打开窗口"
+
+        modules = (
+            PortalModule(
+                "wanxiang_note",
+                "万象笔记",
+                "记录图文灵感",
+                "",
+                "https://note.example.com/app",
+            ),
+        )
+        window._apply_portal_modules(modules)
+        assert window._portal_module.link_url == "https://note.example.com/app"
+        assert (
+            window._home_page._portal_card._title_label.text() == "万象笔记"
+        )
+
+        window._open_portal_window()
+        assert window._portal_window is not None
+        window._portal_window.close()
     finally:
         window.close()

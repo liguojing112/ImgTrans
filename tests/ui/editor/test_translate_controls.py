@@ -242,9 +242,9 @@ def test_translate_controls_font_defaults_to_auto(qtbot) -> None:
 
 def test_translation_font_choices_show_chinese_names_without_duplicates() -> None:
     """中文字体显示中文名，英文别名并入同一条，不出现重复项。"""
-    from src.ui.editor.widgets.translate_controls import _translation_font_choices
+    from src.ui.editor.widgets.translate_controls import translation_font_choices
 
-    choices = _translation_font_choices(
+    choices = translation_font_choices(
         [
             "宋体",
             "SimSun",
@@ -400,3 +400,70 @@ def test_theme_keeps_checked_radio_indicator_visible() -> None:
     from src.ui.editor.theme import EDITOR_DARK_THEME
 
     assert "QRadioButton::indicator:checked" in EDITOR_DARK_THEME
+
+
+def test_translation_font_combo_is_searchable(qtbot) -> None:
+    """译文字体下拉可输入搜索：包含匹配、不区分大小写、不插入新项。"""
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QComboBox
+
+    QApplication.instance() or QApplication(["font-search-test"])
+    ctrl = TranslateControls()
+    qtbot.addWidget(ctrl)
+    combo = ctrl.translation_font
+
+    assert combo.isEditable()
+    assert combo.insertPolicy() == QComboBox.InsertPolicy.NoInsert
+    completer = combo.completer()
+    assert completer is not None
+    assert completer.filterMode() == Qt.MatchFlag.MatchContains
+    assert completer.caseSensitivity() == Qt.CaseSensitivity.CaseInsensitive
+
+
+def test_translation_font_restores_invalid_typed_text(qtbot) -> None:
+    """手输不存在的字体名后，失焦时恢复为当前选中项。"""
+    from src.platform.fonts import resolve_system_font
+
+    QApplication.instance() or QApplication(["font-restore-test"])
+    resolve_system_font("en")  # 注册内置字体，保证下拉有内容
+    ctrl = TranslateControls()
+    qtbot.addWidget(ctrl)
+    combo = ctrl.translation_font
+
+    assert combo.count() > 1
+    combo.setCurrentIndex(1)
+    expected = combo.itemText(1)
+    combo.setEditText("不存在的字体XYZ")
+    ctrl._restore_font_edit_text()
+
+    assert combo.currentText() == expected
+    assert combo.currentIndex() == 1
+
+
+def test_auto_font_combo_defaults_to_none_and_emits(qtbot) -> None:
+    """「自动匹配首选」默认不使用；选择字体后发信号。"""
+    QApplication.instance() or QApplication(["auto-font-test"])
+    ctrl = TranslateControls()
+    qtbot.addWidget(ctrl)
+
+    assert ctrl.selected_auto_font is None
+    assert ctrl.auto_font.itemData(0) is None
+
+    received: list = []
+    ctrl.auto_font_changed.connect(received.append)
+    assert ctrl.auto_font.count() > 1
+    ctrl.auto_font.setCurrentIndex(1)
+
+    assert received == [ctrl.auto_font.itemData(1)]
+    assert ctrl.selected_auto_font == ctrl.auto_font.itemData(1)
+
+
+def test_auto_font_set_unknown_family_echoes(qtbot) -> None:
+    """偏好里的字体不在列表（如字体文件被删）时补临时项回显。"""
+    QApplication.instance() or QApplication(["auto-font-echo-test"])
+    ctrl = TranslateControls()
+    qtbot.addWidget(ctrl)
+
+    ctrl.set_auto_font("MissingFontFamily")
+
+    assert ctrl.selected_auto_font == "MissingFontFamily"

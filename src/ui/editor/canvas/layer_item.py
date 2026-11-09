@@ -30,7 +30,11 @@ from src.domain.layout import TextLayer
 from src.domain.composition import WatermarkLayer
 from src.domain.layout import TextBox, TextStyle
 
+_BASE_Z = 1.0
+# 水面/水印层在 z=2，选中文字放在两者之间：盖住其它文字，又不会盖住水印控件
+_SELECTED_Z = 1.5
 _HANDLE_RADIUS = 5.0
+_ROTATE_HANDLE_RADIUS = 8.0
 _ROTATE_HANDLE_OFFSET = 24.0
 _MIN_SIZE = 10.0
 
@@ -59,8 +63,14 @@ class TextLayerItem(QGraphicsItem):
             | QGraphicsItem.GraphicsItemFlag.ItemIsFocusable
         )
         self.setAcceptHoverEvents(True)
-        self.setZValue(1)
+        self.setZValue(_BASE_Z)
         self._sync_transform()
+
+    def itemChange(self, change, value):  # noqa: ANN001 - Qt 接口
+        # 选中的文字层临时置顶：多层文字重叠时，下方被选中的控制点才不会被盖住
+        if change == QGraphicsItem.GraphicsItemChange.ItemSelectedChange:
+            self.setZValue(_SELECTED_Z if value else _BASE_Z)
+        return super().itemChange(change, value)
 
     # —— 属性 ——
 
@@ -106,11 +116,12 @@ class TextLayerItem(QGraphicsItem):
             QRectF(half_w - r, half_h - r, r * 2, r * 2),  # 右下
             QRectF(-half_w - r, half_h - r, r * 2, r * 2),  # 左下
         ]
+        rr = _ROTATE_HANDLE_RADIUS
         rotate = QRectF(
-            -r,
-            -half_h - _ROTATE_HANDLE_OFFSET - r,
-            r * 2,
-            r * 2,
+            -rr,
+            -half_h - _ROTATE_HANDLE_OFFSET - rr,
+            rr * 2,
+            rr * 2,
         )
         return corners, rotate
 
@@ -132,7 +143,7 @@ class TextLayerItem(QGraphicsItem):
 
     def boundingRect(self) -> QRectF:
         box = self._layer.box
-        pad = _ROTATE_HANDLE_OFFSET + _HANDLE_RADIUS * 2 + 4
+        pad = _ROTATE_HANDLE_OFFSET + max(_HANDLE_RADIUS, _ROTATE_HANDLE_RADIUS) * 2 + 4
         return QRectF(
             -box.width / 2 - pad,
             -box.height / 2 - pad,

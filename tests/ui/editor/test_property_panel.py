@@ -673,11 +673,12 @@ def test_editor_page_format_brush_rect_batch(qtbot) -> None:
 
     assert len(batches) == 1
     updates = batches[0]
-    assert [u[0] for u in updates] == ["near"]
-    style, rotation = updates[0][1], updates[0][2]
-    assert style.font_size == 20.0
-    assert style.fill_rgb == (255, 0, 0)
-    assert rotation == near.box.rotation_degrees  # 保持目标自身旋转角
+    assert [layer.region_id for layer in updates] == ["near"]
+    changed = updates[0]
+    assert changed.style.font_size == 20.0
+    assert changed.style.fill_rgb == (255, 0, 0)
+    # 保持目标自身旋转角（路径随样式快照一起带过来）
+    assert changed.box.rotation_degrees == near.box.rotation_degrees
     # 框选套用后仍保持刷状态，可继续框选/点选，由 Esc 或再次点击按钮退出
     assert panel.format_brush_btn.isChecked()
     assert panel.brush_snapshot() is not None
@@ -882,3 +883,662 @@ def test_editor_page_format_brush_canvas_click_applies_style(qtbot) -> None:
     # 刷保持待用，可继续点选/框选
     assert panel.format_brush_btn.isChecked()
     panel.disarm_brush()
+
+
+def test_auto_fit_choice_sticks_across_layers(qtbot) -> None:
+    """用户手动取消自动适配后，换图片/换图层不应又被自动勾上。"""
+    panel = PropertyPanel()
+    qtbot.addWidget(panel)
+    panel.show()
+
+    panel.set_layer(_make_layer(region_id="l1"))
+    assert panel.auto_fit_check.isChecked()
+
+    # 手动取消 → 新图层（自身仍是自动适配）也保持取消
+    panel.auto_fit_check.setChecked(False)
+    qtbot.wait(400)
+    panel.set_layer(_make_layer(region_id="l2"))
+    assert not panel.auto_fit_check.isChecked()
+
+    # 手动重新勾选 → 新图层（自身不是自动适配）也保持勾选
+    panel.auto_fit_check.setChecked(True)
+    qtbot.wait(400)
+    panel.set_layer(
+        _make_layer(
+            region_id="l3",
+            style=TextStyle("Microsoft YaHei", 14, (24, 32, 51), auto_fit=False),
+        )
+    )
+    assert panel.auto_fit_check.isChecked()
+
+
+def test_manual_font_size_sticks_auto_fit_off_for_next_layer(qtbot) -> None:
+    """手动定字号后换图，自动适配不应被勾回。"""
+    panel = PropertyPanel()
+    qtbot.addWidget(panel)
+    panel.show()
+
+    panel.set_layer(_make_layer(region_id="l1"))
+    panel.font_size_spin.setValue(28)
+    qtbot.wait(400)
+    assert not panel.auto_fit_check.isChecked()
+
+    panel.set_layer(_make_layer(region_id="l2"))
+    assert not panel.auto_fit_check.isChecked()
+
+
+def _ocr_region():
+    from src.domain.ocr import TextRegion, order_quad
+
+    return TextRegion(
+        "r1",
+        order_quad(((10, 10), (90, 10), (90, 40), (10, 40))),
+        "ABC",
+        0.9,
+        "en",
+        "fixture",
+    )
+
+
+def test_fixed_font_size_seeds_from_current_and_applies_on_ocr_update(qtbot) -> None:
+    """勾选「固定字号」后，更新 OCR 原文时按统—字号写回（批量 OCR 修词场景）。"""
+    panel = PropertyPanel()
+    qtbot.addWidget(panel)
+    panel.show()
+    region = _ocr_region()
+    panel.set_ocr_region(region, None, {})
+
+    assert not panel.fixed_font_spin.isEnabled()
+    current = panel.font_size_spin.value()
+    panel.fixed_font_check.setChecked(True)
+    assert panel.fixed_font_spin.isEnabled()
+    assert panel.fixed_font_spin.value() == current
+
+    panel.fixed_font_spin.setValue(30)
+    source: list = []
+    properties: list = []
+    panel.source_text_changed.connect(lambda *args: source.append(args))
+    panel.ocr_property_changed.connect(lambda *args: properties.append(args))
+    panel.source_text_edit.setPlainText("NEW")
+    panel.apply_source_text_btn.click()
+
+    assert source == [("r1", "NEW")]
+    assert properties == [("r1", "font_size", 30.0)]
+
+
+def test_fixed_font_size_applies_to_text_layer(qtbot) -> None:
+    """已生成图层时同样按固定字号改，并关闭自动适配。"""
+    panel = PropertyPanel()
+    qtbot.addWidget(panel)
+    panel.show()
+    panel.set_layer(_make_layer())
+    panel.fixed_font_check.setChecked(True)
+    panel.fixed_font_spin.setValue(26)
+
+    emitted: list = []
+    panel.layer_property_changed.connect(
+        lambda region_id, field, value: emitted.append((region_id, field, value))
+    )
+    panel.source_text_edit.setPlainText("HELLO")
+    panel.apply_source_text_btn.click()
+
+    assert ("l1", "font_size", 26.0) in emitted
+
+
+def test_fixed_font_size_off_keeps_estimated_size(qtbot) -> None:
+    """不勾选时不额外改字号，保持各图识别出的字号。"""
+    panel = PropertyPanel()
+    qtbot.addWidget(panel)
+    panel.show()
+    panel.set_layer(_make_layer())
+
+    emitted: list = []
+    panel.layer_property_changed.connect(
+        lambda region_id, field, value: emitted.append((region_id, field, value))
+    )
+    panel.source_text_edit.setPlainText("HELLO")
+    panel.apply_source_text_btn.click()
+
+    assert all(field != "font_size" for _region, field, _value in emitted)
+
+
+def test_format_brush_snapshot_carries_arc_bend(qtbot) -> None:
+    """格式刷快照要带弧形弯曲度；圆环依赖绝对圆心，不随刷。"""
+    panel = PropertyPanel()
+    qtbot.addWidget(panel)
+    panel.show()
+
+    arc = ArcTextPath(PathPoint(40, 50), PathPoint(100, 20), PathPoint(160, 50))
+    panel.set_layer(_make_layer(region_id="arc", path=arc))
+    snapshot = panel._capture_brush_snapshot()
+    assert snapshot["text_path"]["mode"] == "arc"
+    assert abs(snapshot["text_path"]["bend"] - panel.arc_bend.value()) < 1e-6
+
+    panel.set_layer(_make_layer(region_id="straight"))
+    assert panel._capture_brush_snapshot()["text_path"]["mode"] == "straight"
+
+    from src.domain.layout import CircularTextPath
+
+    circle = CircularTextPath(PathPoint(100, 50), 40, 180, 360)
+    panel.set_layer(_make_layer(region_id="circle", path=circle))
+    assert "text_path" not in panel._capture_brush_snapshot()
+
+
+def test_format_brush_copies_arc_bend_to_straight_target(qtbot) -> None:
+    """刷到直排目标时，按目标自身文字框套用相同的弧形弯曲度。"""
+    from types import SimpleNamespace
+
+    from PySide6.QtGui import QUndoStack
+    from src.domain.layout import TextLayout, default_arc_path
+
+    from src.ui.editor.editor_page import EditorPage
+
+    QApplication.instance() or QApplication(["format-brush-arc-test"])
+    family = _test_font_family()
+    page = EditorPage(QUndoStack())
+    qtbot.addWidget(page)
+    page.show()
+
+    arc = ArcTextPath(PathPoint(40, 50), PathPoint(100, 20), PathPoint(160, 50))
+    source = TextLayer(
+        "src", "A", TextBox(100, 50, 120, 24), TextStyle(family, 20, (255, 0, 0)), path=arc
+    )
+    target = TextLayer(
+        "tgt", "B", TextBox(300, 150, 200, 60), TextStyle("Microsoft YaHei", 14, (24, 32, 51))
+    )
+    page._model = SimpleNamespace(text_layout=TextLayout((source, target)))
+
+    edits = []
+    page.edit_requested.connect(lambda *a: edits.append(a))
+
+    panel = page.property_panel
+    panel.set_layer(source)
+    bend = panel.arc_bend.value()
+    panel.format_brush_btn.click()
+    panel.set_layer(target)
+
+    assert len(edits) == 1
+    after = edits[0][2]
+    assert isinstance(after.path, ArcTextPath)
+    expected = default_arc_path(target.box, bend)
+    assert after.path.control == expected.control
+
+
+def test_format_brush_rect_carries_arc_path(qtbot) -> None:
+    """框选套用同样要带弧形弯曲度（批量结果里是整层，含 path）。"""
+    from types import SimpleNamespace
+
+    from PySide6.QtGui import QUndoStack
+
+    from src.domain.layout import ArcTextPath, TextLayout
+    from src.ui.editor.editor_page import EditorPage
+
+    family = _test_font_family()
+    page = EditorPage(QUndoStack())
+    qtbot.addWidget(page)
+    page.show()
+
+    arc = ArcTextPath(PathPoint(20, 30), PathPoint(50, 10), PathPoint(80, 30))
+    source = TextLayer(
+        "src", "A", TextBox(100, 50, 80, 24), TextStyle(family, 20, (255, 0, 0)), path=arc
+    )
+    target = TextLayer(
+        "tgt", "B", TextBox(130, 60, 100, 30), TextStyle(family, 12, (10, 20, 30))
+    )
+    page._model = SimpleNamespace(text_layout=TextLayout((source, target)))
+
+    batches = []
+    page.style_brush_batch_requested.connect(batches.append)
+    panel = page.property_panel
+    panel.set_layer(source)
+    panel.format_brush_btn.click()
+
+    page._on_area_selected("format_brush", TextBox(115, 55, 120, 40))
+
+    assert len(batches) == 1
+    changed = batches[0][0]
+    assert changed.region_id == "tgt"
+    assert isinstance(changed.path, ArcTextPath)
+    panel.disarm_brush()
+
+
+def _ocr_region_at(region_id: str, x: float, y: float):
+    from src.domain.ocr import TextRegion, order_quad
+
+    return TextRegion(
+        region_id,
+        order_quad(((x, y), (x + 60, y), (x + 60, y + 24), (x, y + 24))),
+        "ABC",
+        0.9,
+        "en",
+        "fixture",
+    )
+
+
+def test_format_brush_enabled_and_applies_between_ocr_regions(qtbot) -> None:
+    """OCR 阶段（还没有文字图层）也能用格式刷：把当前区域样式刷给其它识别区域。"""
+    panel = PropertyPanel()
+    qtbot.addWidget(panel)
+    panel.show()
+
+    panel.set_ocr_region(_ocr_region_at("a", 20, 20), None, {})
+    assert panel.format_brush_btn.isEnabled()
+    panel.font_size_spin.setValue(30)
+    panel.format_brush_btn.click()
+    assert panel.brush_snapshot() is not None
+
+    applied: list = []
+    panel.style_brush_applied.connect(lambda *args: applied.append(args))
+    panel.set_ocr_region(_ocr_region_at("b", 120, 20), None, {})
+
+    assert applied and applied[0][0] == "b"
+    assert applied[0][2]["font_size"] == 30.0
+    panel.disarm_brush()
+
+
+def test_ocr_only_brush_writes_overrides_and_preview(qtbot) -> None:
+    """刷到 OCR-only 区域时写入属性覆盖并触发预览重绘。"""
+    from types import SimpleNamespace
+
+    from PySide6.QtGui import QUndoStack
+
+    from src.domain.layout import TextLayout
+    from src.domain.ocr import OcrResult
+    from src.ui.editor.editor_page import EditorPage
+
+    QApplication.instance() or QApplication(["ocr-brush-overrides-test"])
+    page = EditorPage(QUndoStack())
+    qtbot.addWidget(page)
+    page.show()
+
+    region_a = _ocr_region_at("a", 20, 20)
+    region_b = _ocr_region_at("b", 120, 20)
+    page._model = SimpleNamespace(
+        text_layout=TextLayout(()),
+        ocr_result=OcrResult((region_a, region_b), "en", "fixture", 1.0),
+    )
+    previews: list = []
+    page.ocr_preview_changed.connect(lambda rid, region: previews.append(rid))
+
+    page._on_style_brush_applied("b", "a", {"font_size": 30.0, "fill_rgb": (255, 0, 0)})
+
+    assert page._ocr_property_overrides["b"]["font_size"] == 30.0
+    assert page._ocr_property_overrides["b"]["fill_rgb"] == (255, 0, 0)
+    assert previews == ["b"]
+
+
+def test_format_brush_rect_covers_ocr_only_regions(qtbot) -> None:
+    """框选套用同样能作用在 OCR-only 区域（写入覆盖）。"""
+    from types import SimpleNamespace
+
+    from PySide6.QtGui import QUndoStack
+
+    from src.domain.layout import TextLayout
+    from src.domain.ocr import OcrResult
+    from src.ui.editor.editor_page import EditorPage
+
+    QApplication.instance() or QApplication(["ocr-brush-rect-test"])
+    page = EditorPage(QUndoStack())
+    qtbot.addWidget(page)
+    page.show()
+
+    region_a = _ocr_region_at("a", 20, 20)
+    region_b = _ocr_region_at("b", 120, 20)
+    page._model = SimpleNamespace(
+        text_layout=TextLayout(()),
+        ocr_result=OcrResult((region_a, region_b), "en", "fixture", 1.0),
+    )
+    panel = page.property_panel
+    panel.set_ocr_region(region_a, None, {})
+    panel.font_size_spin.setValue(28)
+    panel.format_brush_btn.click()
+
+    page._on_area_selected("format_brush", TextBox(150, 32, 80, 40))
+
+    assert page._ocr_property_overrides["b"]["font_size"] == 28.0
+    panel.disarm_brush()
+
+
+def test_pending_field_dropped_when_selection_changes(qtbot) -> None:
+    """防抖窗口内切到别的区域时，旧数值不能落到新选中的区域上。"""
+    panel = PropertyPanel()
+    qtbot.addWidget(panel)
+    panel.show()
+
+    panel.set_ocr_region(_ocr_region_at("a", 20, 20), None, {})
+    got: list = []
+    panel.ocr_property_changed.connect(lambda *args: got.append(args))
+
+    panel.font_size_spin.setValue(60)  # 进入 300ms 防抖
+    panel.set_ocr_region(_ocr_region_at("b", 120, 20), None, {})  # 立刻换区域
+    qtbot.wait(450)
+
+    assert got == []
+
+
+def test_ocr_region_with_translation_unit_stays_editable(qtbot) -> None:
+    """已有译文单元的 OCR 区域被选中时，属性面板不能整块禁用（否则像功能坏了）。"""
+    panel = PropertyPanel()
+    qtbot.addWidget(panel)
+    panel.show()
+    unit = TranslationUnit(
+        "a", "ABC", "en", "zh-Hans", "译文", TranslationStatus.TRANSLATED
+    )
+
+    panel.set_ocr_region(_ocr_region_at("a", 20, 20), unit, {})
+
+    assert panel.font_size_spin.isEnabled()
+    assert panel.x_spin.isEnabled()
+    assert panel.format_brush_btn.isEnabled()
+
+
+# —— 片段上色（一句话里局部换色）——
+
+
+def test_color_run_button_emits_selection_and_color(qtbot, monkeypatch) -> None:
+    """选中文字内容里的片段 → 点「上色…」选颜色 → 发射 color_run_requested。"""
+    from PySide6.QtGui import QTextCursor
+
+    panel = PropertyPanel()
+    qtbot.addWidget(panel)
+    panel.show()
+    panel.set_layer(_make_layer(text="DOUBLE 11 SALE"))
+
+    cursor = panel.text_edit.textCursor()
+    cursor.setPosition(0)
+    cursor.setPosition(6, QTextCursor.MoveMode.KeepAnchor)
+    panel.text_edit.setTextCursor(cursor)
+
+    monkeypatch.setattr(
+        "src.ui.editor.widgets.property_panel.pick_color",
+        lambda *a, **k: (220, 20, 30),
+    )
+    received: list = []
+    panel.color_run_requested.connect(lambda *args: received.append(args))
+
+    panel.color_run_btn.click()
+
+    assert received == [("l1", 0, 6, "DOUBLE", (220, 20, 30))]
+    # 取色器下次从刚选过的颜色出发
+    assert panel._last_run_rgb == (220, 20, 30)
+
+
+def test_color_run_button_requires_text_selection(qtbot, monkeypatch) -> None:
+    """没选中任何文字就点「上色…」：提示且不发射信号。"""
+    from PySide6.QtWidgets import QMessageBox
+
+    panel = PropertyPanel()
+    qtbot.addWidget(panel)
+    panel.show()
+    panel.set_layer(_make_layer())
+
+    messages: list = []
+    monkeypatch.setattr(
+        QMessageBox, "information", lambda *a: messages.append(a)
+    )
+    received: list = []
+    panel.color_run_requested.connect(lambda *args: received.append(args))
+
+    panel.color_run_btn.click()
+
+    assert received == []
+    assert messages, "应提示用户先选中文字"
+
+
+def test_color_run_button_rejects_arc_but_allows_multiline(qtbot, monkeypatch) -> None:
+    """弧线文字暂不支持片段上色（提示且不发射）；多行文字应正常发射。"""
+    from PySide6.QtGui import QTextCursor
+    from PySide6.QtWidgets import QMessageBox
+
+    panel = PropertyPanel()
+    qtbot.addWidget(panel)
+    panel.show()
+    messages: list = []
+    colors: list = []
+    monkeypatch.setattr(QMessageBox, "information", lambda *a: messages.append(a))
+    monkeypatch.setattr(
+        "src.ui.editor.widgets.property_panel.pick_color",
+        lambda *a, **k: colors.append(1) or (0, 0, 0),
+    )
+    received: list = []
+    panel.color_run_requested.connect(lambda *args: received.append(args))
+
+    panel.set_layer(
+        _make_layer(path=ArcTextPath(PathPoint(100, 50), PathPoint(100, 20), PathPoint(100, 80), False))
+    )
+    cursor = panel.text_edit.textCursor()
+    cursor.setPosition(0)
+    cursor.setPosition(3, QTextCursor.MoveMode.KeepAnchor)
+    panel.text_edit.setTextCursor(cursor)
+    panel.color_run_btn.click()
+    assert received == [] and len(messages) == 1 and colors == []
+
+    panel.set_layer(_make_layer(text="LINE1\nLINE2"))
+    cursor = panel.text_edit.textCursor()
+    cursor.setPosition(0)
+    cursor.setPosition(5, QTextCursor.MoveMode.KeepAnchor)
+    panel.text_edit.setTextCursor(cursor)
+    panel.color_run_btn.click()
+    assert received and received[0][3] == "LINE1"
+    assert len(messages) == 1
+
+
+def test_color_run_buttons_disabled_without_layer_and_in_ocr_mode(qtbot) -> None:
+    panel = PropertyPanel()
+    qtbot.addWidget(panel)
+    panel.show()
+
+    assert not panel.color_run_btn.isEnabled()
+    assert not panel.clear_color_runs_btn.isEnabled()
+
+    panel.set_layer(_make_layer())
+    assert panel.color_run_btn.isEnabled()
+    assert panel.clear_color_runs_btn.isEnabled()
+
+    # OCR-only 阶段没有文字图层，局部上色不可用
+    panel.set_ocr_region(_ocr_region_at("ocr1", 20, 20), None, {})
+    assert not panel.color_run_btn.isEnabled()
+    assert not panel.clear_color_runs_btn.isEnabled()
+
+
+def test_editor_page_color_run_merges_and_emits_edit(qtbot) -> None:
+    """片段上色：与旧片段裁剪合并后，以 style 整层替换发射 edit_requested。"""
+    from types import SimpleNamespace
+
+    from PySide6.QtGui import QUndoStack
+
+    from src.domain.layout import ColorRun, TextLayout
+    from src.ui.editor.editor_page import EditorPage
+
+    family = _test_font_family()
+    page = EditorPage(QUndoStack())
+    qtbot.addWidget(page)
+    page.show()
+
+    layer = TextLayer(
+        "l1",
+        "DOUBLE 11 SALE",
+        TextBox(100, 50, 240, 40),
+        TextStyle(family, 20, (0, 0, 0)),
+        color_runs=(ColorRun(9, 14, (0, 0, 200)),),
+    )
+    page._model = SimpleNamespace(text_layout=TextLayout((layer,)))
+    edits: list = []
+    page.edit_requested.connect(lambda *args: edits.append(args))
+
+    # 新片段与旧片段不相叠：两段并存
+    page._on_color_run_requested("l1", 0, 6, "DOUBLE", (220, 20, 30))
+    assert len(edits) == 1
+    region_id, kind, after, before = edits[0]
+    assert (region_id, kind) == ("l1", "style")
+    assert before.color_runs == (ColorRun(9, 14, (0, 0, 200)),)
+    assert after.color_runs == (
+        ColorRun(0, 6, (220, 20, 30)),
+        ColorRun(9, 14, (0, 0, 200)),
+    )
+
+    # 应用上一步后，新片段与旧片段重叠：旧片段裁掉重叠部分
+    page._model = SimpleNamespace(text_layout=TextLayout((after,)))
+    page._on_color_run_requested("l1", 11, 14, "ALE", (0, 160, 0))
+    assert len(edits) == 2
+    merged = edits[-1][2]
+    assert merged.color_runs == (
+        ColorRun(0, 6, (220, 20, 30)),
+        ColorRun(9, 11, (0, 0, 200)),
+        ColorRun(11, 14, (0, 160, 0)),
+    )
+
+
+def test_editor_page_color_run_relocates_stale_selection(qtbot) -> None:
+    """面板文本滞后于图层时（区间越界/对不上），按选中文本重新定位。"""
+    from types import SimpleNamespace
+
+    from PySide6.QtGui import QUndoStack
+
+    from src.domain.layout import ColorRun, TextLayout
+    from src.ui.editor.editor_page import EditorPage
+
+    family = _test_font_family()
+    page = EditorPage(QUndoStack())
+    qtbot.addWidget(page)
+    page.show()
+
+    layer = TextLayer(
+        "l1", "SALE SALE", TextBox(100, 50, 240, 40), TextStyle(family, 20, (0, 0, 0))
+    )
+    page._model = SimpleNamespace(text_layout=TextLayout((layer,)))
+    edits: list = []
+    page.edit_requested.connect(lambda *args: edits.append(args))
+
+    # 面板给的区间来自旧文本（越界），按子串重新查找
+    page._on_color_run_requested("l1", 100, 104, "SALE", (220, 20, 30))
+    assert len(edits) == 1
+    assert edits[0][2].color_runs == (ColorRun(0, 4, (220, 20, 30)),)
+
+    # 子串在图层文本里找不到：忽略
+    page._on_color_run_requested("l1", 0, 3, "NOPE", (1, 2, 3))
+    assert len(edits) == 1
+
+
+def test_editor_page_clear_color_runs(qtbot) -> None:
+    from types import SimpleNamespace
+
+    from PySide6.QtGui import QUndoStack
+
+    from src.domain.layout import ColorRun, TextLayout
+    from src.ui.editor.editor_page import EditorPage
+
+    family = _test_font_family()
+    page = EditorPage(QUndoStack())
+    qtbot.addWidget(page)
+    page.show()
+
+    layer = TextLayer(
+        "l1",
+        "HELLO",
+        TextBox(100, 50, 240, 40),
+        TextStyle(family, 20, (0, 0, 0)),
+        color_runs=(ColorRun(0, 5, (220, 20, 30)),),
+    )
+    page._model = SimpleNamespace(text_layout=TextLayout((layer,)))
+    edits: list = []
+    page.edit_requested.connect(lambda *args: edits.append(args))
+
+    page._on_clear_color_runs("l1")
+    assert len(edits) == 1
+    assert edits[0][1] == "style"
+    assert edits[0][2].color_runs == ()
+
+    # 应用清除后再点：没有片段颜色，是空操作
+    page._model = SimpleNamespace(text_layout=TextLayout((edits[0][2],)))
+    page._on_clear_color_runs("l1")
+    assert len(edits) == 1
+
+
+# —— 新增文字：点击画布放置 ——
+
+
+def test_add_text_tool_enters_place_mode_and_emits_click_position(qtbot) -> None:
+    """点「新增文字」进入放置模式；画布点击后按点击坐标请求创建，并退回选择工具。"""
+    from PySide6.QtCore import QPointF
+    from PySide6.QtGui import QUndoStack
+
+    from src.ui.editor.editor_page import EditorPage
+
+    page = EditorPage(QUndoStack())
+    qtbot.addWidget(page)
+    page.show()
+
+    # 画布需要一张图片：点击坐标会被夹到画面范围内
+    from pathlib import Path
+
+    from src.domain.image import ImageAsset, ImageDocument, ImageFileFormat
+
+    asset = ImageAsset(
+        Path("add_text.png"), 200, 150, 1, ImageFileFormat.PNG, False, False
+    )
+    page.set_document(ImageDocument(asset, "RGB", bytes(200 * 150 * 3)))
+
+    page.toolbar.buttons["add_text"].click()
+    assert page.scene._selection_mode == "add_text"
+
+    placed: list = []
+    page.add_layer_at_requested.connect(lambda *args: placed.append(args))
+
+    from PySide6.QtCore import QEvent, Qt
+    from PySide6.QtWidgets import QGraphicsSceneMouseEvent
+
+    press = QGraphicsSceneMouseEvent(QEvent.Type.GraphicsSceneMousePress)
+    press.setScenePos(QPointF(50, 40))
+    press.setButton(Qt.MouseButton.LeftButton)
+    press.setButtons(Qt.MouseButton.LeftButton)
+    page.scene.mousePressEvent(press)
+
+    assert placed == [("新文本", 50.0, 40.0)]
+    assert page.toolbar.active_tool == "select"
+    assert page.scene._selection_mode is None
+
+
+def test_property_panel_add_button_enters_place_mode(qtbot) -> None:
+    """属性面板「新增文字图层」按钮同样进入点击放置模式。"""
+    from PySide6.QtGui import QUndoStack
+
+    from src.ui.editor.editor_page import EditorPage
+
+    page = EditorPage(QUndoStack())
+    qtbot.addWidget(page)
+    page.show()
+
+    page.property_panel.set_layer(_make_layer())
+    page.property_panel.add_btn.click()
+
+    assert page.scene._selection_mode == "add_text"
+
+
+def test_property_panel_font_combo_is_searchable(qtbot) -> None:
+    """属性面板字体下拉同样支持输入搜索（包含匹配）。"""
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QComboBox
+
+    panel = PropertyPanel()
+    qtbot.addWidget(panel)
+    panel.show()
+
+    assert panel.font_family.isEditable()
+    assert panel.font_family.insertPolicy() == QComboBox.InsertPolicy.NoInsert
+    completer = panel.font_family.completer()
+    assert completer is not None
+    assert completer.filterMode() == Qt.MatchFlag.MatchContains
+    assert completer.caseSensitivity() == Qt.CaseSensitivity.CaseInsensitive
+
+
+def test_property_panel_font_family_echoes_layer_value(qtbot) -> None:
+    panel = PropertyPanel()
+    qtbot.addWidget(panel)
+    panel.show()
+
+    panel.set_layer(
+        _make_layer(style=TextStyle("Microsoft YaHei", 14, (24, 32, 51)))
+    )
+
+    assert panel.font_family.currentData() == "Microsoft YaHei"

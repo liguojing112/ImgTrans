@@ -8,6 +8,7 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QFrame,
+    QHBoxLayout,
     QLabel,
     QListWidget,
     QListWidgetItem,
@@ -26,6 +27,7 @@ class ImageListPanel(QFrame):
 
     document_activated = Signal(str)  # doc_id
     remove_requested = Signal(str)  # doc_id
+    pin_requested = Signal(str)  # doc_id
 
     def __init__(self) -> None:
         super().__init__()
@@ -53,7 +55,17 @@ class ImageListPanel(QFrame):
             "QPushButton:hover { background: #e0e4ec; }"
         )
         self._remove_btn.clicked.connect(self._on_remove_clicked)
-        layout.addWidget(self._remove_btn)
+        self._pin_btn = QPushButton("置顶")
+        self._pin_btn.setEnabled(False)
+        self._pin_btn.setToolTip("把选中图片移到列表最前面")
+        self._pin_btn.setStyleSheet(self._remove_btn.styleSheet())
+        self._pin_btn.clicked.connect(self._on_pin_clicked)
+        actions = QHBoxLayout()
+        actions.setContentsMargins(0, 0, 0, 0)
+        actions.setSpacing(6)
+        actions.addWidget(self._remove_btn, 1)
+        actions.addWidget(self._pin_btn)
+        layout.addLayout(actions)
 
         self._list = QListWidget()
         self._list.setStyleSheet(
@@ -81,19 +93,29 @@ class ImageListPanel(QFrame):
     # —— 数据 ——
 
     def set_documents(self, documents: list) -> None:
-        """documents: list[EditorDocumentRef]"""
-        self._list.clear()
-        self._items.clear()
-        self._doc_ids = [d.doc_id for d in documents]
-        for doc in documents:
-            item = QListWidgetItem()
-            item.setText(doc.name)
-            item.setData(Qt.ItemDataRole.UserRole, doc.doc_id)
-            item.setToolTip(str(doc.source_path))
-            self._list.addItem(item)
-            self._items[doc.doc_id] = item
+        """documents: list[EditorDocumentRef]
+
+        重建列表期间屏蔽激活回调：清空/重建会让列表自动选中第一项，
+        否则置顶等只改顺序的操作会被当成「点了另一张图」而切换画布。
+        """
+        previous_suppression = self._suppress_activation
+        self._suppress_activation = True
+        try:
+            self._list.clear()
+            self._items.clear()
+            self._doc_ids = [d.doc_id for d in documents]
+            for doc in documents:
+                item = QListWidgetItem()
+                item.setText(doc.name)
+                item.setData(Qt.ItemDataRole.UserRole, doc.doc_id)
+                item.setToolTip(str(doc.source_path))
+                self._list.addItem(item)
+                self._items[doc.doc_id] = item
+        finally:
+            self._suppress_activation = previous_suppression
         self._count_label.setText(f"{len(documents)} 张图片")
         self._remove_btn.setEnabled(False)
+        self._pin_btn.setEnabled(False)
         self._last_emit_doc_id = None
         self._last_emit_at = 0.0
 
@@ -133,6 +155,7 @@ class ImageListPanel(QFrame):
 
     def _on_current_changed(self, current, _previous) -> None:
         self._remove_btn.setEnabled(current is not None)
+        self._pin_btn.setEnabled(current is not None)
         if current is None:
             self._current_doc_id = None
             return
@@ -155,6 +178,14 @@ class ImageListPanel(QFrame):
         doc_id = item.data(Qt.ItemDataRole.UserRole)
         if doc_id:
             self._emit_activated(doc_id)
+
+    def _on_pin_clicked(self) -> None:
+        item = self._list.currentItem()
+        if item is None:
+            return
+        doc_id = item.data(Qt.ItemDataRole.UserRole)
+        if doc_id:
+            self.pin_requested.emit(doc_id)
 
     def _on_remove_clicked(self) -> None:
         item = self._list.currentItem()

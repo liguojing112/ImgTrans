@@ -165,3 +165,18 @@ def test_model_remove_active_document_restores_next_state() -> None:
     assert model.active_document_id == id_b
     assert model.translation_result is None  # B 干净状态
     assert model.text_layout.layers == ()
+
+
+def test_pin_document_moves_document_to_front():
+    model = EditorModel()
+    id_a = model.add_document(Path("a.png"), _doc(), name="a.png")
+    id_b = model.add_document(Path("b.png"), _doc(name="b.png"), name="b.png")
+    id_c = model.add_document(Path("c.png"), _doc(name="c.png"), name="c.png")
+
+    model.set_active_document(id_b)
+    model.pin_document(id_c)
+
+    order = [doc.doc_id for doc in model.documents()]
+    assert order == [id_c, id_a, id_b]
+    # 置顶只改列表顺序，不改变当前编辑中的图片
+    assert model.active_document_id == id_b

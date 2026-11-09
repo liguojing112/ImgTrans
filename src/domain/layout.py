@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, fields, replace
 from enum import Enum
 from math import cos, hypot, isfinite, radians, sin
 
@@ -254,6 +254,23 @@ class TextStyle:
 
 
 @dataclass(frozen=True, slots=True)
+class ColorRun:
+    """图层文字里的一段局部颜色：字符区间 [start, end) 用指定颜色绘制。"""
+
+    start: int
+    end: int
+    fill_rgb: tuple[int, int, int]
+
+    def __post_init__(self) -> None:
+        if self.start < 0 or self.end <= self.start:
+            raise ValueError("Color run range must be a non-empty ascending range")
+        if len(self.fill_rgb) != 3 or any(
+            not 0 <= value <= 255 for value in self.fill_rgb
+        ):
+            raise ValueError("Color run color must be an RGB triple")
+
+
+@dataclass(frozen=True, slots=True)
 class TextLayer:
     region_id: str
     text: str
@@ -267,10 +284,22 @@ class TextLayer:
     # glyphs follow the image instead of merely moving their bounding boxes.
     mirror_x: bool = False
     mirror_y: bool = False
+    # 同一图层内的局部换色（如整句里的品牌词用红字），按字符区间着色
+    color_runs: tuple[ColorRun, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.region_id:
             raise ValueError("Text layer region ID cannot be empty")
+
+    def __setstate__(self, state: list) -> None:
+        # 旧版本 .edit.gz 里的 state 缺后续新增字段（color_runs 等），
+        # dataclass 默认 zip 会直接漏掉，读取该字段时 AttributeError
+        names = [spec.name for spec in fields(self)]
+        values = list(state) + [
+            self.__dataclass_fields__[name].default for name in names[len(state) :]
+        ]
+        for name, value in zip(names, values):
+            object.__setattr__(self, name, value)
 
 
 @dataclass(frozen=True, slots=True)

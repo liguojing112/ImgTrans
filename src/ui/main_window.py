@@ -1242,6 +1242,7 @@ class MainWindow(QMainWindow):
             self._manual_selection_completed
         )
         self.batch_panel = BatchPanel()
+        self.batch_panel.set_ocr_mode_available(False)  # 旧界面只有翻译批次
         self.batch_panel.add_requested.connect(self._choose_batch_images)
         self.batch_panel.clear_requested.connect(self.request_clear_batch)
         self.batch_panel.start_requested.connect(self.request_batch)
