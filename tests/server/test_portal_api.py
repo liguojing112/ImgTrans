@@ -247,3 +247,20 @@ def test_admin_upload_rejects_invalid_image() -> None:
 def test_portal_module_allows_site_relative_image_path() -> None:
     module = PortalModule("k", "t", "", "/portal-assets/portal-x.png", "")
     assert module.image_url == "/portal-assets/portal-x.png"
+
+
+def test_portal_images_dir_falls_back_when_unwritable(monkeypatch) -> None:
+    """部署目录不可写时回退到临时目录，应用启动不崩溃。"""
+    from pathlib import Path
+    import tempfile
+
+    import server.admin.portal_images as portal_images
+
+    monkeypatch.setattr(
+        portal_images, "_IMAGE_DIR", Path("Z:/no-such-drive/portal-images")
+    )
+    directory = portal_images.portal_images_dir()
+
+    assert directory.is_dir()
+    assert "imgtrans-portal-images" in str(directory)
+    assert str(directory).startswith(tempfile.gettempdir())

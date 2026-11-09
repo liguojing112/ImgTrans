@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import base64
 import binascii
+import os
 import re
+import tempfile
 from pathlib import Path
 from uuid import uuid4
 
@@ -16,7 +18,9 @@ PORTAL_IMAGE_URL_PREFIX = "/portal-assets"
 _MAX_BYTES = 2 * 1024 * 1024
 _NAME_PATTERN = re.compile(r"^[a-z0-9-]+\.(png|jpg|webp|gif)$")
 
-_IMAGE_DIR = Path(__file__).resolve().parents[2] / "data" / "portal-images"
+_IMAGE_DIR = Path(os.environ.get("IMGTRANS_PORTAL_IMAGE_DIR") or "") if os.environ.get(
+    "IMGTRANS_PORTAL_IMAGE_DIR"
+) else Path(__file__).resolve().parents[2] / "data" / "portal-images"
 
 
 class PortalImageError(ValueError):
@@ -24,8 +28,17 @@ class PortalImageError(ValueError):
 
 
 def portal_images_dir() -> Path:
-    _IMAGE_DIR.mkdir(parents=True, exist_ok=True)
-    return _IMAGE_DIR
+    """返回可写的图片目录：部署目录只读时回退到系统临时目录，避免启动崩溃。"""
+    try:
+        _IMAGE_DIR.mkdir(parents=True, exist_ok=True)
+        probe = _IMAGE_DIR / ".write-test"
+        probe.touch()
+        probe.unlink(missing_ok=True)
+        return _IMAGE_DIR
+    except OSError:
+        fallback = Path(tempfile.gettempdir()) / "imgtrans-portal-images"
+        fallback.mkdir(parents=True, exist_ok=True)
+        return fallback
 
 
 def save_portal_image(data_url: str) -> str:
