@@ -17,6 +17,7 @@
     {% if 'activation' in permissions %}<a href="/admin/activation">激活</a>{% endif %}
     {% if 'usage' in permissions %}<a href="/admin/usage">用量</a>{% endif %}
     {% if 'payments' in permissions %}<a href="/admin/payments">订单</a>{% endif %}
+    <a href="/admin/portal">门户入口</a>
     {% if 'audit' in permissions %}<a href="/admin/audit">审计</a>{% endif %}
     {% if 'users' in permissions %}<a href="/admin/users">账号管理</a>{% endif %}
     {% if role == 'super' %}<a href="/admin/settings">第三方配置</a>{% endif %}

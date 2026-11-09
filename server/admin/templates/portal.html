@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>门户入口</h1>
+<section class="card">
+  <h2>万象笔记（首页与编辑器入口）</h2>
+  <form method="post" action="/admin/portal" class="form-grid">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="module_key" value="{{ module_key }}">
+    <label>入口标题<input name="title" type="text" maxlength="60" required
+      value="{{ module.title if module else '万象笔记' }}"></label>
+    <label>入口说明（卡片下方文字，可多行）<textarea name="description" rows="3" maxlength="300">
+{{- module.description if module else '' -}}</textarea></label>
+    <label>入口图片 URL（卡片图标，留空用默认图标）<input name="image_url" type="url" maxlength="500"
+      value="{{ module.image_url if module else '' }}"></label>
+    <label>跳转链接（点击入口打开的网页地址）<input name="link_url" type="url" maxlength="500"
+      value="{{ module.link_url if module else '' }}"></label>
+    <label><input type="checkbox" name="enabled" value="1"
+      {% if not module or module.enabled %}checked{% endif %}> 启用该入口</label>
+    <button type="submit">保存</button>
+  </form>
+</section>
+{% endblock %}

@@ -19,6 +19,7 @@ from server.api.correlation import CORRELATION_HEADER, normalize_correlation_id
 from server.api.image_limits import admin_image_limits_router, client_config_router
 from server.api.payment import admin_payment_router, payment_router
 from server.api.product_llm import llm_router
+from server.api.portal import portal_router
 from server.api.routes import health_router, v1_router
 from server.api.translation import translation_router
 from server.api.usage import usage_router
@@ -64,6 +65,7 @@ from server.infrastructure.image_limits_repository import (
     SqlAlchemyImageLimitRepository,
 )
 from server.infrastructure.activation_repository import SqlAlchemyActivationRepository
+from server.infrastructure.portal_repository import SqlAlchemyPortalRepository
 from server.infrastructure.audit_repository import SqlAlchemyAuditRepository
 from server.infrastructure.rate_limiter import InMemoryRateLimiter
 from server.domain.activation import (
@@ -139,6 +141,7 @@ def create_app(
         if settings.admin_session_secret is not None
         else None
     )
+    app.state.portal_repository = SqlAlchemyPortalRepository(database)
     image_limit_repository = SqlAlchemyImageLimitRepository(database)
     app.state.manage_image_limits = ManageImageLimits(image_limit_repository)
     app.state.get_client_config = GetClientConfig(
@@ -375,6 +378,7 @@ def create_app(
     app.include_router(health_router)
     app.include_router(v1_router)
     app.include_router(client_config_router)
+    app.include_router(portal_router)
     app.include_router(admin_image_limits_router)
     app.include_router(translation_router)
     app.include_router(activation_router)

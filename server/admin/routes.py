@@ -23,6 +23,7 @@ from server.domain.admin_users import (
     PERMISSION_LABELS,
 )
 from server.domain.image_limits import ImageLimitConflict, ImageLimitValues
+from server.domain.portal import PortalModule
 from server.api.rate_limit import enforce_rate_limit
 from server.domain.translation import TranslationTextItem, TranslationTextRequest
 from server.application.payment import RefundPaymentOrder, RestorePaymentOrder
@@ -446,6 +447,35 @@ def _format_beijing_time(value: datetime) -> str:
     if value.tzinfo is None:
         value = value.replace(tzinfo=timezone.utc)
     return value.astimezone(_BEIJING_TIMEZONE).strftime("%Y-%m-%d %H:%M:%S")
+
+
+@admin_router.get("/portal", response_class=HTMLResponse)
+def portal_page(request: Request) -> Response:
+    session = _require_session(request)
+    return _render_protected(
+        "portal.html",
+        request,
+        session,
+        title="门户入口",
+        module=request.app.state.portal_repository.get("wanxiang_note"),
+        module_key="wanxiang_note",
+    )
+
+
+@admin_router.post("/portal")
+async def save_portal_module(request: Request) -> Response:
+    _, form = await _protected_form(request)
+    request.app.state.portal_repository.upsert(
+        PortalModule(
+            module_key=_required(form, "module_key"),
+            title=_required(form, "title"),
+            description=form.get("description", ""),
+            image_url=form.get("image_url", ""),
+            link_url=form.get("link_url", ""),
+            enabled=form.get("enabled") == "1",
+        )
+    )
+    return _redirect("/admin/portal")
 
 
 @admin_router.get("/audit", response_class=HTMLResponse)
