@@ -26,10 +26,9 @@ class PortalModule:
             raise PortalError("Module key cannot be empty")
         if not self.title.strip():
             raise PortalError("Module title cannot be empty")
-        for value, name in (
-            (self.image_url, "image"),
-            (self.link_url, "link"),
-        ):
-            trimmed = value.strip()
-            if trimmed and not trimmed.startswith(("http://", "https://")):
-                raise PortalError(f"Module {name} URL must use HTTP or HTTPS")
+        image = self.image_url.strip()
+        if image and not image.startswith(("http://", "https://", "/")):
+            raise PortalError("Module image URL must use HTTP, HTTPS or a site path")
+        link = self.link_url.strip()
+        if link and not link.startswith(("http://", "https://")):
+            raise PortalError("Module link URL must use HTTP or HTTPS")

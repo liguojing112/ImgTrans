@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
@@ -26,7 +27,8 @@ class HttpPortalConfigClient:
             raise ValueError("Backend URL cannot contain credentials, query or fragment")
         if timeout_seconds <= 0:
             raise ValueError("Portal config timeout must be positive")
-        self._url = f"{base_url.rstrip('/')}/v1/portal-modules"
+        self._base_url = base_url.rstrip("/")
+        self._url = f"{self._base_url}/v1/portal-modules"
         self._timeout_seconds = timeout_seconds
 
     def fetch(self) -> tuple[PortalModule, ...]:
@@ -53,7 +55,16 @@ class HttpPortalConfigClient:
             raise PortalConfigError("无法连接门户配置服务") from error
         if len(encoded) > _MAX_CONFIG_BYTES:
             raise PortalConfigError("门户配置响应过大")
-        return parse_portal_modules(encoded)
+        return tuple(
+            replace(module, image_url=self._absolute_image(module.image_url))
+            for module in parse_portal_modules(encoded)
+        )
+
+    def _absolute_image(self, value: str) -> str:
+        """后台本地上传的图片是站内相对路径，补全为完整地址供下载。"""
+        if value.startswith("/"):
+            return f"{self._base_url}{value}"
+        return value
 
 
 def parse_portal_modules(encoded: bytes) -> tuple[PortalModule, ...]:

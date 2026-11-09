@@ -10,8 +10,17 @@
       value="{{ module.title if module else '万象笔记' }}"></label>
     <label>入口说明（卡片下方文字，可多行）<textarea name="description" rows="3" maxlength="300">
 {{- module.description if module else '' -}}</textarea></label>
-    <label>入口图片 URL（卡片图标，留空用默认图标）<input name="image_url" type="url" maxlength="500"
-      value="{{ module.image_url if module else '' }}"></label>
+    <label>入口图片（卡片图标；支持 PNG / JPEG / WebP / GIF，不超过 2 MB）
+      <input type="file" id="portal_image_file" accept="image/png,image/jpeg,image/webp,image/gif">
+      <input type="hidden" name="image_base64" id="portal_image_base64">
+    </label>
+    {% if module and module.image_url %}
+    <label>当前图片
+      <span><img src="{{ module.image_url }}" alt="入口图片"
+        style="height:48px;vertical-align:middle;border:1px solid #ccc;border-radius:4px"></span>
+      <span><input type="checkbox" name="remove_image" value="1"> 删除当前图片</span>
+    </label>
+    {% endif %}
     <label>跳转链接（点击入口打开的网页地址）<input name="link_url" type="url" maxlength="500"
       value="{{ module.link_url if module else '' }}"></label>
     <label><input type="checkbox" name="enabled" value="1"
@@ -19,4 +28,24 @@
     <button type="submit">保存</button>
   </form>
 </section>
+<script>
+  (function () {
+    var fileInput = document.getElementById('portal_image_file');
+    var hidden = document.getElementById('portal_image_base64');
+    if (!fileInput || !hidden) return;
+    fileInput.addEventListener('change', function () {
+      var file = fileInput.files && fileInput.files[0];
+      if (!file) { hidden.value = ''; return; }
+      if (file.size > 2 * 1024 * 1024) {
+        alert('图片不能超过 2 MB');
+        fileInput.value = '';
+        hidden.value = '';
+        return;
+      }
+      var reader = new FileReader();
+      reader.onload = function () { hidden.value = reader.result; };
+      reader.readAsDataURL(file);
+    });
+  })();
+</script>
 {% endblock %}

@@ -11,6 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException
 
 from server import __version__
+from server.admin.portal_images import PORTAL_IMAGE_URL_PREFIX, portal_images_dir
 from server.admin.routes import admin_router
 from server.admin.security import AdminSecurity
 from server.api.contracts import ApiError, ErrorResponse
@@ -387,6 +388,11 @@ def create_app(
     app.include_router(llm_router)
     app.include_router(admin_payment_router)
     app.include_router(usage_router)
+    app.mount(
+        PORTAL_IMAGE_URL_PREFIX,
+        StaticFiles(directory=portal_images_dir()),
+        name="portal-assets",
+    )
     app.mount(
         "/admin/static",
         StaticFiles(directory=Path(__file__).parent / "admin" / "static"),

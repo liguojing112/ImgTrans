@@ -87,7 +87,6 @@ def test_admin_saves_portal_module_visible_to_clients() -> None:
                     "module_key": "wanxiang_note",
                     "title": "万象笔记",
                     "description": "记录图文灵感",
-                    "image_url": "https://cdn.example.com/note.png",
                     "link_url": "https://note.example.com/app",
                     "enabled": "1",
                 },
@@ -102,7 +101,7 @@ def test_admin_saves_portal_module_visible_to_clients() -> None:
                     "module_key": "wanxiang_note",
                     "title": "万象笔记",
                     "description": "记录图文灵感",
-                    "image_url": "https://cdn.example.com/note.png",
+                    "image_url": "",
                     "link_url": "https://note.example.com/app",
                 }
             ]
@@ -137,3 +136,114 @@ def test_portal_module_rejects_non_http_urls() -> None:
         PortalModule("k", "t", "", "", "javascript:alert(1)")
     with pytest.raises(PortalError):
         PortalModule("", "t", "", "", "")
+
+
+_PNG_DATA_URL = (
+    "data:image/png;base64,"
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+)
+
+
+def _delete_uploaded(image_url: str) -> None:
+    from server.admin.portal_images import delete_portal_image
+
+    delete_portal_image(image_url)
+
+
+def test_admin_upload_image_stored_and_served() -> None:
+    """后台上传图片：保存到站内目录，公开接口返回 /portal-assets/ 路径。"""
+
+    async def scenario():
+        app = _app()
+        async with _client(app) as client:
+            await _login(client)
+            page = await client.get("/admin/portal")
+            token = _csrf(page.text)
+            response = await client.post(
+                "/admin/portal",
+                data={
+                    "csrf_token": token,
+                    "module_key": "wanxiang_note",
+                    "title": "万象笔记",
+                    "description": "",
+                    "image_base64": _PNG_DATA_URL,
+                    "link_url": "https://note.example.com/app",
+                    "enabled": "1",
+                },
+                follow_redirects=False,
+            )
+            assert response.status_code == 303
+            modules = (await client.get("/v1/portal-modules")).json()["modules"]
+            image_url = modules[0]["image_url"]
+            assert image_url.startswith("/portal-assets/portal-")
+            try:
+                asset = await client.get(image_url)
+                assert asset.status_code == 200
+                assert asset.content.startswith(b"\x89PNG")
+            finally:
+                _delete_uploaded(image_url)
+
+    _run(scenario)
+
+
+def test_admin_remove_image_clears_url() -> None:
+    async def scenario():
+        app = _app()
+        app.state.portal_repository.upsert(
+            PortalModule(
+                "wanxiang_note",
+                "万象笔记",
+                "",
+                "/portal-assets/portal-abc123.png",
+                "https://note.example.com/app",
+            )
+        )
+        async with _client(app) as client:
+            await _login(client)
+            page = await client.get("/admin/portal")
+            token = _csrf(page.text)
+            response = await client.post(
+                "/admin/portal",
+                data={
+                    "csrf_token": token,
+                    "module_key": "wanxiang_note",
+                    "title": "万象笔记",
+                    "remove_image": "1",
+                    "link_url": "https://note.example.com/app",
+                    "enabled": "1",
+                },
+                follow_redirects=False,
+            )
+            assert response.status_code == 303
+            module = app.state.portal_repository.get("wanxiang_note")
+            assert module is not None and module.image_url == ""
+
+    _run(scenario)
+
+
+def test_admin_upload_rejects_invalid_image() -> None:
+    async def scenario():
+        app = _app()
+        async with _client(app) as client:
+            await _login(client)
+            page = await client.get("/admin/portal")
+            token = _csrf(page.text)
+            response = await client.post(
+                "/admin/portal",
+                data={
+                    "csrf_token": token,
+                    "module_key": "wanxiang_note",
+                    "title": "万象笔记",
+                    "image_base64": "data:image/png;base64,bm90LWFuLWltYWdl",
+                    "enabled": "1",
+                },
+                follow_redirects=False,
+            )
+            assert response.status_code == 422
+
+    _run(scenario)
+
+
+def test_portal_module_allows_site_relative_image_path() -> None:
+    module = PortalModule("k", "t", "", "/portal-assets/portal-x.png", "")
+    assert module.image_url == "/portal-assets/portal-x.png"

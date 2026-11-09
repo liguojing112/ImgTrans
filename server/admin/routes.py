@@ -23,6 +23,11 @@ from server.domain.admin_users import (
     PERMISSION_LABELS,
 )
 from server.domain.image_limits import ImageLimitConflict, ImageLimitValues
+from server.admin.portal_images import (
+    PortalImageError,
+    delete_portal_image,
+    save_portal_image,
+)
 from server.domain.portal import PortalModule
 from server.api.rate_limit import enforce_rate_limit
 from server.domain.translation import TranslationTextItem, TranslationTextRequest
@@ -36,6 +41,8 @@ _TEMPLATES = Environment(
     autoescape=select_autoescape(("html", "xml")),
 )
 _MAX_FORM_BYTES = 64 * 1024
+# 门户入口图片以 base64 随表单提交，放宽上限（2 MB 图片约 2.7 MB base64）
+_PORTAL_FORM_MAX_BYTES = 4 * 1024 * 1024
 _BEIJING_TIMEZONE = ZoneInfo("Asia/Shanghai")
 
 admin_router = APIRouter(prefix="/admin", tags=["admin-console"])
@@ -464,13 +471,31 @@ def portal_page(request: Request) -> Response:
 
 @admin_router.post("/portal")
 async def save_portal_module(request: Request) -> Response:
-    _, form = await _protected_form(request)
-    request.app.state.portal_repository.upsert(
+    repository = request.app.state.portal_repository
+    _, form = await _protected_form(request, max_bytes=_PORTAL_FORM_MAX_BYTES)
+    existing = repository.get(_required(form, "module_key"))
+    previous_image = existing.image_url if existing is not None else ""
+    upload = form.get("image_base64", "").strip()
+    remove = form.get("remove_image") == "1"
+
+    if upload:
+        try:
+            image_url = save_portal_image(upload)
+        except PortalImageError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        delete_portal_image(previous_image)
+    elif remove:
+        delete_portal_image(previous_image)
+        image_url = ""
+    else:
+        image_url = previous_image
+
+    repository.upsert(
         PortalModule(
             module_key=_required(form, "module_key"),
             title=_required(form, "title"),
             description=form.get("description", ""),
-            image_url=form.get("image_url", ""),
+            image_url=image_url,
             link_url=form.get("link_url", ""),
             enabled=form.get("enabled") == "1",
         )
@@ -865,20 +890,24 @@ def _require_permission(request: Request, session: AdminSession, permission: str
 
 async def _protected_form(
     request: Request,
+    max_bytes: int = _MAX_FORM_BYTES,
 ) -> tuple[AdminSession, dict[str, str]]:
     session = _require_session(request)
-    form = await _read_form(request)
+    form = await _read_form(request, max_bytes=max_bytes)
     if not _security(request).verify_csrf(session, form.get("csrf_token", "")):
         raise HTTPException(status_code=403, detail="CSRF validation failed")
     return session, form
 
 
-async def _read_form(request: Request) -> dict[str, str]:
+async def _read_form(
+    request: Request,
+    max_bytes: int = _MAX_FORM_BYTES,
+) -> dict[str, str]:
     content_type = request.headers.get("Content-Type", "").split(";", 1)[0].strip()
     if content_type != "application/x-www-form-urlencoded":
         raise HTTPException(status_code=415, detail="Unsupported form content type")
     body = await request.body()
-    if len(body) > _MAX_FORM_BYTES:
+    if len(body) > max_bytes:
         raise HTTPException(status_code=413, detail="Form body is too large")
     try:
         parsed = parse_qs(body.decode("utf-8"), keep_blank_values=True, max_num_fields=64)

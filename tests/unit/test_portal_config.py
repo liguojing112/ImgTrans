@@ -76,3 +76,43 @@ def test_client_fetch_surfaces_network_errors(monkeypatch) -> None:
     client = HttpPortalConfigClient("https://example.com")
     with pytest.raises(PortalConfigError):
         client.fetch()
+
+
+def test_client_resolves_site_relative_image_url(monkeypatch) -> None:
+    """后台本地上传的图片返回站内相对路径，客户端补全为完整地址。"""
+    import src.infrastructure.portal_config_client as module
+
+    payload = json.dumps(
+        {
+            "modules": [
+                {
+                    "module_key": "wanxiang_note",
+                    "title": "万象笔记",
+                    "image_url": "/portal-assets/portal-abc.png",
+                }
+            ]
+        },
+        ensure_ascii=False,
+    ).encode("utf-8")
+
+    class _Response:
+        headers = {}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self, size: int) -> bytes:
+            return payload
+
+    monkeypatch.setattr(module, "urlopen", lambda *args, **kwargs: _Response())
+    client = HttpPortalConfigClient("https://api.example.com")
+
+    modules = client.fetch()
+
+    assert (
+        modules[0].image_url
+        == "https://api.example.com/portal-assets/portal-abc.png"
+    )
