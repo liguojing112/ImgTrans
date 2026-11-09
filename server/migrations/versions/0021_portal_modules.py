@@ -1,7 +1,7 @@
 """Create portal module entries (client-facing entry cards).
 
-Revision ID: 0005_portal_modules
-Revises: 0004_audit_events
+Revision ID: 0021_portal_modules
+Revises: 0020_watermark_daily_limit
 Create Date: 2026-11-09
 """
 from typing import Sequence, Union
@@ -10,8 +10,8 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision: str = "0005_portal_modules"
-down_revision: Union[str, None] = "0004_audit_events"
+revision: str = "0021_portal_modules"
+down_revision: Union[str, None] = "0020_watermark_daily_limit"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
