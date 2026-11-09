@@ -3,7 +3,7 @@
 <h1>门户入口</h1>
 <section class="card">
   <h2>万象笔记（首页与编辑器入口）</h2>
-  <form method="post" action="/admin/portal" class="form-grid">
+  <form method="post" action="/admin/portal" class="form-grid" style="grid-template-columns: 1fr; max-width: 680px;">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <input type="hidden" name="module_key" value="{{ module_key }}">
     <label>入口标题<input name="title" type="text" maxlength="60" required
