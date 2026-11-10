@@ -3974,10 +3974,13 @@ class EditorMainWindow(QMainWindow):
         # 预览阶段按识别框多边形整块擦掉原文：只擦字形时，艺术字/描边字/旋转文字
         # 常留下残影，预览文字叠上去就成了「重影」。正式翻译仍走精细蒙版。
         if self._mask_rasterizer is not None:
+            polygon = _expand_polygon_to_glyphs(
+                source, tuple((point.x, point.y) for point in region.polygon)
+            )
             return self._mask_rasterizer.rasterize(
                 source.asset.width,
                 source.asset.height,
-                (tuple((point.x, point.y) for point in region.polygon),),
+                (polygon,),
                 2,
             )
         if self._erase_mask_builder is not None:
@@ -4065,11 +4068,34 @@ class EditorMainWindow(QMainWindow):
             if existing_id is None:
                 return
 
-        if self._task_runner is None or not self._ensure_composition_editor():
+        _log = logging.getLogger("imgtrans")
+        _log.info(
+            "ocr-preview begin region=%s text=%r original=%r existing=%s box=%s",
+            region_id,
+            region.text,
+            self._ocr_original_texts.get(region_id),
+            existing_id,
+            [(round(p.x, 1), round(p.y, 1)) for p in region.polygon],
+        )
+
+        if self._task_runner is None:
+            _log.warning("ocr-preview abort: no task_runner")
+            self.statusBar().showMessage("OCR 原文无法应用：编辑器未就绪", 6000)
+            return
+        if not self._ensure_composition_editor():
+            _log.warning(
+                "ocr-preview abort: ensure_editor failed source=%s",
+                self._model.source_document is not None,
+            )
+            self.statusBar().showMessage(
+                "OCR 原文无法应用：缺少原图或编辑会话，请重新导入图片", 8000
+            )
             return
         editor = self._model.composition_editor
         if editor is None:
+            self.statusBar().showMessage("OCR 原文无法应用：编辑会话创建失败", 6000)
             return
+        self.statusBar().showMessage("正在更新 OCR 原文…")
         if existing_id is not None and not any(
             layer.region_id == existing_id for layer in editor.layout.layers
         ):
@@ -4181,6 +4207,12 @@ class EditorMainWindow(QMainWindow):
             return edit
 
         def on_success(edit):
+            logging.getLogger("imgtrans").info(
+                "ocr-preview done region=%s layers=%d patches=%d",
+                region_id,
+                len(edit.layout.layers),
+                getattr(edit, "patch_count", -1),
+            )
             self._editor_page.apply_edit_result(edit)
             self._apply_preview_mode("layers")
             self._editor_page.top_bar.set_has_layers(True)
@@ -4188,8 +4220,13 @@ class EditorMainWindow(QMainWindow):
         self._task_runner.submit(
             operation,
             on_success,
-            lambda error: self.statusBar().showMessage(
-                f"OCR 原文预览更新失败：{error}", 6000
+            lambda error: (
+                logging.getLogger("imgtrans").exception(
+                    "ocr-preview failed region=%s", region_id
+                ),
+                self.statusBar().showMessage(
+                    f"OCR 原文预览更新失败：{error}", 8000
+                ),
             ),
         )
 
@@ -4970,3 +5007,105 @@ def _rect_erase_mask(
         data[start : start + span] = b"\xff" * span
     return EraseMask(width, height, bytes(data))
 
+def _expand_polygon_to_glyphs(
+    document: ImageDocument,
+    polygon: tuple[tuple[float, float], ...],
+) -> tuple[tuple[float, float], ...]:
+    """把识别框扩到覆盖被切在框外的文字笔画。
+
+    OCR 常把末尾字符整体落在框外（实测框右边界 228，而实际文字到 339），
+    只擦框内会留下完整可见的旧字。做法：从框的每条边向外逐像素扫描同行/同列，
+    遇到亮像素记为可达、允许跨过字间距（gap），连续无字则停止。
+    """
+    import numpy as np
+
+    channels = 4 if document.mode == "RGBA" else 3
+    pixels = np.frombuffer(document.pixels, dtype=np.uint8).reshape(
+        document.asset.height, document.asset.width, channels
+    )[:, :, :3]
+    height, width = pixels.shape[:2]
+    xs = [point[0] for point in polygon]
+    ys = [point[1] for point in polygon]
+    x0 = max(0, int(min(xs)))
+    x1 = min(width, int(max(xs)) + 1)
+    y0 = max(0, int(min(ys)))
+    y1 = min(height, int(max(ys)) + 1)
+    if x1 <= x0 or y1 <= y0:
+        return polygon
+
+    luminance = pixels @ np.asarray((0.2126, 0.7152, 0.0722), dtype=np.float32)
+    base = float(np.percentile(luminance[y0:y1, x0:x1].ravel(), 40))
+    bright = luminance > base + 45.0
+
+    box_w, box_h = x1 - x0, y1 - y0
+    # 字间距通常是字宽的一半以内；给足余量但不超过框宽
+    gap_x = min(box_w, max(20, int(box_w * 0.55)))
+    gap_y = min(box_h, max(16, int(box_h * 0.45)))
+    # 总扩展量不超过框尺寸本身：足以覆盖被切掉的末尾字符，又不会
+    # 误把旁边的其它文字/图形圈进擦除区。
+    limit_x = box_w
+    limit_y = int(box_h * 0.9)
+
+    def extend_right() -> int:
+        misses = 0
+        result = x1
+        for x in range(x1, min(width, x1 + limit_x)):
+            if bright[y0:y1, x].any():
+                result = x + 1
+                misses = 0
+            else:
+                misses += 1
+                if misses > gap_x:
+                    break
+        return result
+
+    def extend_left() -> int:
+        misses = 0
+        result = x0
+        for x in range(x0 - 1, max(-1, x0 - 1 - limit_x), -1):
+            if bright[y0:y1, x].any():
+                result = x
+                misses = 0
+            else:
+                misses += 1
+                if misses > gap_x:
+                    break
+        return result
+
+    def extend_down(left: int, right: int) -> int:
+        misses = 0
+        result = y1
+        for y in range(y1, min(height, y1 + limit_y)):
+            if bright[y, left:right].any():
+                result = y + 1
+                misses = 0
+            else:
+                misses += 1
+                if misses > gap_y:
+                    break
+        return result
+
+    def extend_up(left: int, right: int) -> int:
+        misses = 0
+        result = y0
+        for y in range(y0 - 1, max(-1, y0 - 1 - limit_y), -1):
+            if bright[y, left:right].any():
+                result = y
+                misses = 0
+            else:
+                misses += 1
+                if misses > gap_y:
+                    break
+        return result
+
+    nx0 = extend_left()
+    nx1 = extend_right()
+    # 上下扫用扩展后的水平范围，保证末尾字符的上下也覆盖到
+    ny0 = extend_up(nx0, nx1)
+    ny1 = extend_down(nx0, nx1)
+    return (
+        (float(nx0), float(ny0)),
+        (float(nx1), float(ny0)),
+        (float(nx1), float(ny1)),
+        (float(nx0), float(ny1)),
+    )
