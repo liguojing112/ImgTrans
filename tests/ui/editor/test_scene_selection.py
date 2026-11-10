@@ -237,3 +237,34 @@ def test_delete_key_emits_layer_delete_for_selected_layer() -> None:
     scene.clear_selection()
     scene.keyPressEvent(key)
     assert deleted == ["r1"], "未选中图层时 Delete 不应发删除请求"
+
+
+def test_picture_selection_survives_scene_rebuild() -> None:
+    """编辑后场景重建（set_document）时，图片图层选中状态恢复，Delete 才能继续用。"""
+    from src.domain.composition import PictureLayer
+
+    QApplication.instance() or QApplication(["picture-selection-test"])
+    scene = EditorScene()
+    scene.set_document(_document())
+    picture = PictureLayer(
+        "picture-1", bytes([220, 30, 30] * (10 * 10)), 10, 10, 50, 40
+    )
+    scene.set_picture_layers([picture])
+    scene.select_picture("picture-1")
+    assert scene._picture_items["picture-1"].isSelected()
+
+    # 模拟一次编辑后的重建
+    scene.set_document(_document())
+    scene.set_picture_layers([picture])
+
+    assert scene._picture_items["picture-1"].isSelected()
+
+    deleted = []
+    scene.picture_delete_requested.connect(deleted.append)
+    from PySide6.QtGui import QKeyEvent
+    from PySide6.QtCore import QEvent, Qt
+
+    scene.keyPressEvent(
+        QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Delete, Qt.KeyboardModifier.NoModifier)
+    )
+    assert deleted == ["picture-1"]

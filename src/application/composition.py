@@ -71,6 +71,8 @@ class EditComposition:
         self._layout_adapter = layout_adapter
         self._renderer = renderer
         self._lock = Lock()
+        self._render_base_key: tuple[int, int, int, int] | None = None
+        self._render_base_document: ImageDocument | None = None
         viewport = CropViewport(
             0,
             0,
@@ -149,10 +151,12 @@ class EditComposition:
 
     @property
     def editing_document(self) -> ImageDocument:
-        """返回不含水印的编辑底图，水印由画布交互项单独显示。"""
-        return self._render_state(
-            replace(self._session.state, watermarks=())
-        )
+        """编辑底图：背景 + 文字层（不含水印与图片层）。
+
+        水印、图片图层都由画布交互项单独显示：图片层若烘焙进底图，
+        拖动图片图层时底图（旧位置）与拖动预览（新位置）会同时出现，形成重影。
+        """
+        return self._render_base(self._session.state)
 
     @property
     def watermarks(self) -> tuple[WatermarkLayer, ...]:
@@ -895,6 +899,25 @@ class EditComposition:
         )
 
     def _render_state(self, state: CompositionState) -> ImageDocument:
+        rendered = _composite_picture_layers(
+            self._render_base(state), state.pictures
+        )
+        return _render_watermarks(rendered, state.watermarks)
+
+    def _render_base(self, state: CompositionState) -> ImageDocument:
+        """背景 + 文字层（不含图片图层与水印），带缓存。
+
+        移动图片图层只改变 pictures：命中缓存后无需重新绘制文字与背景，
+        画布刷新因此明显变快。
+        """
+        cache_key = (
+            id(state.layout),
+            id(state.patches),
+            id(state.base_document),
+            id(state.viewport),
+        )
+        if self._render_base_key == cache_key:
+            return self._render_base_document
         visible_layout = TextLayout(
             tuple(layer for layer in state.layout.layers if layer.visible)
         )
@@ -906,8 +929,9 @@ class EditComposition:
             ),
             visible_layout,
         )
-        rendered = _composite_picture_layers(rendered, state.pictures)
-        return _render_watermarks(rendered, state.watermarks)
+        self._render_base_key = cache_key
+        self._render_base_document = rendered
+        return rendered
 
     def _commit_state(
         self,

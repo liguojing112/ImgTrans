@@ -67,6 +67,7 @@ class EditorScene(QGraphicsScene):
         self._regions_visible = True
         self._watermark_items: dict[str, WatermarkLayerItem] = {}
         self._picture_items: dict[str, PictureLayerItem] = {}
+        self._picture_selection: set[str] = set()
         self._erase_mask_image: QImage | None = None
         self._mask_visible = True
         self._scene_width = 800
@@ -117,6 +118,12 @@ class EditorScene(QGraphicsScene):
         self._crop_selection_rect = None
         self._crop_move_origin = None
         self._crop_move_start_rect = None
+        # clear() 会删除图元的 C++ 对象：先保存图片图层选中状态，重建后恢复
+        self._picture_selection = {
+            layer_id
+            for layer_id, item in self._picture_items.items()
+            if item.isSelected()
+        }
         self.clear()
         self._manual_preview_item = None
         self._background = None
@@ -149,6 +156,12 @@ class EditorScene(QGraphicsScene):
         self._crop_selection_rect = None
         self._crop_move_origin = None
         self._crop_move_start_rect = None
+        # clear() 会删除图元的 C++ 对象：先保存图片图层选中状态，重建后恢复
+        self._picture_selection = {
+            layer_id
+            for layer_id, item in self._picture_items.items()
+            if item.isSelected()
+        }
         self.clear()
         self._background = None
         self._comparison_clip = None
@@ -299,6 +312,14 @@ class EditorScene(QGraphicsScene):
         """同步画布上的图片图层图形项（框选剥离出来的元素）。"""
         pictures = tuple(pictures or ())
         wanted = {picture.layer_id for picture in pictures}
+        # 编辑后场景会重建图元：记住选中项，重建后恢复，
+        # 否则「拖动一下再按 Delete」会因为选中丢失而删不掉
+        selected = {
+            layer_id
+            for layer_id, item in self._picture_items.items()
+            if item.isSelected()
+        } | self._picture_selection
+        self._picture_selection = set()
         for layer_id in list(self._picture_items):
             if layer_id not in wanted:
                 item = self._picture_items.pop(layer_id)
@@ -312,6 +333,10 @@ class EditorScene(QGraphicsScene):
                 self._picture_items[picture.layer_id] = item
             else:
                 item.update_layer(picture)
+        for layer_id in selected:
+            item = self._picture_items.get(layer_id)
+            if item is not None:
+                item.setSelected(True)
 
     def select_picture(self, layer_id: str) -> None:
         self.clear_selection()
@@ -330,6 +355,10 @@ class EditorScene(QGraphicsScene):
         item = self._watermark_items.get(watermark_id)
         if item is not None:
             item.setSelected(True)
+
+    def set_picture_items_visible(self, visible: bool) -> None:
+        for item in self._picture_items.values():
+            item.setVisible(visible)
 
     def clear_selection(self) -> None:
         for item in self._picture_items.values():

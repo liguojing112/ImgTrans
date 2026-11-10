@@ -911,16 +911,47 @@ class EditorMainWindow(QMainWindow):
         adapter = self._text_layout_adapter
         if adapter is not None and hasattr(adapter, "set_font_family"):
             adapter.set_font_family(font_family)
+        if font_family is not None:
+            # 已翻译的文字同步换成新字体，避免「译文字体」与
+            # 「文字属性 → 字体」显示不一致（一次撤销）
+            self._apply_font_family_to_layers(font_family)
         if self._font_preferences is None:
             return
         try:
             self._font_preferences.save(font_family)
             self.statusBar().showMessage(
-                "译文字体已保存" if font_family else "译文字体已恢复自动匹配",
+                "译文字体已保存，现有文字已同步"
+                if font_family
+                else "译文字体已恢复自动匹配（下次翻译生效）",
                 3000,
             )
         except Exception as error:
             self.statusBar().showMessage(f"无法保存译文字体设置：{error}", 5000)
+
+    def _apply_font_family_to_layers(self, font_family: str) -> None:
+        editor = self._model.composition_editor
+        if editor is None or self._task_runner is None:
+            return
+        try:
+            layers = [
+                replace(
+                    layer,
+                    style=replace(layer.style, font_family=font_family),
+                )
+                for layer in editor.layout.layers
+                if layer.style.font_family != font_family
+            ]
+        except Exception:
+            return
+        if not layers:
+            return
+        self._task_runner.submit(
+            lambda: editor.replace_layers_many(layers),
+            self._editor_page.apply_edit_result,
+            lambda error: self.statusBar().showMessage(
+                f"更新译文字体失败：{error}", 5000
+            ),
+        )
 
     def _on_match_source_font_changed(self, enabled: bool) -> None:
         adapter = self._text_layout_adapter
@@ -2529,6 +2560,7 @@ class EditorMainWindow(QMainWindow):
 
     def _apply_preview_mode(self, mode: str) -> None:
         """切换原图、干净成品图和可编辑辅助层。"""
+        self._sync_picture_positions()
         self._model.preview_mode = mode
         self._model.showing_original = mode == "original"
         if mode == "original":
@@ -2576,6 +2608,8 @@ class EditorMainWindow(QMainWindow):
                     self._model.composition_editor.patch_count,
                 )
         self._editor_page.scene.set_mask_visible(show_mask)
+        # 成品预览的底图已包含图片图层；编辑底图不含，图片层由画布项绘制
+        self._editor_page.scene.set_picture_items_visible(show_layers)
         self._editor_page.set_layers_visible(show_layers)
         self._model.layers_visible = show_layers
         self._editor_page.property_panel.setEnabled(enable_properties)
@@ -2606,7 +2640,7 @@ class EditorMainWindow(QMainWindow):
     def _on_editor_tool_changed(self, tool_id: str) -> None:
         if self._model.translation_result is None:
             # 强化翻译直接吃导入的原图，不要求先跑完 OCR / 翻译
-            if tool_id not in {"select", "ai_erase", "manual_translate", "enhance_translate"}:
+            if tool_id not in {"select", "ai_erase", "manual_translate", "extract_layer", "enhance_translate"}:
                 self.statusBar().showMessage("请先导入图片并完成 OCR 或翻译")
                 return
         if tool_id == "select":
@@ -2627,6 +2661,17 @@ class EditorMainWindow(QMainWindow):
                 return
             self._apply_preview_mode("layers")
             self._editor_page.open_erase_dialog()
+        elif tool_id == "extract_layer":
+            # 与 AI 消除一致：导入图片即可用，未翻译时以原图为底建立会话
+            if not self._ensure_composition_editor():
+                self.statusBar().showMessage("请先导入图片，再使用图层剥离")
+                self._editor_page.toolbar.set_active_tool("select")
+                return
+            self._apply_preview_mode("layers")
+            # 切预览会重建画布并重置框选状态：这里必须重新设置框选模式，
+            # 否则点了「图层剥离」在画布上拖不出框
+            self._editor_page.scene.set_area_selection_mode("extract_layer")
+            self.statusBar().showMessage("在图片上框选要剥离的元素")
         elif tool_id == "manual_translate":
             if self._process_manual_region is None:
                 self.statusBar().showMessage("框选翻译当前不可用")
@@ -4198,28 +4243,59 @@ class EditorMainWindow(QMainWindow):
         self._editor_page.toolbar.set_active_tool("select")
 
     def _on_picture_moved(self, layer_id: str, center_x: float, center_y: float) -> None:
+        # 同步执行：基础层已有缓存，只需合成图片图层；也避免后台渲染
+        # 尚未完成时立即导出，拿到移动前的旧文档
         editor = self._model.composition_editor
-        if editor is None or self._task_runner is None:
+        if editor is None:
             return
-        self._task_runner.submit(
-            lambda: editor.move_picture_layer(layer_id, center_x, center_y),
-            self._editor_page.apply_edit_result,
-            lambda error: self.statusBar().showMessage(
-                f"移动图层失败：{error}", 6000
-            ),
+        try:
+            edit = editor.move_picture_layer(layer_id, center_x, center_y)
+        except Exception as error:  # noqa: BLE001 - 状态栏提示
+            self.statusBar().showMessage(f"移动图层失败：{error}", 6000)
+            return
+        self._apply_picture_move_result(edit)
+
+    def _apply_picture_move_result(self, edit) -> None:
+        """移动图片层：画布项已在新位置，无需重建底图，只同步导出文档与历史。"""
+        self._model.rendered_document = edit.document
+        self._model.is_dirty = True
+        editor = self._model.composition_editor
+        if editor is not None:
+            self._sync_history_actions(editor.can_undo, editor.can_redo)
+        self._editor_page.scene.set_picture_layers(
+            editor.pictures if editor is not None else ()
         )
 
     def _on_delete_picture(self, layer_id: str) -> None:
         editor = self._model.composition_editor
-        if editor is None or self._task_runner is None:
+        if editor is None:
             return
-        self._task_runner.submit(
-            lambda: editor.remove_picture_layer(layer_id),
-            self._editor_page.apply_edit_result,
-            lambda error: self.statusBar().showMessage(
-                f"删除图层失败：{error}", 6000
-            ),
-        )
+        try:
+            edit = editor.remove_picture_layer(layer_id)
+        except Exception as error:  # noqa: BLE001 - 状态栏提示
+            self.statusBar().showMessage(f"删除图层失败：{error}", 6000)
+            return
+        self._apply_picture_move_result(edit)
+
+    def _sync_picture_positions(self) -> None:
+        """把画布上图元的位置同步回编辑状态（图元是拖动后的真实位置）。"""
+        editor = self._model.composition_editor
+        if editor is None:
+            return
+        scene = self._editor_page.scene
+        for picture in editor.pictures:
+            item = scene._picture_items.get(picture.layer_id)
+            if item is None:
+                continue
+            x, y = item.pos().x(), item.pos().y()
+            if (
+                abs(x - picture.center_x) > 0.5
+                or abs(y - picture.center_y) > 0.5
+            ):
+                try:
+                    editor.move_picture_layer(picture.layer_id, x, y)
+                except Exception:
+                    continue
 
     def _on_picture_selected(self, layer_id: str) -> None:
         self.statusBar().showMessage(
@@ -4730,6 +4806,9 @@ class EditorMainWindow(QMainWindow):
     # —— 导出 ——
 
     def _on_export(self, target: Path) -> None:
+        # 画布上的图片图层位置以图元为准：导出前先同步回编辑状态，
+        # 避免拖动事件在个别路径下没提交时导出旧位置
+        self._sync_picture_positions()
         # 优先使用最新编辑结果（EditComposition），其次使用预渲染成品图
         document = self._model.rendered_document or self._model.document
         if self._model.composition_editor is not None:

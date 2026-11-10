@@ -1542,3 +1542,56 @@ def test_property_panel_font_family_echoes_layer_value(qtbot) -> None:
     )
 
     assert panel.font_family.currentData() == "Microsoft YaHei"
+
+
+def test_fixed_font_family_applies_on_ocr_update(qtbot) -> None:
+    """勾选「固定字体」后，更新 OCR 原文时写回统一字体。"""
+    panel = PropertyPanel()
+    qtbot.addWidget(panel)
+    panel.show()
+    panel.set_ocr_region(_ocr_region(), None, {})
+
+    assert not panel.fixed_family_combo.isEnabled()
+    panel.fixed_family_check.setChecked(True)
+    assert panel.fixed_family_combo.isEnabled()
+    panel.fixed_family_combo.addItem("测试字体", "TestFamily")
+    panel.fixed_family_combo.setCurrentIndex(panel.fixed_family_combo.count() - 1)
+
+    properties: list = []
+    panel.ocr_property_changed.connect(lambda *args: properties.append(args))
+    panel.source_text_edit.setPlainText("NEW")
+    panel.apply_source_text_btn.click()
+
+    assert ("r1", "font_family", "TestFamily") in properties
+
+
+def test_fixed_font_family_keeps_choice_when_switching_region(qtbot) -> None:
+    """勾选固定字体后切换区域，字体下拉保留用户选定的字体。"""
+    panel = PropertyPanel()
+    qtbot.addWidget(panel)
+    panel.show()
+    panel.set_ocr_region(_ocr_region(), None, {})
+    panel.fixed_family_check.setChecked(True)
+    panel.fixed_family_combo.addItem("测试字体", "TestFamily")
+    panel.fixed_family_combo.setCurrentIndex(panel.fixed_family_combo.count() - 1)
+
+    panel.set_layer(_make_layer(style=TextStyle("Arial", 14, (24, 32, 51))))
+
+    assert panel.fixed_family_combo.currentData() == "TestFamily"
+
+
+def test_fixed_font_off_keeps_estimated_family(qtbot) -> None:
+    """不勾选固定字体时不额外改字体。"""
+    panel = PropertyPanel()
+    qtbot.addWidget(panel)
+    panel.show()
+    panel.set_layer(_make_layer())
+
+    emitted: list = []
+    panel.layer_property_changed.connect(
+        lambda region_id, field, value: emitted.append((region_id, field, value))
+    )
+    panel.source_text_edit.setPlainText("HELLO")
+    panel.apply_source_text_btn.click()
+
+    assert not any(field == "font_family" for _, field, _ in emitted)

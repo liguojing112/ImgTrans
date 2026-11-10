@@ -767,3 +767,31 @@ def test_picture_layer_rejects_mismatched_pixels() -> None:
 
     with pytest.raises(ValueError):
         PictureLayer("p", b"\x00" * 10, 5, 5, 0, 0)
+
+
+def test_editing_document_excludes_picture_layers() -> None:
+    """编辑底图不含图片图层（画布项单独绘制，避免拖动重影）；导出文档包含。"""
+    from src.domain.composition import PictureLayer
+    from src.domain.inpainting import EraseMask
+
+    QApplication.instance() or QApplication(["picture-editing-doc-test"])
+    background = _background()
+    renderer = QtTextRenderer()
+    empty = TextLayout(())
+    initial = renderer.render(background, empty)
+    editor = CreateCompositionEditor(
+        QtBasicTextLayoutAdapter(), renderer
+    ).execute(background, initial, empty)
+
+    red = bytes([220, 30, 30] * (20 * 10))
+    picture = PictureLayer("picture-1", red, 20, 10, center_x=50, center_y=30)
+    mask_data = bytearray(180 * 80)
+    for y in range(25, 35):
+        mask_data[y * 180 + 40 : y * 180 + 60] = b"\xff" * 20
+    mask = EraseMask(180, 80, bytes(mask_data))
+    editor.add_extracted_picture(picture, background, mask)
+
+    editing = np.frombuffer(editor.editing_document.pixels, np.uint8).reshape(80, 180, 3)
+    exported = np.frombuffer(editor.document.pixels, np.uint8).reshape(80, 180, 3)
+    assert tuple(editing[30, 50]) != (220, 30, 30)
+    assert tuple(exported[30, 50]) == (220, 30, 30)

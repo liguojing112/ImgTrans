@@ -863,6 +863,10 @@ class EditorPage(QWidget):
                 else ()
             )
             self.scene.set_picture_layers(pictures)
+            # 编辑底图不含图片层（由画布项绘制）；成品预览底图已包含，隐藏画布项
+            self.scene.set_picture_items_visible(
+                self._model.preview_mode == "layers"
+            )
             self.layer_state_panel.set_composition(
                 edit_result.layout,
                 getattr(edit_result, "watermarks", ()),

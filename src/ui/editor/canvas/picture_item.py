@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
-from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen
+from PySide6.QtGui import QColor, QImage, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import (
     QGraphicsItem,
     QGraphicsObject,
@@ -26,6 +26,7 @@ class PictureLayerItem(QGraphicsObject):
         self._layer = layer
         self._drag_origin: QPointF | None = None
         self._drag_start = QPointF()
+        self._image_cache: QImage | None = None
         self.setFlags(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable)
         self.setZValue(_Z)
         self._sync()
@@ -41,6 +42,8 @@ class PictureLayerItem(QGraphicsObject):
     def update_layer(self, layer: PictureLayer) -> None:
         if (layer.width, layer.height) != (self._layer.width, self._layer.height):
             self.prepareGeometryChange()
+        if layer.pixels != self._layer.pixels:
+            self._image_cache = None
         self._layer = layer
         self._sync()
         self.update()
@@ -71,6 +74,10 @@ class PictureLayerItem(QGraphicsObject):
         _widget: object | None = None,
     ) -> None:
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        # 图片层始终由本图元绘制（编辑底图不含图片层），拖动时自然跟随、无重影
+        image = self._image()
+        if image is not None and not image.isNull():
+            painter.drawImage(self.boundingRect(), image)
         pen = QPen(QColor("#22c55e"), 1.2)
         pen.setCosmetic(True)
         if self.isSelected():
@@ -79,6 +86,29 @@ class PictureLayerItem(QGraphicsObject):
         painter.setPen(pen)
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.drawRect(self.boundingRect())
+
+    def _image(self) -> QImage | None:
+        if self._image_cache is None:
+            channels = (
+                4
+                if len(self._layer.pixels)
+                == self._layer.width * self._layer.height * 4
+                else 3
+            )
+            format_ = (
+                QImage.Format.Format_RGBA8888
+                if channels == 4
+                else QImage.Format.Format_RGB888
+            )
+            image = QImage(
+                self._layer.pixels,
+                self._layer.width,
+                self._layer.height,
+                self._layer.width * channels,
+                format_,
+            )
+            self._image_cache = image.copy()
+        return self._image_cache
 
     # —— 拖动移动 ——
 

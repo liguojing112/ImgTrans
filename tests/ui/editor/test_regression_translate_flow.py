@@ -4554,3 +4554,134 @@ def test_extract_layer_creates_picture_and_repairs_background():
         assert editor.pictures == ()
     finally:
         window.close()
+
+
+def test_translation_font_change_applies_to_existing_layers():
+    """切换「译文字体」后，已翻译图层的字体同步更新（与文字属性显示一致）。"""
+    QApplication.instance() or QApplication(["translation-font-sync-test"])
+    result = FakeTranslateImage().execute(
+        _document(),
+        "en",
+        TranslationSelection(TranslationMode.ALL, "zh-Hans"),
+    )
+    window = EditorMainWindow(
+        import_image=object(),
+        task_runner=ImmediateTaskRunner(),
+        create_composition_editor=CreateCompositionEditor(
+            QtBasicTextLayoutAdapter("Arial"),
+            QtTextRenderer(),
+        ),
+    )
+    try:
+        window._on_translation_succeeded(result)
+        assert window._model.text_layout.layers, "夹具应包含翻译图层"
+
+        window._on_translation_font_changed("Microsoft YaHei")
+
+        assert all(
+            layer.style.font_family == "Microsoft YaHei"
+            for layer in window._model.text_layout.layers
+        )
+    finally:
+        window.close()
+
+
+def test_extract_layer_works_without_translation():
+    """批量 OCR / 未翻译图片也能用图层剥离：自动建立编辑会话。"""
+    from src.domain.layout import TextBox
+
+    QApplication.instance() or QApplication(["extract-layer-no-translation-test"])
+    window = EditorMainWindow(
+        import_image=object(),
+        task_runner=ImmediateTaskRunner(),
+        create_composition_editor=CreateCompositionEditor(
+            QtBasicTextLayoutAdapter("Arial"),
+            QtTextRenderer(),
+        ),
+        repair_selection=RepairSelection(FakeRepairAdapter()),
+    )
+    try:
+        window._on_image_loaded(_document())
+        assert window._model.translation_result is None
+
+        window._editor_page.toolbar.buttons["extract_layer"].click()
+
+        assert window._model.composition_editor is not None
+        assert window._editor_page.scene._selection_mode == "extract_layer"
+        assert window._editor_page.scene._manual_selection_enabled, (
+            "切换预览后框选状态必须仍开启，否则画布拖不出框"
+        )
+
+        window._on_extract_layer(TextBox(90, 34, 40, 24))
+
+        assert len(window._model.composition_editor.pictures) == 1
+    finally:
+        window.close()
+
+
+def test_picture_move_updates_export_document_immediately():
+    """拖动图片层后导出文档立即是新位置（同步更新，无后台竞态）。"""
+    from src.domain.layout import TextBox
+
+    QApplication.instance() or QApplication(["picture-move-export-test"])
+    window = EditorMainWindow(
+        import_image=object(),
+        task_runner=ImmediateTaskRunner(),
+        create_composition_editor=CreateCompositionEditor(
+            QtBasicTextLayoutAdapter("Arial"),
+            QtTextRenderer(),
+        ),
+        repair_selection=RepairSelection(FakeRepairAdapter()),
+    )
+    try:
+        window._on_image_loaded(_document())
+        assert window._ensure_composition_editor()
+        window._on_extract_layer(TextBox(90, 34, 40, 24))
+        editor = window._model.composition_editor
+        picture = editor.pictures[0]
+
+        window._on_picture_moved(picture.layer_id, 150, 20)
+
+        import numpy as np
+
+        pixels = np.frombuffer(
+            editor._document.pixels, np.uint8
+        ).reshape(editor._document.asset.height, editor._document.asset.width, 3)
+        assert tuple(pixels[20, 150]) == (25, 35, 50), "导出文档应包含新位置"
+        assert tuple(pixels[34, 90]) != (25, 35, 50), "原位置应是补全背景"
+    finally:
+        window.close()
+
+
+def test_preview_syncs_uncommitted_canvas_picture_position():
+    """即使拖动事件没提交，切换预览时也把画布上图元位置同步回编辑状态。"""
+    from PySide6.QtCore import QPointF
+
+    from src.domain.layout import TextBox
+
+    QApplication.instance() or QApplication(["picture-sync-test"])
+    window = EditorMainWindow(
+        import_image=object(),
+        task_runner=ImmediateTaskRunner(),
+        create_composition_editor=CreateCompositionEditor(
+            QtBasicTextLayoutAdapter("Arial"),
+            QtTextRenderer(),
+        ),
+        repair_selection=RepairSelection(FakeRepairAdapter()),
+    )
+    try:
+        window._on_image_loaded(_document())
+        assert window._ensure_composition_editor()
+        window._on_extract_layer(TextBox(90, 34, 40, 24))
+        editor = window._model.composition_editor
+        picture = editor.pictures[0]
+        item = window._editor_page.scene._picture_items[picture.layer_id]
+
+        # 只移动图元、不提交（模拟 moved 信号丢失的路径）
+        item.setPos(QPointF(150, 20))
+        window._apply_preview_mode("translated")
+
+        moved = editor.pictures[0]
+        assert (moved.center_x, moved.center_y) == (150, 20)
+    finally:
+        window.close()

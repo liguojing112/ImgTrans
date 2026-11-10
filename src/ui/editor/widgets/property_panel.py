@@ -171,12 +171,43 @@ class PropertyPanel(QFrame):
             )
         )
         source_action_row.addStretch(1)
+
+        # 批量 OCR 逐张改原文时，勾选它统一按同一字体写回，避免字体被自动匹配改来改去
+        self.fixed_family_check = QCheckBox("固定字体")
+        self.fixed_family_check.setToolTip(
+            "勾选后点「更新 OCR 原文」按此字体统一设置，不跟随自动匹配/原图匹配"
+        )
+        self.fixed_family_combo = QComboBox()
+        self.fixed_family_combo.setMinimumWidth(180)
+        self.fixed_family_combo.setEditable(True)
+        self.fixed_family_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self.fixed_family_combo.setToolTip("固定字体；可直接输入字体名搜索")
+        fixed_family_completer = self.fixed_family_combo.completer()
+        if fixed_family_completer is not None:
+            fixed_family_completer.setFilterMode(Qt.MatchFlag.MatchContains)
+            fixed_family_completer.setCaseSensitivity(
+                Qt.CaseSensitivity.CaseInsensitive
+            )
+        for display, family in translation_font_choices():
+            self.fixed_family_combo.addItem(display, family)
+        self.fixed_family_combo.setEnabled(False)
+        self.fixed_family_combo.lineEdit().editingFinished.connect(
+            self._restore_fixed_family_edit_text
+        )
+        self.fixed_family_check.toggled.connect(self._on_fixed_family_toggled)
+        source_family_row = QHBoxLayout()
+        source_family_row.setContentsMargins(0, 0, 0, 0)
+        source_family_row.setSpacing(4)
+        source_family_row.addWidget(self.fixed_family_check)
+        source_family_row.addWidget(self.fixed_family_combo, 1)
+
         source_text_widget = QWidget()
         source_text_layout = QVBoxLayout(source_text_widget)
         source_text_layout.setContentsMargins(0, 0, 0, 0)
         source_text_layout.setSpacing(4)
         source_text_layout.addWidget(self.source_text_edit)
         source_text_layout.addLayout(source_action_row)
+        source_text_layout.addLayout(source_family_row)
         source_text_layout.addWidget(self.apply_source_text_btn)
 
         self.translated_text_edit = QPlainTextEdit()
@@ -748,13 +779,16 @@ class PropertyPanel(QFrame):
             self.source_text_changed.emit(self._region_id, text)
         # 「固定字号」勾选时跟着写回统一字号（固定值优先生效，关闭自动适配）
         fixed_size = self.fixed_font_size()
+        signal = (
+            self.ocr_property_changed
+            if self._ocr_editing
+            else self.layer_property_changed
+        )
         if fixed_size is not None:
-            signal = (
-                self.ocr_property_changed
-                if self._ocr_editing
-                else self.layer_property_changed
-            )
             signal.emit(self._region_id, "font_size", fixed_size)
+        fixed_family = self.fixed_font_family()
+        if fixed_family is not None:
+            signal.emit(self._region_id, "font_family", fixed_family)
 
     def _on_fixed_font_toggled(self, checked: bool) -> None:
         self.fixed_font_spin.setEnabled(checked)
@@ -766,6 +800,42 @@ class PropertyPanel(QFrame):
         if not self.fixed_font_check.isChecked():
             return None
         return float(self.fixed_font_spin.value())
+
+    def _on_fixed_family_toggled(self, checked: bool) -> None:
+        self.fixed_family_combo.setEnabled(checked)
+        if checked:
+            # 以当前图层字体为起点，方便直接沿用
+            current = self.font_family.currentData()
+            index = (
+                self.fixed_family_combo.findData(current)
+                if isinstance(current, str)
+                else -1
+            )
+            if index >= 0:
+                self.fixed_family_combo.setCurrentIndex(index)
+
+    def fixed_font_family(self) -> str | None:
+        if not self.fixed_family_check.isChecked():
+            return None
+        family = self.fixed_family_combo.currentData()
+        return family if isinstance(family, str) and family else None
+
+    def _restore_fixed_family_edit_text(self) -> None:
+        text = self.fixed_family_combo.currentText().strip()
+        match = (
+            self.fixed_family_combo.findText(text, Qt.MatchFlag.MatchFixedString)
+            if text
+            else -1
+        )
+        if match >= 0:
+            if match != self.fixed_family_combo.currentIndex():
+                self.fixed_family_combo.setCurrentIndex(match)
+            return
+        index = self.fixed_family_combo.currentIndex()
+        if index >= 0:
+            self.fixed_family_combo.setEditText(
+                self.fixed_family_combo.itemText(index)
+            )
 
     def _on_translated_text_changed(self) -> None:
         if self._region_id is None:
@@ -1293,6 +1363,9 @@ class PropertyPanel(QFrame):
 
     def _set_font_family_value(self, family: str) -> None:
         """回显字体：列表缺失（系统没这个字体）时临时补一项，避免显示错位。"""
+        if self.fixed_family_check.isChecked():
+            # 已勾选「固定字体」：切换区域时保留用户选定的字体
+            return
         index = self.font_family.findData(family)
         if index < 0:
             self.font_family.addItem(family, family)
