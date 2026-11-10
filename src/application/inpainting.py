@@ -22,11 +22,20 @@ class EraseMaskPlan:
 
 
 class BuildEraseMask:
-    def __init__(self, rasterizer: MaskRasterizer, expansion: int = 2) -> None:
+    def __init__(
+        self,
+        rasterizer: MaskRasterizer,
+        expansion: int = 2,
+        whole_box: bool = True,
+    ) -> None:
         if expansion < 0:
             raise ValueError("Mask expansion cannot be negative")
         self._rasterizer = rasterizer
         self._expansion = expansion
+        # 整框擦除：按识别框矩形一次性擦掉，而不是只擦字形。
+        # 视频截图/半透明底上的细字，笔画间缝隙会让补全模型"看见"字形轮廓，
+        # 补出残影；整框遮挡后补全无特征可循，画面更干净（实测对比明显）。
+        self._whole_box = whole_box
 
     def execute(
         self,
@@ -68,16 +77,26 @@ class BuildEraseMask:
         )
         masks: list[EraseMask] = []
         if regular_polygons:
-            masks.append(
-                rasterize_text(document, regular_polygons, self._expansion)
-                if rasterize_text is not None
-                else self._rasterizer.rasterize(
-                    document.asset.width,
-                    document.asset.height,
-                    regular_polygons,
-                    self._expansion,
+            if self._whole_box:
+                masks.append(
+                    self._rasterizer.rasterize(
+                        document.asset.width,
+                        document.asset.height,
+                        regular_polygons,
+                        self._expansion,
+                    )
                 )
-            )
+            else:
+                masks.append(
+                    rasterize_text(document, regular_polygons, self._expansion)
+                    if rasterize_text is not None
+                    else self._rasterizer.rasterize(
+                        document.asset.width,
+                        document.asset.height,
+                        regular_polygons,
+                        self._expansion,
+                    )
+                )
         if enhanced_polygons:
             rasterize_mapped_text = (
                 getattr(
