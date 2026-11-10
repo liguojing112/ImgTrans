@@ -1907,3 +1907,32 @@ def test_widely_spaced_lines_without_group_id_stay_separate_layers() -> None:
     )
 
     assert [layer.region_id for layer in layout.layers] == ["line-1", "line-2"]
+
+
+def test_foreground_estimation_prefers_white_text_on_translucent_blue() -> None:
+    """半透明蓝底上的白字：不能被少量暗边带偏成黑字（客户监控图场景）。"""
+    QApplication.instance() or QApplication(["foreground-white-on-blue-test"])
+    rng = np.random.default_rng(3)
+    width, height = 260, 90
+    base = np.zeros((height, width, 3), dtype=np.uint8)
+    base[:, :, 0], base[:, :, 1], base[:, :, 2] = (72, 108, 196)
+    noise = rng.integers(-24, 25, size=(height, width, 3))
+    pixels = np.clip(base.astype(np.int16) + noise, 0, 255).astype(np.uint8)
+    pixels[20:70, 20:60] = (255, 255, 255)
+    pixels[18:20, 18:62] = (40, 40, 40)  # 少量暗边
+    asset = ImageAsset(
+        Path("blue.png"), width, height, 1, ImageFileFormat.PNG, False, False
+    )
+    document = ImageDocument(asset, "RGB", pixels.tobytes())
+    region = TextRegion(
+        "digits",
+        order_quad(((15, 15), (250, 15), (250, 80), (15, 80))),
+        "09:19",
+        0.95,
+        "en",
+        "fixture",
+    )
+
+    color = _estimate_foreground_color(document, region)
+
+    assert min(color) >= 200, f"白字应估计为白色，实际 {color}"

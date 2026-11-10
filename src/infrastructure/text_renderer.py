@@ -2676,7 +2676,25 @@ def _estimate_foreground_color(
     background = np.median(border, axis=0)
     dark_distance = float(np.linalg.norm(dark - background))
     bright_distance = float(np.linalg.norm(bright - background))
-    color = dark if dark_distance >= bright_distance else bright
+    # 先剔除"与背景同色"的样本（背景通常占框内绝大多数像素），再在剩余
+    # 候选里按数量比较：笔画本体像素远多于零散暗边/阴影，白字就不会被
+    # 少量暗色带偏成黑字；黄底黑字这类背景占比极高的情况也不会误判。
+    background_distance_all = np.linalg.norm(
+        samples.astype(np.float32) - background, axis=1
+    )
+    background_like = background_distance_all <= 32
+    dark_count = int(
+        np.count_nonzero((luminance <= low) & ~background_like)
+    )
+    bright_count = int(
+        np.count_nonzero((luminance >= high) & ~background_like)
+    )
+    if dark_count >= bright_count * 1.5:
+        color = dark
+    elif bright_count >= dark_count * 1.5:
+        color = bright
+    else:
+        color = dark if dark_distance >= bright_distance else bright
     if max(dark_distance, bright_distance) < 32:
         black = np.zeros(3)
         white = np.full(3, 255)

@@ -77,9 +77,10 @@ class PillowMaskRasterizer:
                 )
                 if narrow_label:
                     refined_expansion = max(1, expansion // 2)
-                elif is_refined and short_edge >= 18 and refined_ratio <= 0.3:
-                    refined_expansion = expansion * 2
                 else:
+                    # 细化蒙版已按字形精确收敛，再翻倍膨胀会把周围背景一起擦掉
+                    # （半透明底图上尤其明显：补全区域过大，与周围衔接不上，
+                    # 看起来就像「没擦干净」）。统一使用调用方给的膨胀量。
                     refined_expansion = expansion
                 refined_image = refined_image.filter(
                     ImageFilter.MaxFilter(refined_expansion * 2 + 1)
@@ -307,7 +308,11 @@ def _high_contrast_text_mask(
     if not len(samples):
         return np.asarray(geometry, dtype=np.uint8)
     luminance = samples @ np.asarray((0.2126, 0.7152, 0.0722), dtype=np.float32)
-    low_limit, high_limit = np.percentile(luminance, (3.0, 97.0))
+    # 前景色取亮度分布的极值端（而非分位数）：视频截图里白字常被一圈半透明
+    # 白晕包住，白晕像素数量可能多于字形本体，分位取样会把前景色稀释成灰白，
+    # 于是"距背景远"的判据对字形本体不成立，大面积漏擦。取最亮/最暗的少量
+    # 样本即可稳定命中真正的字形与背景色。
+    low_limit, high_limit = np.percentile(luminance, (0.5, 99.5))
     dark = np.median(samples[luminance <= low_limit], axis=0)
     bright = np.median(samples[luminance >= high_limit], axis=0)
     edge_width = 5 if min(geometry.size) >= 20 else 3
@@ -321,6 +326,21 @@ def _high_contrast_text_mask(
         background_samples if len(background_samples) else samples,
         axis=0,
     )
+    # 文字贴框（白字占满识别框）时，框内一圈边缘也全是字，背景会被估成字形色，
+    # 后续"距背景远"的判据随之失效，蒙版大面积漏擦。此时用外侧一圈（框外扩
+    # 数像素）重新估计背景：那里一定是底图。
+    if border.size and (
+        np.count_nonzero(border) == 0
+        or np.linalg.norm(background - bright) < 40
+        or np.linalg.norm(background - dark) < 40
+    ):
+        outside = cv2.dilate(
+            polygon.astype(np.uint8), np.ones((edge_width * 4 + 1,) * 2, np.uint8)
+        ) > 0
+        outside &= ~polygon
+        outside_samples = pixels[outside].astype(np.float32)
+        if len(outside_samples):
+            background = np.median(outside_samples, axis=0)
     background = _corrected_background(pixels, polygon, background)
     # 已知未解决：彩色横幅/圆角标签/表格单元格上的文字，其底色会被当成文字擦掉
     # （实测圆角胶囊条覆盖率 98%）。曾尝试两种判别均在语料上净负、已撤回，详见
@@ -360,7 +380,9 @@ def _high_contrast_text_mask(
             pixels.astype(np.float32) - foreground,
             axis=2,
         )
-        foreground_limit = max(72.0, min(180.0, contrast * 0.65))
+        # 半透明字缘（抗锯齿、视频压缩）比纯前景暗不少，上限放得太紧会留下
+        # 一圈"白斑"；下限同时保证不会越到背景上（背景离前景色更远）。
+        foreground_limit = max(110.0, min(220.0, contrast * 0.8))
         background_minimum = max(72.0, contrast * 0.5)
         candidate = polygon & (
             distance_to_foreground <= foreground_limit
@@ -425,6 +447,11 @@ def _high_contrast_text_mask(
             ),
         ):
             candidate = _merge_if_not_whole_box(polygon, candidate, extra)
+    candidate_ratio = (
+        float(np.count_nonzero(candidate)) / float(np.count_nonzero(polygon))
+        if np.any(candidate)
+        else 1.0
+    )
     candidate_ratio = (
         float(np.count_nonzero(candidate)) / float(np.count_nonzero(polygon))
         if np.any(candidate)
