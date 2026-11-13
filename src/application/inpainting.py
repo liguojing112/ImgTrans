@@ -26,15 +26,21 @@ class BuildEraseMask:
         self,
         rasterizer: MaskRasterizer,
         expansion: int = 2,
-        whole_box: bool = True,
+        whole_box: bool = False,
     ) -> None:
         if expansion < 0:
             raise ValueError("Mask expansion cannot be negative")
         self._rasterizer = rasterizer
         self._expansion = expansion
         # 整框擦除：按识别框矩形一次性擦掉，而不是只擦字形。
-        # 视频截图/半透明底上的细字，笔画间缝隙会让补全模型"看见"字形轮廓，
-        # 补出残影；整框遮挡后补全无特征可循，画面更干净（实测对比明显）。
+        #
+        # 默认关闭，改为按区域自动选择（见 _polygons_need_whole_box）：
+        # - 纯色/简单渐变背景（黄标签、紫色底条、按钮）：整框擦会把整块
+        #   彩色底一起抹掉，补全模型不知道原底色，只能凭周围环境乱补，
+        #   结果就是标签变成灰白碎块（客户电商图实测）。用字形蒙版只擦
+        #   笔画，底色基本原样保留。
+        # - 复杂/半透明背景（视频截图上的水印）：只擦笔画时，笔画缝隙里
+        #   残留的旧字轮廓会被补全模型"看见"，补出鬼影。这时需要整框遮挡。
         self._whole_box = whole_box
 
     def execute(
@@ -86,17 +92,47 @@ class BuildEraseMask:
                         self._expansion,
                     )
                 )
-            else:
+            elif rasterize_text is None:
                 masks.append(
-                    rasterize_text(document, regular_polygons, self._expansion)
-                    if rasterize_text is not None
-                    else self._rasterizer.rasterize(
+                    self._rasterizer.rasterize(
                         document.asset.width,
                         document.asset.height,
                         regular_polygons,
                         self._expansion,
                     )
                 )
+            else:
+                # 逐个区域选择蒙版：纯色底只擦笔画（保住标签底色），
+                # 复杂底整框遮挡（避免笔画缝隙透出旧字轮廓）。
+                solid, textured = _split_by_background(
+                    document, regular_polygons
+                )
+                if solid:
+                    # 这些区域已判定为高对比、文字与底色可分离，
+                    # 放开横排彩色标签分支（否则整个标签会被当成文字擦掉）。
+                    try:
+                        masks.append(
+                            rasterize_text(
+                                document,
+                                solid,
+                                self._expansion,
+                                allow_wide_label=True,
+                            )
+                        )
+                    except TypeError:
+                        # 不接受该参数的栅格化实现退回原调用
+                        masks.append(
+                            rasterize_text(document, solid, self._expansion)
+                        )
+                if textured:
+                    masks.append(
+                        self._rasterizer.rasterize(
+                            document.asset.width,
+                            document.asset.height,
+                            textured,
+                            self._expansion,
+                        )
+                    )
         if enhanced_polygons:
             rasterize_mapped_text = (
                 getattr(
@@ -493,6 +529,68 @@ class RepairSelection:
         cancel = getattr(self._inpainting, "cancel", None)
         if cancel is not None:
             cancel()
+
+
+def _split_by_background(
+    document: ImageDocument,
+    polygons: tuple[tuple[tuple[float, float], ...], ...],
+) -> tuple[
+    tuple[tuple[tuple[float, float], ...], ...],
+    tuple[tuple[tuple[float, float], ...], ...],
+]:
+    """按「文字与底色的可分离度」分组，分别选蒙版。
+
+    - 能分离（黄标签白字、蓝底白字、按钮文字）：用字形蒙版，只擦笔画，
+      底色、圆角与形状原样保留。整框擦会把整块彩色底一起抹掉，补全模型
+      不知道原底色，只能按周围环境乱补，标签就变成灰白碎块。
+    - 分离不开（半透明叠加、低对比度）：用整框蒙版，否则笔画缝隙里
+      残留的旧字轮廓会被补全模型重新画出来（鬼影）。
+
+    判据用亮度对比度而不是背景方差：方差只能区分「纯色 / 渐变」，
+    带颗粒的深色底方差同样很大，却完全可以用字形蒙版。
+    """
+    import numpy as np
+
+    channels = 4 if document.mode == "RGBA" else 3
+    pixels = np.frombuffer(document.pixels, dtype=np.uint8).reshape(
+        document.asset.height,
+        document.asset.width,
+        channels,
+    )[:, :, :3]
+    height, width = pixels.shape[:2]
+    luminance_weights = np.asarray((0.2126, 0.7152, 0.0722), dtype=np.float32)
+    separable: list[tuple[tuple[float, float], ...]] = []
+    merged: list[tuple[tuple[float, float], ...]] = []
+    for polygon in polygons:
+        xs = [point[0] for point in polygon]
+        ys = [point[1] for point in polygon]
+        x0 = max(0, min(width - 1, int(min(xs))))
+        x1 = max(x0 + 1, min(width, int(max(xs)) + 1))
+        y0 = max(0, min(height - 1, int(min(ys))))
+        y1 = max(y0 + 1, min(height, int(max(ys)) + 1))
+        patch = pixels[y0:y1, x0:x1].astype(np.float32).reshape(-1, 3)
+        if len(patch) < 64:
+            merged.append(polygon)
+            continue
+        luminance = patch @ luminance_weights
+        low_limit, high_limit = np.percentile(luminance, (2.0, 98.0))
+        dark = patch[luminance <= low_limit]
+        bright = patch[luminance >= high_limit]
+        if not len(dark) or not len(bright):
+            merged.append(polygon)
+            continue
+        # 前景/背景色差足够大，字形蒙版才能稳定分出笔画与底色；
+        # 低对比（半透明白字压在浅底上）会抠出残缺笔画，补得更糟。
+        contrast = float(
+            np.linalg.norm(
+                np.median(bright, axis=0) - np.median(dark, axis=0)
+            )
+        )
+        if contrast >= 90.0:
+            separable.append(polygon)
+        else:
+            merged.append(polygon)
+    return tuple(separable), tuple(merged)
 
 
 def _expand_erase_mask(

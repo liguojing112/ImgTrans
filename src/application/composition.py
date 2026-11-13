@@ -544,6 +544,30 @@ class EditComposition:
             )
             return self._commit_state(before, after, layer_id)
 
+    def duplicate_picture_layer(
+        self,
+        layer_id: str,
+        offset_x: float = 16.0,
+        offset_y: float = 16.0,
+    ) -> CompositionEditResult:
+        """复制图片图层：新图层叠加在原图层右下方 offset 处，像素完全一致。"""
+        with self._lock:
+            before = self._session.state
+            source = next(
+                (item for item in before.pictures if item.layer_id == layer_id),
+                None,
+            )
+            if source is None:
+                raise KeyError(layer_id)
+            copy = replace(
+                source,
+                layer_id=f"picture-{uuid4().hex}",
+                center_x=source.center_x + offset_x,
+                center_y=source.center_y + offset_y,
+            )
+            after = replace(before, pictures=before.pictures + (copy,))
+            return self._commit_state(before, after, copy.layer_id)
+
     def remove_picture_layer(self, layer_id: str) -> CompositionEditResult:
         with self._lock:
             before = self._session.state

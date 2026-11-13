@@ -210,6 +210,21 @@ def _document(w=190, h=72):
     return ImageDocument(asset, "RGB", pixels.tobytes())
 
 
+def _ocr_result_with_box(height: float):
+    """构造单个识别区域（宽 60、高按参数），用于字号比例测试。"""
+    from src.domain.ocr import OcrResult, TextRegion, order_quad
+
+    region = TextRegion(
+        "region-0000",
+        order_quad(((20, 10), (80, 10), (80, 10 + height), (20, 10 + height))),
+        "0901",
+        0.95,
+        "en",
+        "fixture",
+    )
+    return OcrResult((region,), "en", "fixture", 0)
+
+
 def _active_session():
     """未过期的激活会话。
 
@@ -1217,6 +1232,135 @@ class FailingRepairAdapter:
         raise InpaintingError(
             "lama_inference_failed", "LaMa 推理失败（模拟）"
         )
+
+
+def test_batch_ocr_import_clears_previous_composition_state():
+    """仅 OCR 批量导入必须清掉上一张图的译文与编辑会话。
+
+    否则「先翻译 A 图 → 批量仅 OCR 导入 B 图」时，B 图改原文会拿 A 图残留的
+    repaired_background 当底图，擦除区被旧内容盖回，导出图带着没擦干净的残影
+    （用户实际报障：0901 单图 OCR 改数字后旧字痕迹仍在）。
+    """
+    QApplication.instance() or QApplication(["batch-ocr-reset-test"])
+    from src.application.batch import BatchOcrState
+
+    source = _document()
+    window = EditorMainWindow(
+        import_image=object(),
+        task_runner=ImmediateTaskRunner(),
+        create_composition_editor=CreateCompositionEditor(
+            QtBasicTextLayoutAdapter("Arial"),
+            QtTextRenderer(),
+        ),
+        repair_selection=RepairSelection(FakeRepairAdapter()),
+    )
+    try:
+        window._on_image_loaded(source)
+        # 伪造「上一张图已有译文与编辑会话」的残留状态
+        window._model.repaired_background = source
+        window._model.rendered_document = source
+        window._model.composition_editor = object()
+        window._model.translation_result = object()
+        window._model.text_layout = TextLayout(())
+
+        ocr = OcrResult((), "zh-Hans", "fixture", 1.0)
+        window._restore_batch_editable(
+            source, source, BatchOcrState(ocr)
+        )
+
+        assert window._model.repaired_background is None
+        assert window._model.composition_editor is None
+        assert window._model.rendered_document is None
+        assert window._model.translation_result is None
+        assert window._model.ocr_result is ocr
+    finally:
+        window.close()
+
+
+def test_ocr_preview_mask_stays_within_recognized_region():
+    """OCR 预览擦除蒙版不得越出识别框，否则会吃掉紧邻的其它文字。
+
+    实测「0901」检查井水印图：识别框 (32,1068)-(228,1162) 已完整覆盖 09:19
+    全部笔画，右侧 26px 处就是「2026年01月02」。上一版按亮度向框外自动扩展，
+    把整块蓝色贴图擦掉，补全后出现大片白雾。这里锁定：蒙版边界与识别框的
+    距离不超过膨胀量（默认 2px）+ 1px 抗锯齿余量。
+    """
+    QApplication.instance() or QApplication(["ocr-preview-mask-bounds-test"])
+    source = _document()
+    window = EditorMainWindow(
+        import_image=object(),
+        task_runner=ImmediateTaskRunner(),
+        create_composition_editor=CreateCompositionEditor(
+            QtBasicTextLayoutAdapter("Arial"),
+            QtTextRenderer(),
+        ),
+        repair_selection=RepairSelection(FakeRepairAdapter()),
+    )
+    try:
+        window._on_image_loaded(source)
+        window._mask_rasterizer = PillowMaskRasterizer()
+        quad = ((18.0, 18.0), (78.0, 18.0), (78.0, 48.0), (18.0, 48.0))
+        region = TextRegion("bounds", order_quad(quad), "SUMMER", 0.9, "en", "fx")
+
+        mask = window._ocr_preview_mask(region)
+        assert mask is not None
+
+        painted = np.frombuffer(mask.pixels, dtype=np.uint8).reshape(72, 190) > 0
+        rows, columns = np.nonzero(painted)
+        assert columns.min() >= 18 - 3
+        assert columns.max() <= 78 + 3
+        assert rows.min() >= 18 - 3
+        assert rows.max() <= 48 + 3
+    finally:
+        window.close()
+
+
+def test_ocr_preview_mask_traces_glyphs_not_whole_box():
+    """OCR 预览擦除蒙版必须贴合字形，不能退化成整框矩形。
+
+    实测「0901」水印图（白字蓝底）：整框蒙版交给 LaMa 后，LaMa 会按周围
+    纹理「脑补」，把旧字轮廓重新画回来——膨胀 5px 时旧字残影 472 个像素、
+    背景 std 26.2（正常蓝底 5.6），用户看到的就是「擦不干净」。
+    字形蒙版下残影 0 个、std 6.8，因此这里锁定蒙版不能铺满整框。
+    """
+    QApplication.instance() or QApplication(["ocr-preview-glyph-mask-test"])
+    # 必须用「深色背景 + 白字」才有真实字形可剥离；纯色块会让细化蒙版
+    # 退化成整框，测不出这条约束。
+    width, height = 190, 72
+    pixels = np.full((height, width, 3), 30, dtype=np.uint8)
+    for row in range(24, 42):
+        for column in range(24, 34):
+            pixels[row, column] = 250
+    for row in range(24, 42):
+        for column in range(44, 54):
+            pixels[row, column] = 250
+    asset = ImageAsset(
+        Path("glyphs.png"), width, height, 1, ImageFileFormat.PNG, False, False
+    )
+    source = ImageDocument(asset, "RGB", pixels.tobytes())
+    window = EditorMainWindow(
+        import_image=object(),
+        task_runner=ImmediateTaskRunner(),
+        create_composition_editor=CreateCompositionEditor(
+            QtBasicTextLayoutAdapter("Arial"),
+            QtTextRenderer(),
+        ),
+        repair_selection=RepairSelection(FakeRepairAdapter()),
+    )
+    try:
+        window._on_image_loaded(source)
+        window._mask_rasterizer = PillowMaskRasterizer()
+        quad = ((18.0, 18.0), (78.0, 18.0), (78.0, 48.0), (18.0, 48.0))
+        region = TextRegion("glyphs", order_quad(quad), "SUMMER", 0.9, "en", "fx")
+
+        mask = window._ocr_preview_mask(region)
+        assert mask is not None
+
+        painted = np.frombuffer(mask.pixels, dtype=np.uint8).reshape(72, 190) > 0
+        box_area = (78 - 18) * (48 - 18)
+        assert int(painted.sum()) < box_area * 0.8
+    finally:
+        window.close()
 
 
 def test_repair_selection_expands_user_mask_by_3px():
@@ -4485,9 +4629,21 @@ def test_auto_font_preference_updates_adapter_and_persists():
         window.close()
 
 
-def test_portal_entry_opens_window_with_configured_link():
-    """万象笔记入口：未配置链接只提示；配置后打开浏览器窗口；工具栏按钮在强化翻译之后。"""
+def test_portal_entry_opens_external_browser_with_configured_link(monkeypatch):
+    """万象笔记入口：未配置链接只提示；配置后交给系统 Edge 打开。
+
+    不再内嵌 QtWebEngine —— 客户机器上它的 GPU 合成会让网页里固定定位的
+    底部菜单栏闪动。
+    """
     from src.domain.portal import PortalModule
+    import src.ui.editor.main_window as main_window_module
+
+    opened: list[str] = []
+    monkeypatch.setattr(
+        main_window_module,
+        "open_in_edge",
+        lambda url: (opened.append(url), "Microsoft Edge")[1],
+    )
 
     QApplication.instance() or QApplication(["portal-entry-test"])
     window = EditorMainWindow(import_image=object())
@@ -4499,7 +4655,7 @@ def test_portal_entry_opens_window_with_configured_link():
         assert labels.index("万象笔记") == labels.index("强化翻译") + 1
 
         window._open_portal_window()
-        assert window._portal_window is None, "未配置链接时不应打开窗口"
+        assert opened == [], "未配置链接时不应打开浏览器"
 
         modules = (
             PortalModule(
@@ -4517,8 +4673,7 @@ def test_portal_entry_opens_window_with_configured_link():
         )
 
         window._open_portal_window()
-        assert window._portal_window is not None
-        window._portal_window.close()
+        assert opened == ["https://note.example.com/app"]
     finally:
         window.close()
 
@@ -4683,5 +4838,469 @@ def test_preview_syncs_uncommitted_canvas_picture_position():
 
         moved = editor.pictures[0]
         assert (moved.center_x, moved.center_y) == (150, 20)
+    finally:
+        window.close()
+
+
+def test_paste_picture_layer_adds_offset_copy_of_same_pixels():
+    """Ctrl+C / Ctrl+V：粘贴出与原图层同像素、偏移放置的新图层。"""
+    from src.domain.layout import TextBox
+
+    QApplication.instance() or QApplication(["picture-paste-test"])
+    window = EditorMainWindow(
+        import_image=object(),
+        task_runner=ImmediateTaskRunner(),
+        create_composition_editor=CreateCompositionEditor(
+            QtBasicTextLayoutAdapter("Arial"),
+            QtTextRenderer(),
+        ),
+        repair_selection=RepairSelection(FakeRepairAdapter()),
+    )
+    try:
+        window._on_image_loaded(_document())
+        assert window._ensure_composition_editor()
+        window._on_extract_layer(TextBox(90, 34, 40, 24))
+        editor = window._model.composition_editor
+        original = editor.pictures[0]
+
+        window._on_copy_picture(original.layer_id)
+        window._on_paste_picture()
+
+        assert len(editor.pictures) == 2
+        copy = next(
+            item for item in editor.pictures if item.layer_id != original.layer_id
+        )
+        assert copy.pixels == original.pixels
+        assert (copy.width, copy.height) == (original.width, original.height)
+        assert (copy.center_x, copy.center_y) != (
+            original.center_x,
+            original.center_y,
+        ), "粘贴出的图层要偏移，否则与原图层完全重叠看不出效果"
+        assert copy.layer_id in window._editor_page.scene._picture_items
+        assert window._editor_page.scene._picture_items[copy.layer_id].isSelected()
+    finally:
+        window.close()
+
+
+def test_paste_without_copy_keeps_state_and_reports():
+    """没复制就粘贴：不新增图层，状态栏给出提示。"""
+    from src.domain.layout import TextBox
+
+    QApplication.instance() or QApplication(["picture-paste-empty-test"])
+    window = EditorMainWindow(
+        import_image=object(),
+        task_runner=ImmediateTaskRunner(),
+        create_composition_editor=CreateCompositionEditor(
+            QtBasicTextLayoutAdapter("Arial"),
+            QtTextRenderer(),
+        ),
+        repair_selection=RepairSelection(FakeRepairAdapter()),
+    )
+    try:
+        window._on_image_loaded(_document())
+        assert window._ensure_composition_editor()
+        window._on_extract_layer(TextBox(90, 34, 40, 24))
+        editor = window._model.composition_editor
+        before = len(editor.pictures)
+
+        window._on_copy_picture(editor.pictures[0].layer_id)
+        window._on_delete_picture(editor.pictures[0].layer_id)
+        window._on_paste_picture()
+
+        assert len(editor.pictures) == before - 1, "原图层已删除，粘贴不应新增"
+        assert "重新复制" in window.statusBar().currentMessage()
+    finally:
+        window.close()
+
+
+def test_extract_layer_switches_to_layers_mode_and_selects_new_picture():
+    """剥离后自动进入图层模式并选中新图层，否则用户在原位置拖的是整张画布。"""
+    from src.domain.layout import TextBox
+
+    QApplication.instance() or QApplication(["picture-extract-mode-test"])
+    window = EditorMainWindow(
+        import_image=object(),
+        task_runner=ImmediateTaskRunner(),
+        create_composition_editor=CreateCompositionEditor(
+            QtBasicTextLayoutAdapter("Arial"),
+            QtTextRenderer(),
+        ),
+        repair_selection=RepairSelection(FakeRepairAdapter()),
+    )
+    try:
+        window._on_image_loaded(_document())
+        assert window._ensure_composition_editor()
+        window._apply_preview_mode("translated")
+
+        window._on_extract_layer(TextBox(90, 34, 40, 24))
+
+        editor = window._model.composition_editor
+        picture = editor.pictures[0]
+        assert window._model.preview_mode == "layers"
+        item = window._editor_page.scene._picture_items[picture.layer_id]
+        assert item.isSelected()
+        assert item.isVisible()
+    finally:
+        window.close()
+
+
+def test_preview_switch_keeps_picture_items_in_scene():
+    """切换预览模式后图片图元仍在场景里，移动/复制粘贴不会失效。"""
+    from src.domain.layout import TextBox
+
+    QApplication.instance() or QApplication(["picture-preview-rebuild-test"])
+    window = EditorMainWindow(
+        import_image=object(),
+        task_runner=ImmediateTaskRunner(),
+        create_composition_editor=CreateCompositionEditor(
+            QtBasicTextLayoutAdapter("Arial"),
+            QtTextRenderer(),
+        ),
+        repair_selection=RepairSelection(FakeRepairAdapter()),
+    )
+    try:
+        window._on_image_loaded(_document())
+        assert window._ensure_composition_editor()
+        window._on_extract_layer(TextBox(90, 34, 40, 24))
+        editor = window._model.composition_editor
+        layer_id = editor.pictures[0].layer_id
+
+        window._apply_preview_mode("translated")
+        window._apply_preview_mode("layers")
+
+        item = window._editor_page.scene._picture_items[layer_id]
+        assert item.isVisible()
+        assert (item.pos().x(), item.pos().y()) == (
+            editor.pictures[0].center_x,
+            editor.pictures[0].center_y,
+        )
+    finally:
+        window.close()
+
+
+def test_apply_fixed_size_to_all_uses_absolute_pixels_and_relative_position():
+    """「应用到全部图片」按绝对像素统一，并按相对位置找到每张图的对应区域。
+
+    客户这批图同一位置的区域编号各不相同（region-0004/0005/0009…），
+    只能按相对位置匹配；字号要统一成同一个像素值，视觉才一样大。
+    """
+    from src.domain.ocr import OcrResult, TextRegion, order_quad
+
+    def region(region_id: str, cx: float, cy: float) -> TextRegion:
+        # 190x72 的图，时间在左下角
+        half_w, half_h = 45.0, 12.0
+        return TextRegion(
+            region_id,
+            order_quad(
+                (
+                    (cx - half_w, cy - half_h),
+                    (cx + half_w, cy - half_h),
+                    (cx + half_w, cy + half_h),
+                    (cx - half_w, cy + half_h),
+                )
+            ),
+            "09:19",
+            0.95,
+            "en",
+            "fixture",
+        )
+
+    QApplication.instance() or QApplication(["fixed-style-all-test"])
+    window = EditorMainWindow(
+        import_image=object(),
+        task_runner=ImmediateTaskRunner(),
+        create_composition_editor=CreateCompositionEditor(
+            QtBasicTextLayoutAdapter("Arial"),
+            QtTextRenderer(),
+        ),
+    )
+    try:
+        # 两张 190x72 的图：时间都在左下角，但编号不同
+        first = window._model.add_document(Path("a.png"), _document(), name="a.png")
+        window._model.source_document = _document()
+        window._model.ocr_result = OcrResult(
+            (region("region-0009", 50.0, 60.0),), "en", "fixture", 0
+        )
+        second = window._model.add_document(Path("b.png"), _document(), name="b.png")
+        window._model.source_document = _document()
+        window._model.ocr_result = OcrResult(
+            (region("region-0004", 50.0, 60.0),), "en", "fixture", 0
+        )
+        window._model._snapshot_active()
+
+        # 当前停在 second；把它的区域载入属性面板作为锚点
+        active_region = window._model.ocr_result.regions[0]
+        window._editor_page.property_panel.set_ocr_region(active_region, None, {})
+        window._on_apply_fixed_style_to_all(82.0, None, None)
+
+        first_ref = next(
+            d for d in window._model.documents() if d.doc_id == first
+        )
+        second_ref = next(
+            d for d in window._model.documents() if d.doc_id == second
+        )
+        # 编号不同，但都按相对位置命中，字号统一为 82px
+        assert first_ref.ocr_property_overrides["region-0009"]["font_size"] == 82.0
+        assert second_ref.ocr_property_overrides["region-0004"]["font_size"] == 82.0
+        assert (
+            first_ref.ocr_property_overrides["region-0009"]["auto_fit"] is False
+        )
+    finally:
+        window.close()
+
+
+def test_apply_fixed_size_to_all_skips_images_without_region_nearby():
+    """相对位置差太远的图不误改（那说明这张图没有该文字）。"""
+    from src.domain.ocr import OcrResult, TextRegion, order_quad
+
+    QApplication.instance() or QApplication(["fixed-style-all-miss-test"])
+    window = EditorMainWindow(
+        import_image=object(),
+        task_runner=ImmediateTaskRunner(),
+        create_composition_editor=CreateCompositionEditor(
+            QtBasicTextLayoutAdapter("Arial"),
+            QtTextRenderer(),
+        ),
+    )
+    try:
+        first = window._model.add_document(Path("a.png"), _document(), name="a.png")
+        window._model.source_document = _document()
+        window._model.ocr_result = OcrResult(
+            (
+                TextRegion(
+                    "region-0000",
+                    order_quad(((5, 50), (25, 50), (25, 70), (5, 70))),
+                    "09:19",
+                    0.9,
+                    "en",
+                    "fixture",
+                ),
+            ),
+            "en",
+            "fixture",
+            0,
+        )
+        # 第二张图同位置没有任何文字
+        second = window._model.add_document(Path("b.png"), _document(), name="b.png")
+        window._model.source_document = _document()
+        window._model.ocr_result = OcrResult((), "en", "fixture", 0)
+        window._model._snapshot_active()
+
+        window._model.set_active_document(first)
+        region = window._model.ocr_result.regions[0]
+        window._editor_page.property_panel.set_ocr_region(region, None, {})
+        window._on_apply_fixed_style_to_all(82.0, None, None)
+
+        first_ref = next(
+            d for d in window._model.documents() if d.doc_id == first
+        )
+        second_ref = next(
+            d for d in window._model.documents() if d.doc_id == second
+        )
+        assert first_ref.ocr_property_overrides["region-0000"]["font_size"] == 82.0
+        assert second_ref.ocr_property_overrides == {}
+    finally:
+        window.close()
+
+
+def test_fixed_font_size_converts_to_pixels_on_ocr_update():
+    """OCR 阶段：填 82px + 更新原文 → 该区域写回 82px 字号。"""
+    QApplication.instance() or QApplication(["fixed-size-ocr-test"])
+    window = EditorMainWindow(
+        import_image=object(),
+        task_runner=ImmediateTaskRunner(),
+        create_composition_editor=CreateCompositionEditor(
+            QtBasicTextLayoutAdapter("Arial"),
+            QtTextRenderer(),
+        ),
+        repair_selection=RepairSelection(FakeRepairAdapter()),
+    )
+    try:
+        window._on_image_loaded(_document())
+        window._model.ocr_result = _ocr_result_with_box(94.0)
+        panel = window._editor_page.property_panel
+        region = window._model.ocr_result.regions[0]
+        panel.set_ocr_region(region, None, {})
+        panel.fixed_font_check.setChecked(True)
+        panel.fixed_font_spin.setValue(82)
+
+        panel.apply_source_text_btn.click()
+
+        overrides = window._editor_page._ocr_property_overrides["region-0000"]
+        assert overrides["font_size"] == pytest.approx(82.0)
+        # font_size 覆盖会由 _apply_field_change 自动关闭 auto_fit
+        from src.ui.editor.editor_page import EditorPage
+        assert "font_size" in overrides
+    finally:
+        window.close()
+
+
+def test_apply_fixed_style_updates_existing_layers_with_absolute_px():
+    """已有文字图层时批量应用要真的改写图层样式（导出图跟着变）。"""
+    from src.domain.layout import TextBox, TextLayer, TextLayout, TextStyle
+
+    QApplication.instance() or QApplication(["fixed-style-layer-test"])
+    window = EditorMainWindow(
+        import_image=object(),
+        task_runner=ImmediateTaskRunner(),
+        create_composition_editor=CreateCompositionEditor(
+            QtBasicTextLayoutAdapter("Arial"),
+            QtTextRenderer(),
+        ),
+    )
+    try:
+        window._model.add_document(Path("a.png"), _document(), name="a.png")
+        window._model.source_document = _document()
+        window._model.document = _document()
+        window._model.ocr_result = _ocr_result_with_box(20.0)
+        # 20px 高的图层，自动适配开着
+        layer = TextLayer(
+            "region-0000",
+            "0901",
+            TextBox(50, 20, 60, 20),
+            TextStyle("Arial", 12, (0, 0, 0), auto_fit=True),
+        )
+        window._model.text_layout = TextLayout((layer,))
+        assert window._ensure_composition_editor()
+        window._model._snapshot_active()
+
+        region = window._model.ocr_result.regions[0]
+        window._editor_page.property_panel.set_ocr_region(region, None, {})
+        window._on_apply_fixed_style_to_all(82.0, "Arial", 700)
+
+        editor = window._model.composition_editor
+        updated = editor.layout.layer_by_id("region-0000")
+        assert updated.style.font_size == pytest.approx(82.0)
+        assert updated.style.auto_fit is False, "固定字号必须关掉自动适配"
+        assert updated.style.font_weight == 700
+        ref = window._model.documents()[0]
+        assert ref.is_dirty
+        assert ref.text_layout.layer_by_id("region-0000").style.font_weight == 700
+    finally:
+        window.close()
+
+
+def test_adjusting_fixed_size_updates_canvas_immediately():
+    """调固定字号后画布立即重绘，不必先点「更新 OCR 原文」。"""
+    from src.domain.layout import TextBox, TextLayer, TextLayout, TextStyle
+
+    QApplication.instance() or QApplication(["fixed-scale-live-preview-test"])
+    window = EditorMainWindow(
+        import_image=object(),
+        task_runner=ImmediateTaskRunner(),
+        create_composition_editor=CreateCompositionEditor(
+            QtBasicTextLayoutAdapter("Arial"),
+            QtTextRenderer(),
+        ),
+    )
+    try:
+        window._on_image_loaded(_document())
+        window._model.source_document = _document()
+        window._model.document = _document()
+        window._model.ocr_result = _ocr_result_with_box(94.0)
+        layer = TextLayer(
+            "region-0000",
+            "09:19",
+            TextBox(130, 40, 196, 94),
+            TextStyle("Arial", 20, (255, 255, 255), auto_fit=False),
+        )
+        window._model.text_layout = TextLayout((layer,))
+        assert window._ensure_composition_editor()
+        region = window._model.ocr_result.regions[0]
+        panel = window._editor_page.property_panel
+        panel.set_ocr_region(region, None, {})
+        panel.fixed_font_check.setChecked(True)
+
+        before = window._model.composition_editor.layout.layer_by_id(
+            "region-0000"
+        ).style.font_size
+        panel.fixed_font_spin.setValue(82)
+
+        after = window._model.composition_editor.layout.layer_by_id(
+            "region-0000"
+        ).style.font_size
+        assert after != before, "改字号应立刻反映到编辑状态（画布与导出图随之更新）"
+        assert after == pytest.approx(82.0)
+    finally:
+        window.close()
+
+
+def test_layer_matching_prefers_nearest_box_when_ids_differ():
+    """区域 id 对不上时按几何就近匹配，不能命中旁边紧挨着的其它区域。
+
+    客户机出现过：OCR 结果列表显示 "13:30"，文字属性里却是日期那段文字。
+    旧逻辑「第一个落在容差内就返回」会拿到相邻的行。
+    """
+    from src.domain.ocr import TextRegion, order_quad
+
+    QApplication.instance() or QApplication(["layer-nearest-match-test"])
+    window = EditorMainWindow(import_image=object(), task_runner=ImmediateTaskRunner())
+    try:
+        window._on_image_loaded(_document(w=500, h=300))
+        page = window._editor_page
+        window._model.text_layout = TextLayout(
+            (
+                TextLayer(
+                    "region-0005",
+                    "13:30",
+                    TextBox(132, 1117, 204, 55),
+                    TextStyle("Arial", 80, (255, 255, 255)),
+                ),
+                TextLayer(
+                    "region-0006",
+                    "2026年01月05日",
+                    TextBox(300, 1117, 278, 47),
+                    TextStyle("Arial", 47, (255, 255, 255)),
+                ),
+            )
+        )
+        # id 不在布局里：只给几何位置
+        region = TextRegion(
+            "region-0099",
+            order_quad(((30, 1090), (234, 1090), (234, 1145), (30, 1145))),
+            "13:30",
+            0.999,
+            "en",
+            "fixture",
+        )
+
+        layer = page._layer_for_ocr_region("region-0099", region)
+
+        assert layer is not None
+        assert layer.text == "13:30", "应命中位置对应的图层，而不是旁边的日期"
+        assert layer.region_id == "region-0005"
+    finally:
+        window.close()
+
+
+def test_layer_matching_does_not_use_far_away_neighbor():
+    """横向距离超出框宽的区域不再算命中（旧逻辑大框容差可达上百像素）。"""
+    from src.domain.ocr import TextRegion, order_quad
+
+    QApplication.instance() or QApplication(["layer-far-match-test"])
+    window = EditorMainWindow(import_image=object(), task_runner=ImmediateTaskRunner())
+    try:
+        window._on_image_loaded(_document(w=700, h=300))
+        page = window._editor_page
+        window._model.text_layout = TextLayout(
+            (
+                TextLayer(
+                    "region-0006",
+                    "2026年01月05日",
+                    TextBox(300, 1117, 278, 47),
+                    TextStyle("Arial", 47, (255, 255, 255)),
+                ),
+            )
+        )
+        region = TextRegion(
+            "region-0099",
+            order_quad(((30, 1090), (234, 1090), (234, 1145), (30, 1145))),
+            "13:30",
+            0.999,
+            "en",
+            "fixture",
+        )
+
+        assert page._layer_for_ocr_region("region-0099", region) is None
     finally:
         window.close()

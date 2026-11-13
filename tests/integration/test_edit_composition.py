@@ -795,3 +795,59 @@ def test_editing_document_excludes_picture_layers() -> None:
     exported = np.frombuffer(editor.document.pixels, np.uint8).reshape(80, 180, 3)
     assert tuple(editing[30, 50]) != (220, 30, 30)
     assert tuple(exported[30, 50]) == (220, 30, 30)
+
+
+def test_duplicate_picture_layer_copies_pixels_to_offset_position() -> None:
+    """复制图片图层：像素一致、位置偏移、新 id、可撤销。"""
+    from src.domain.composition import PictureLayer
+    from src.domain.inpainting import EraseMask
+
+    QApplication.instance() or QApplication(["picture-duplicate-test"])
+    background = _background()  # 180x80
+    renderer = QtTextRenderer()
+    empty = TextLayout(())
+    initial = renderer.render(background, empty)
+    editor = CreateCompositionEditor(
+        QtBasicTextLayoutAdapter(), renderer
+    ).execute(background, initial, empty)
+
+    red = bytes([220, 30, 30] * (20 * 10))
+    picture = PictureLayer("picture-1", red, 20, 10, center_x=50, center_y=30)
+    mask_data = bytearray(180 * 80)
+    for y in range(25, 35):
+        mask_data[y * 180 + 40 : y * 180 + 60] = b"\xff" * 20
+    mask = EraseMask(180, 80, bytes(mask_data))
+    editor.add_extracted_picture(picture, background, mask)
+
+    duplicated = editor.duplicate_picture_layer("picture-1", 30.0, 20.0)
+
+    assert len(editor.pictures) == 2
+    copy = next(item for item in editor.pictures if item.layer_id != "picture-1")
+    assert copy.layer_id == duplicated.affected_region_id
+    assert copy.layer_id.startswith("picture-")
+    assert copy.pixels == red
+    assert (copy.width, copy.height) == (20, 10)
+    assert (copy.center_x, copy.center_y) == (80.0, 50.0)
+
+    pixels = np.frombuffer(duplicated.document.pixels, np.uint8).reshape(80, 180, 3)
+    assert tuple(pixels[50, 80]) == (220, 30, 30)
+    assert tuple(pixels[30, 50]) == (220, 30, 30), "原图层位置不变"
+
+    editor.undo()
+    assert [item.layer_id for item in editor.pictures] == ["picture-1"]
+
+
+def test_duplicate_missing_picture_layer_raises() -> None:
+    from src.domain.composition import PictureLayer
+
+    QApplication.instance() or QApplication(["picture-duplicate-missing-test"])
+    background = _background()
+    renderer = QtTextRenderer()
+    empty = TextLayout(())
+    initial = renderer.render(background, empty)
+    editor = CreateCompositionEditor(
+        QtBasicTextLayoutAdapter(), renderer
+    ).execute(background, initial, empty)
+
+    with pytest.raises(KeyError):
+        editor.duplicate_picture_layer("picture-missing")

@@ -5,7 +5,6 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
-    QFontComboBox,
     QFormLayout,
     QFrame,
     QHBoxLayout,
@@ -25,6 +24,7 @@ from src.domain.layout import (
 )
 from src.platform.font_candidates import recommend_system_fonts
 from src.ui.color_picker_dialog import pick_color
+from src.ui.editor.widgets.font_combo import SearchableFontComboBox
 
 
 class LayerStylePanel(QFrame):
@@ -46,7 +46,8 @@ class LayerStylePanel(QFrame):
         self.selected_label.setObjectName("styleSelectedLabel")
         form = QFormLayout()
         form.setSpacing(6)
-        self.font_family = QFontComboBox()
+        self.font_family = SearchableFontComboBox()
+        self.font_family.populate()
         self.font_family.setObjectName("styleFontFamily")
         font_recommendation = QHBoxLayout()
         self.font_hint = QComboBox()

@@ -150,6 +150,8 @@ class EditorPage(QWidget):
     manual_translate_requested = Signal(str, str, str, str)
     history_state_changed = Signal(bool, bool)
     ocr_preview_changed = Signal(str, object)
+    # 固定字号/字体/字重应用到全部图片：(字号px, 字体族, 字重)
+    apply_fixed_to_all_requested = Signal(object, object, object)
 
     # 属性编辑信号 — payload: (region_id, field_kind, value, before_layer)
     edit_requested = Signal(str, str, object, object)
@@ -177,7 +179,7 @@ class EditorPage(QWidget):
         self.view.setMinimumWidth(220)
         self._original_document = None
         self._slider_compare = False
-        self._ocr_property_overrides: dict[str, dict[str, object]] = {}
+        self._ocr_overrides_scratch: dict[str, dict[str, object]] = {}
 
         self.property_panel = PropertyPanel()
 
@@ -409,6 +411,9 @@ class EditorPage(QWidget):
             self.restore_layout_requested.emit
         )
         self.property_panel.source_text_changed.connect(self.source_text_changed.emit)
+        self.property_panel.apply_fixed_to_all_requested.connect(
+            self.apply_fixed_to_all_requested.emit
+        )
         self.property_panel.translated_text_changed.connect(
             self.translated_text_changed.emit
         )
@@ -722,6 +727,19 @@ class EditorPage(QWidget):
         if self.toolbar.active_tool != "ai_erase":
             return
         self.erase_dialog.reapply_current_mode()
+
+    @property
+    def _ocr_property_overrides(self) -> dict[str, dict[str, object]]:
+        """OCR 阶段样式暂存，按文档隔离。
+
+        批量图片的 OCR 区域 id 都是 region-0000 这类序号，共用一份字典会让
+        A 图设的字号/字体串到 B 图（同一序号被命中）。
+        """
+        model = getattr(self, "_model", None)
+        overrides = getattr(model, "ocr_property_overrides", None)
+        if overrides is None:
+            return self._ocr_overrides_scratch
+        return overrides
 
     def set_model(self, model) -> None:
         self._model = model
@@ -1100,7 +1118,13 @@ class EditorPage(QWidget):
         self.edit_requested.emit(region_id, "box", after, before)
 
     def _layer_for_ocr_region(self, region_id: str, ocr_region: object):
-        """按区域 id 找对应文字图层；id 对不上时按中心点落框匹配。"""
+        """按区域 id 找对应文字图层；id 对不上时按几何位置就近匹配。
+
+        不能「第一个落在容差内就返回」：旁边紧挨着日期、编号等区域时会被
+        错配，属性面板的「文字内容」就会显示成别的区域的文字（客户机上
+        出现过 OCR 结果列表是对的、文字属性里却是另一段文字）。
+        因此这里取中心距最近的一个，并要求中心确实落在图层框内。
+        """
         model = getattr(self, "_model", None)
         layout = getattr(model, "text_layout", None)
         if layout is None:
@@ -1113,13 +1137,25 @@ class EditorPage(QWidget):
             return None
         center_x = sum(point.x for point in points) / len(points)
         center_y = sum(point.y for point in points) / len(points)
+        best = None
+        best_distance = None
         for layer in layout.layers:
             box = layer.box
+            # 中心必须真的落在该框内，留 2px 给 OCR 与排版取整误差
             if (
-                abs(center_x - box.center_x) <= max(box.width, 24.0) / 2 + 8
-                and abs(center_y - box.center_y) <= max(box.height, 24.0) / 2 + 8
+                abs(center_x - box.center_x) > box.width / 2 + 2
+                or abs(center_y - box.center_y) > box.height / 2 + 2
             ):
-                return layer
+                continue
+            distance = (
+                (center_x - box.center_x) ** 2
+                + (center_y - box.center_y) ** 2
+            )
+            if best_distance is None or distance < best_distance:
+                best, best_distance = layer, distance
+        if best is not None:
+            return best
+        # 位置差得多时退回按原文匹配（译文图层文字已变，此路仅对未翻译区域有效）
         text = str(getattr(ocr_region, "text", "") or "").strip()
         if text:
             matched = [

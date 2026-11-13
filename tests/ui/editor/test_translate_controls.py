@@ -403,25 +403,41 @@ def test_theme_keeps_checked_radio_indicator_visible() -> None:
 
 
 def test_translation_font_combo_is_searchable(qtbot) -> None:
-    """译文字体下拉可输入搜索：包含匹配、不区分大小写、不插入新项。"""
-    from PySide6.QtCore import Qt
-    from PySide6.QtWidgets import QComboBox
+    """译文字体下拉展开后带搜索框，输入片段即筛选（不区分大小写）。"""
+    from src.ui.editor.widgets.font_combo import SearchableFontComboBox
 
     QApplication.instance() or QApplication(["font-search-test"])
     ctrl = TranslateControls()
     qtbot.addWidget(ctrl)
     combo = ctrl.translation_font
 
-    assert combo.isEditable()
-    assert combo.insertPolicy() == QComboBox.InsertPolicy.NoInsert
-    completer = combo.completer()
-    assert completer is not None
-    assert completer.filterMode() == Qt.MatchFlag.MatchContains
-    assert completer.caseSensitivity() == Qt.CaseSensitivity.CaseInsensitive
+    assert isinstance(combo, SearchableFontComboBox)
+    # 弹层里有独立的搜索输入框和字体列表
+    popup = combo._popup
+    assert popup._search.placeholderText()
+    popup.set_items([("宋体", "SimSun"), ("黑体", "SimHei"), ("Arial", "Arial")])
+    popup._apply_filter("黑")
+    visible = [
+        popup._list.item(row).text()
+        for row in range(popup._list.count())
+        if not popup._list.item(row).isHidden()
+    ]
+    assert visible == ["黑体"]
+    # 不区分大小写
+    popup._apply_filter("aria")
+    visible = [
+        popup._list.item(row).text()
+        for row in range(popup._list.count())
+        if not popup._list.item(row).isHidden()
+    ]
+    assert visible == ["Arial"]
+    # 清空搜索恢复全部
+    popup._apply_filter("")
+    assert popup._list.count() == 3
 
 
-def test_translation_font_restores_invalid_typed_text(qtbot) -> None:
-    """手输不存在的字体名后，失焦时恢复为当前选中项。"""
+def test_translation_font_selection_survives_populate(qtbot) -> None:
+    """重建字体列表（如载入新字体后）要保留当前选中项，不能跳回第一项。"""
     from src.platform.fonts import resolve_system_font
 
     QApplication.instance() or QApplication(["font-restore-test"])
@@ -432,12 +448,11 @@ def test_translation_font_restores_invalid_typed_text(qtbot) -> None:
 
     assert combo.count() > 1
     combo.setCurrentIndex(1)
-    expected = combo.itemText(1)
-    combo.setEditText("不存在的字体XYZ")
-    ctrl._restore_font_edit_text()
+    expected = combo.currentData()
 
-    assert combo.currentText() == expected
-    assert combo.currentIndex() == 1
+    ctrl.refresh_translation_font_choices()
+
+    assert combo.currentData() == expected
 
 
 def test_auto_font_combo_defaults_to_none_and_emits(qtbot) -> None:

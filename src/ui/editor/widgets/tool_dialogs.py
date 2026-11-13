@@ -12,7 +12,6 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
-    QFontComboBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -27,6 +26,7 @@ from PySide6.QtWidgets import (
 from src.domain.layout import TextBox
 from src.ui.common import wrap_spin
 from src.ui.editor.theme import EDITOR_DARK_THEME
+from src.ui.editor.widgets.font_combo import SearchableFontComboBox
 
 
 def _apply_editor_theme(dialog: QDialog) -> None:
@@ -375,7 +375,8 @@ class WatermarkToolDialog(QDialog):
         form = QFormLayout()
         self.text = QLineEdit("水印")
         form.addRow("文字水印", self.text)
-        self.font = QFontComboBox()
+        self.font = SearchableFontComboBox()
+        self.font.populate()
         form.addRow("字体", self.font)
         self.font_size = QSpinBox()
         self.font_size.setRange(8, 360)

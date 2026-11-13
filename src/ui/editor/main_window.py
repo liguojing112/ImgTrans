@@ -79,7 +79,7 @@ from src.ui.editor.error_handler import classify_error
 from src.ui.enhance.prompt_builder import build_prompt
 from src.ui.editor.home_page import HomePage
 from src.ui.editor.store_page import StorePage
-from src.ui.portal_browser_window import PortalBrowserWindow
+from src.ui.portal_browser_window import open_in_edge
 from src.domain.portal import DEFAULT_WANXIANG_NOTE
 from src.domain.composition import PictureLayer
 from src.domain.inpainting import EraseMask
@@ -207,7 +207,6 @@ class EditorMainWindow(QMainWindow):
         self._kai_recognition_preferences = kai_recognition_preferences
         self._portal_client = portal_client
         self._portal_module = DEFAULT_WANXIANG_NOTE
-        self._portal_window = None
         self._initial_paragraph_mode = paragraph_mode
         self._update_ecommerce_translation = update_ecommerce_translation
         self._terminology_entries: tuple[TerminologyEntry, ...] = ()
@@ -247,6 +246,8 @@ class EditorMainWindow(QMainWindow):
         # lets the OCR-only preview avoid adding a second copy when a row is
         # merely selected or when a correction is reverted to its source text.
         self._ocr_original_texts: dict[str, str] = {}
+        # 复制中的图片图层 id（Ctrl+C 记下，Ctrl+V 复制出一份）
+        self._copied_picture_id: str | None = None
 
         self._model = EditorModel()
         self._undo_stack = QUndoStack(self)
@@ -727,6 +728,12 @@ class EditorMainWindow(QMainWindow):
         self._editor_page.scene.picture_selected.connect(
             self._on_picture_selected
         )
+        self._editor_page.scene.picture_copy_requested.connect(
+            self._on_copy_picture
+        )
+        self._editor_page.scene.picture_paste_requested.connect(
+            self._on_paste_picture
+        )
         self._editor_page.duplicate_requested.connect(self._on_duplicate_layer)
         self._editor_page.add_layer_requested.connect(self._on_add_layer)
         self._editor_page.add_layer_at_requested.connect(self._on_add_layer_at)
@@ -758,6 +765,9 @@ class EditorMainWindow(QMainWindow):
             self._on_ocr_preview_changed
         )
         self._editor_page.source_text_changed.connect(self._on_source_text_changed)
+        self._editor_page.apply_fixed_to_all_requested.connect(
+            self._on_apply_fixed_style_to_all
+        )
         self._editor_page.translated_text_changed.connect(
             self._on_translated_text_changed
         )
@@ -1606,7 +1616,15 @@ class EditorMainWindow(QMainWindow):
         ):
             return
         if isinstance(state, BatchOcrState):
-            # 仅 OCR 批次：只带回识别结果，画布仍是原图
+            # 仅 OCR 批次：只带回识别结果，画布仍是原图。
+            # 必须显式清掉上一张图遗留的译文与编辑会话，否则「仅 OCR」导入后
+            # 改原文会用上一张图的 repaired_background 当底图，擦除区被旧内容
+            # 盖回，导出图就带着未擦干净的残影。
+            self._model.translation_result = None
+            self._model.composition_editor = None
+            self._model.repaired_background = None
+            self._model.rendered_document = None
+            self._model.text_layout = TextLayout(())
             self._model.ocr_result = state.ocr
             self._ocr_preview_layers.clear()
             self._ocr_original_texts = {
@@ -1988,19 +2006,23 @@ class EditorMainWindow(QMainWindow):
             pass
 
     def _open_portal_window(self) -> None:
-        """打开万象笔记网页窗口（首页卡片与编辑器工具栏共用）。"""
+        """用系统自带的 Edge 打开万象笔记（首页卡片与编辑器工具栏共用）。
+
+        不再内嵌浏览器：客户机器上 WebEngine 的 GPU 合成会让网页里固定定位的
+        底部菜单栏闪动，换成 Edge 后渲染稳定。
+        """
         url = getattr(self._portal_module, "link_url", "") or ""
         if not url:
             self.statusBar().showMessage(
                 "万象笔记入口尚未配置链接，请联系管理员在后台设置", 6000
             )
             return
-        if self._portal_window is None:
-            self._portal_window = PortalBrowserWindow(self)
-        self._portal_window.load_url(url)
-        self._portal_window.show()
-        self._portal_window.raise_()
-        self._portal_window.activateWindow()
+        try:
+            browser = open_in_edge(url)
+        except OSError as error:
+            self.statusBar().showMessage(f"无法打开万象笔记：{error}", 8000)
+            return
+        self.statusBar().showMessage(f"已在{browser}中打开万象笔记", 5000)
 
     def _enter_toolbox(self) -> None:
         self._stack.setCurrentWidget(self._toolbox_page)
@@ -2608,6 +2630,12 @@ class EditorMainWindow(QMainWindow):
                     self._model.composition_editor.patch_count,
                 )
         self._editor_page.scene.set_mask_visible(show_mask)
+        # set_document 会清空场景图元：图片图层必须在这里重建，
+        # 否则切一次预览模式图片层就“消失”，只剩图像上的一块像素
+        picture_editor = self._model.composition_editor
+        self._editor_page.scene.set_picture_layers(
+            picture_editor.pictures if picture_editor is not None else ()
+        )
         # 成品预览的底图已包含图片图层；编辑底图不含，图片层由画布项绘制
         self._editor_page.scene.set_picture_items_visible(show_layers)
         self._editor_page.set_layers_visible(show_layers)
@@ -3904,6 +3932,255 @@ class EditorMainWindow(QMainWindow):
             ),
         )
 
+    def _on_apply_fixed_style_to_all(
+        self,
+        font_size: object,
+        font_family: object,
+        font_weight: object,
+    ) -> None:
+        """把固定字号/字体/字重应用到工作台里所有图片的同一个文字区域。
+
+        字号是绝对像素：客户要把一批图里同一位置的数字（多在 80px 以上、
+        个别偏小）统一成 80~85px，看起来一样大。
+
+        匹配方式按「相对位置」而不是区域编号：每张图的 OCR 区域编号不同
+        （同是左下角时间，可能分别是 region-0004 / region-0005 / region-0009），
+        按编号在客户这批图上根本对不上。
+        """
+        size = float(font_size) if isinstance(font_size, (int, float)) else None
+        family = font_family if isinstance(font_family, str) and font_family else None
+        weight = int(font_weight) if isinstance(font_weight, int) else None
+        if size is None and family is None and weight is None:
+            self.statusBar().showMessage("请先勾选要固定的字号/字体/字重", 5000)
+            return
+
+        region_id = self._editor_page.property_panel.selected_region_id
+        if region_id is None:
+            self.statusBar().showMessage(
+                "请先在画布或 OCR 结果列表中选中要统一的文字区域", 6000
+            )
+            return
+
+        if self._task_runner is None:
+            return
+        # 当前文档的最新编辑状态先入快照，否则这次批处理会漏掉刚做的修改
+        self._model._snapshot_active()
+        anchor = self._relative_region_anchor(region_id)
+        if anchor is None:
+            # source_document 在部分导入路径下可能为空，退回用 OCR 的坐标范围
+            anchor = self._relative_anchor_from_ocr(region_id)
+        if anchor is None:
+            self.statusBar().showMessage(
+                "无法定位该区域在图片中的位置，请先完成 OCR 识别", 6000
+            )
+            return
+        target_name = self._region_label(region_id)
+        self.statusBar().showMessage(
+            f"正在把这套样式应用到全部图片（{target_name}）…"
+        )
+
+        def operation() -> tuple[int, list[str]]:
+            applied = 0
+            missed: list[str] = []
+            for ref in self._model.documents():
+                if self._apply_fixed_style_to_document(
+                    ref, anchor, size, family, weight
+                ):
+                    applied += 1
+                else:
+                    missed.append(ref.name)
+            return applied, missed
+
+        def on_success(result: tuple[int, list[str]]) -> None:
+            applied, missed = result
+            self._load_active_document()
+            message = f"已应用到 {applied} 张图片"
+            if missed:
+                message += f"，{len(missed)} 张同一位置没有文字区域"
+            self.statusBar().showMessage(message, 8000)
+            if applied == 0:
+                QMessageBox.information(
+                    self,
+                    "应用到全部图片",
+                    "没有图片在该位置找到文字区域。\n\n"
+                    "这一步按「文字在图片中的相对位置」匹配，"
+                    "请确认这些图片已完成 OCR 识别，且位置一致。",
+                )
+
+        self._task_runner.submit(
+            operation,
+            on_success,
+            lambda error: self.statusBar().showMessage(
+                f"应用到全部图片失败：{error}", 8000
+            ),
+        )
+
+    def _region_label(self, region_id: str) -> str:
+        region = self._find_region_for(region_id)
+        text = getattr(region, "text", None)
+        return f"{region_id}「{text}」" if text else region_id
+
+    def _relative_region_anchor(
+        self, region_id: str
+    ) -> tuple[float, float, float, float] | None:
+        """把当前区域的框换算成相对整图的 (cx, cy, w, h)，用于跨图匹配。"""
+        document = self._model.source_document
+        box = self._editor_page.property_panel._current_box
+        if box is None:
+            region = self._find_region_for(region_id)
+            points = tuple(getattr(region, "polygon", ()))
+            if not points:
+                return None
+            xs = [float(point.x) for point in points]
+            ys = [float(point.y) for point in points]
+            box = TextBox(
+                (min(xs) + max(xs)) / 2,
+                (min(ys) + max(ys)) / 2,
+                max(1.0, max(xs) - min(xs)),
+                max(1.0, max(ys) - min(ys)),
+            )
+        if document is None:
+            return None
+        width = max(1.0, document.asset.width)
+        height = max(1.0, document.asset.height)
+        return (
+            box.center_x / width,
+            box.center_y / height,
+            box.width / width,
+            box.height / height,
+        )
+
+    def _relative_anchor_from_ocr(
+        self, region_id: str
+    ) -> tuple[float, float, float, float] | None:
+        """没有 source_document 时的退路：用所有 OCR 区域的外接范围当画面尺寸。"""
+        ocr = self._model.ocr_result
+        regions = tuple(getattr(ocr, "regions", ()) or ())
+        region = next(
+            (item for item in regions if item.region_id == region_id), None
+        )
+        if region is None or not regions:
+            return None
+        points = tuple(getattr(region, "polygon", ()))
+        if not points:
+            return None
+        all_x = [
+            float(point.x)
+            for item in regions
+            for point in getattr(item, "polygon", ())
+        ]
+        all_y = [
+            float(point.y)
+            for item in regions
+            for point in getattr(item, "polygon", ())
+        ]
+        if not all_x or not all_y:
+            return None
+        xs = [float(point.x) for point in points]
+        ys = [float(point.y) for point in points]
+        span_x = max(1.0, max(all_x) - min(all_x))
+        span_y = max(1.0, max(all_y) - min(all_y))
+        return (
+            ((min(xs) + max(xs)) / 2 - min(all_x)) / span_x,
+            ((min(ys) + max(ys)) / 2 - min(all_y)) / span_y,
+            max(1.0, max(xs) - min(xs)) / span_x,
+            max(1.0, max(ys) - min(ys)) / span_y,
+        )
+
+    def _find_region_by_relative_position(
+        self,
+        ref,
+        anchor: tuple[float, float, float, float],
+    ):
+        """在指定文档里找与 anchor 相对位置最接近的 OCR 区域。"""
+        ocr = ref.ocr_result
+        regions = tuple(getattr(ocr, "regions", ()) or ())
+        if not regions:
+            return None
+        width = max(1.0, ref.source_document.asset.width)
+        height = max(1.0, ref.source_document.asset.height)
+        best = None
+        best_distance = None
+        for region in regions:
+            points = tuple(getattr(region, "polygon", ()))
+            if not points:
+                continue
+            xs = [float(point.x) for point in points]
+            ys = [float(point.y) for point in points]
+            cx = (min(xs) + max(xs)) / 2 / width
+            cy = (min(ys) + max(ys)) / 2 / height
+            distance = ((cx - anchor[0]) ** 2 + (cy - anchor[1]) ** 2) ** 0.5
+            if best_distance is None or distance < best_distance:
+                best, best_distance = region, distance
+        # 超过图宽/高 5% 的位移视为「这张图没有该区域」，避免误改别的文字
+        if best_distance is not None and best_distance > 0.05:
+            return None
+        return best
+
+    def _apply_fixed_style_to_document(
+        self,
+        ref,
+        anchor: tuple[float, float, float, float],
+        size: float | None,
+        family: str | None,
+        weight: int | None,
+    ) -> bool:
+        """对单个文档应用固定样式；返回是否真的改到了东西。"""
+        region = self._find_region_by_relative_position(ref, anchor)
+        if region is None:
+            return False
+        region_id = region.region_id
+        editor = ref.composition_editor
+        layer = None
+        if editor is not None:
+            try:
+                layer = editor.layout.layer_by_id(region_id)
+            except KeyError:
+                layer = None
+        if layer is None and ref.ocr_result is not None:
+            # 还没有文字图层（仅 OCR 阶段）：写进该图的样式暂存，
+            # 生成图层时由 apply_ocr_property_overrides 生效
+            overrides = ref.ocr_property_overrides.setdefault(region_id, {})
+            if size is not None:
+                overrides["font_size"] = size
+                overrides["auto_fit"] = False
+            if family is not None:
+                overrides["font_family"] = family
+            if weight is not None:
+                overrides["font_weight"] = weight
+            return True
+
+        if editor is None or layer is None:
+            return False
+        style = layer.style
+        changes: dict[str, object] = {}
+        if size is not None:
+            changes["font_size"] = size
+            changes["auto_fit"] = False
+        if family is not None:
+            changes["font_family"] = family
+        if weight is not None:
+            changes["font_weight"] = weight
+        if not changes:
+            return False
+        new_style = replace(style, **changes)
+        if new_style == style:
+            return True
+        try:
+            editor.replace_style(
+                region_id, new_style, layer.box.rotation_degrees
+            )
+        except Exception:
+            logging.getLogger("imgtrans").warning(
+                "批量固定样式失败 doc=%s region=%s", ref.name, region_id,
+                exc_info=True,
+            )
+            return False
+        ref.rendered_document = editor._document
+        ref.text_layout = editor.layout
+        ref.is_dirty = True
+        return True
+
     def _find_region_for(self, region_id: str):
         """按区域 id 找 OCR 识别结果（译文结果优先，其次当前 OCR 结果）。"""
         result = self._model.translation_result
@@ -3971,18 +4248,21 @@ class EditorMainWindow(QMainWindow):
         source = self._model.source_document
         if source is None:
             return None
-        # 预览阶段按识别框多边形整块擦掉原文：只擦字形时，艺术字/描边字/旋转文字
-        # 常留下残影，预览文字叠上去就成了「重影」。正式翻译仍走精细蒙版。
+        # 必须用精细字形蒙版，不能退化成整框矩形。
+        #
+        # 实测「0901」水印图（09:19 白字、蓝底）：整框蒙版交给 LaMa 会让它按
+        # 周围纹理「脑补」，把旧字轮廓重新画回来——膨胀 5px 时旧字残影像素
+        # 高达 472 个、背景 std 26.2（正常蓝底 5.6），看起来就像「没擦干净」；
+        # 换成精细字形蒙版后残影 0 个、std 6.8。
+        #
+        # 也不要向框外自动扩展：该图识别框 (32,1068)-(228,1162) 已完整覆盖
+        # 全部笔画（实际 x49-214），右侧 26px 就是「2026年01月02」、上方 5px
+        # 是日期行，外扩会吃掉相邻文字并留下大片白雾。
         if self._mask_rasterizer is not None:
-            polygon = _expand_polygon_to_glyphs(
-                source, tuple((point.x, point.y) for point in region.polygon)
+            polygon = tuple(
+                (point.x, point.y) for point in region.polygon
             )
-            return self._mask_rasterizer.rasterize(
-                source.asset.width,
-                source.asset.height,
-                (polygon,),
-                2,
-            )
+            return self._mask_rasterizer.rasterize_text(source, (polygon,), 3)
         if self._erase_mask_builder is not None:
             ocr_result, translation_result = self._ocr_preview_pipeline_inputs(region)
             return self._erase_mask_builder.execute(
@@ -4133,6 +4413,12 @@ class EditorMainWindow(QMainWindow):
             return
 
         repair_mask = self._ocr_preview_mask(region)
+        _log.info(
+            "ocr-preview state base_is_source=%s repaired_bg=%s masks=%s",
+            editor.background_document is self._model.source_document,
+            self._model.repaired_background is not None,
+            _mask_bounds(repair_mask) if repair_mask is not None else None,
+        )
         field_order = (
             "center_x", "center_y", "width", "height",
             "rotation_degrees", "font_family", "font_weight",
@@ -4207,12 +4493,24 @@ class EditorMainWindow(QMainWindow):
             return edit
 
         def on_success(edit):
-            logging.getLogger("imgtrans").info(
-                "ocr-preview done region=%s layers=%d patches=%d",
+            _logger = logging.getLogger("imgtrans")
+            _logger.info(
+                "ocr-preview done region=%s layers=%d",
                 region_id,
                 len(edit.layout.layers),
-                getattr(edit, "patch_count", -1),
             )
+            # 只看背景层：合成后的图上盖着新文字，抗锯齿边缘会被判成残影，
+            # 读数没有诊断价值（实测新字会让 ghost 虚高到 240 上下）。
+            editor_for_log = self._model.composition_editor
+            if editor_for_log is not None:
+                _logger.info(
+                    "ocr-preview base %s",
+                    _region_luminance(
+                        editor_for_log.background_document,
+                        region,
+                        self._model.source_document,
+                    ),
+                )
             self._editor_page.apply_edit_result(edit)
             self._apply_preview_mode("layers")
             self._editor_page.top_bar.set_has_layers(True)
@@ -4243,7 +4541,9 @@ class EditorMainWindow(QMainWindow):
             )
             self._editor_page.toolbar.set_active_tool("select")
             return
-        document = editor.document
+        # 取编辑底图（背景+文字）而不是成品图：成品图还叠了水印与已有图片层，
+        # 直接剥离会把它们重复烤进新图层。底图也是用户当前看到的画面。
+        document = editor.editing_document
         width, height = document.asset.width, document.asset.height
         left = max(0, min(width - 1, round(box.center_x - box.width / 2)))
         top = max(0, min(height - 1, round(box.center_y - box.height / 2)))
@@ -4272,12 +4572,28 @@ class EditorMainWindow(QMainWindow):
 
         self._task_runner.submit(
             operation,
-            self._editor_page.apply_edit_result,
+            self._on_extract_layer_applied,
             lambda error: self.statusBar().showMessage(
                 f"图层剥离失败：{error}", 8000
             ),
         )
         self._editor_page.toolbar.set_active_tool("select")
+
+    def _on_extract_layer_applied(self, edit) -> None:
+        """剥离完成：立即切到图层模式并选中新图层。
+
+        图片图层只在编辑模式显示；停在成品预览模式时剥离结果看不见，
+        用户在原位置拖动只会平移画布，看起来像在移动原图。
+        """
+        self._editor_page.apply_edit_result(edit)
+        if self._model.preview_mode != "layers":
+            self._apply_preview_mode("layers")
+        if edit.affected_region_id is not None:
+            self._editor_page.scene.select_picture(edit.affected_region_id)
+        self.statusBar().showMessage(
+            "图层已剥离：拖动移动位置，Ctrl+C 复制、Ctrl+V 粘贴，Delete 删除",
+            6000,
+        )
 
     def _on_picture_moved(self, layer_id: str, center_x: float, center_y: float) -> None:
         # 同步执行：基础层已有缓存，只需合成图片图层；也避免后台渲染
@@ -4293,15 +4609,26 @@ class EditorMainWindow(QMainWindow):
         self._apply_picture_move_result(edit)
 
     def _apply_picture_move_result(self, edit) -> None:
-        """移动图片层：画布项已在新位置，无需重建底图，只同步导出文档与历史。"""
+        """移动/删除图片层：同步导出文档、画布图元与历史。
+
+        图层模式下底图不含图片层（由画布图元绘制），因此不需要重设底图——
+        重设会 clear() 整个场景，顺带清掉文字图层与 OCR 框，拖动时还卡。
+        只有成品预览模式的底图含图片层，那时才需要重画底图。
+        """
         self._model.rendered_document = edit.document
         self._model.is_dirty = True
         editor = self._model.composition_editor
         if editor is not None:
             self._sync_history_actions(editor.can_undo, editor.can_redo)
-        self._editor_page.scene.set_picture_layers(
+        show_layers = self._model.preview_mode == "layers"
+        if not show_layers:
+            # 成品预览的底图已经包含图片层，必须重画才能看到新位置
+            self._editor_page.set_document(edit.document)
+        scene = self._editor_page.scene
+        scene.set_picture_layers(
             editor.pictures if editor is not None else ()
         )
+        scene.set_picture_items_visible(show_layers)
 
     def _on_delete_picture(self, layer_id: str) -> None:
         editor = self._model.composition_editor
@@ -4334,9 +4661,37 @@ class EditorMainWindow(QMainWindow):
                 except Exception:
                     continue
 
+    def _on_copy_picture(self, layer_id: str) -> None:
+        self._copied_picture_id = layer_id
+        self.statusBar().showMessage(
+            "已复制图片图层，按 Ctrl+V 粘贴到新位置", 4000
+        )
+
+    def _on_paste_picture(self) -> None:
+        editor = self._model.composition_editor
+        layer_id = self._copied_picture_id
+        if editor is None or layer_id is None:
+            self.statusBar().showMessage("请先复制一个图片图层", 4000)
+            return
+        try:
+            edit = editor.duplicate_picture_layer(layer_id)
+        except KeyError:
+            self._copied_picture_id = None
+            self.statusBar().showMessage("原图片图层已被删除，请重新复制", 4000)
+            return
+        except Exception as error:  # noqa: BLE001 - 状态栏提示
+            self.statusBar().showMessage(f"粘贴图层失败：{error}", 6000)
+            return
+        self._copied_picture_id = edit.affected_region_id
+        self._apply_picture_move_result(edit)
+        if edit.affected_region_id is not None:
+            self._editor_page.scene.select_picture(edit.affected_region_id)
+        self.statusBar().showMessage("已粘贴图片图层：可拖动移动位置", 4000)
+
     def _on_picture_selected(self, layer_id: str) -> None:
         self.statusBar().showMessage(
-            "已选中图片图层：拖动移动位置，按 Delete 删除", 4000
+            "已选中图片图层：拖动移动位置，Ctrl+C 复制、Ctrl+V 粘贴，按 Delete 删除",
+            4000,
         )
 
     def _on_delete_layer(self, region_id: str) -> None:
@@ -4992,6 +5347,78 @@ class EditorMainWindow(QMainWindow):
     def undo_stack(self) -> QUndoStack:
         return self._undo_stack
 
+def _mask_bounds(mask: EraseMask) -> tuple[int, int, int, int] | None:
+    """蒙版的非零像素外接框，用于日志核对擦除范围。"""
+    import numpy as np
+
+    painted = np.frombuffer(mask.pixels, dtype=np.uint8).reshape(
+        mask.height, mask.width
+    ) > 0
+    if not painted.any():
+        return None
+    rows, columns = np.nonzero(painted)
+    return (
+        int(columns.min()),
+        int(rows.min()),
+        int(columns.max()),
+        int(rows.max()),
+    )
+
+
+def _region_luminance(
+    document: ImageDocument,
+    region: TextRegion,
+    source: ImageDocument | None,
+) -> str:
+    """统计识别框内的亮度分布，用于确认旧字是否真的被擦掉。
+
+    正常擦除后框内应为单一背景色（std 很小）；若 std 明显偏大，说明旧字
+    或错位的 patch 还留在画面里（用户报障时的导出图 std≈29，正常≈4）。
+    """
+    import numpy as np
+
+    xs = [point.x for point in region.polygon]
+    ys = [point.y for point in region.polygon]
+    left, right = max(0, int(min(xs))), int(max(xs)) + 1
+    top, bottom = max(0, int(min(ys))), int(max(ys)) + 1
+    channels = 4 if document.mode == "RGBA" else 3
+    pixels = np.frombuffer(document.pixels, dtype=np.uint8).reshape(
+        document.asset.height, document.asset.width, channels
+    )
+    window = pixels[top:bottom, left:right, :3].astype(np.float32)
+    if not window.size:
+        return "empty-window"
+    luminance = window @ np.asarray((0.2126, 0.7152, 0.0722), dtype=np.float32)
+    report = (
+        f"box=({left},{top})-({right},{bottom}) "
+        f"mean={float(luminance.mean()):.1f} std={float(luminance.std()):.1f}"
+    )
+    if source is not None and (
+        source.asset.width,
+        source.asset.height,
+    ) == (document.asset.width, document.asset.height):
+        source_channels = 4 if source.mode == "RGBA" else 3
+        original = np.frombuffer(source.pixels, dtype=np.uint8).reshape(
+            source.asset.height, source.asset.width, source_channels
+        )[top:bottom, left:right, :3].astype(np.float32)
+        original_luminance = original @ np.asarray(
+            (0.2126, 0.7152, 0.0722), dtype=np.float32
+        )
+        was_text = original_luminance > 165.0
+        if was_text.any():
+            # 只有「旧字位置 + 中等亮度」才是残影。新渲染的文字同样很亮，
+            # 直接统计 high 像素会把新字算成未擦干净（实测高估约 3 倍）。
+            ghost = int(
+                (
+                    was_text
+                    & (luminance > 120.0)
+                    & (luminance <= 205.0)
+                ).sum()
+            )
+            report += f" old_text={int(was_text.sum())} ghost={ghost}"
+    return report
+
+
 def _rect_erase_mask(
     width: int,
     height: int,
@@ -5007,105 +5434,3 @@ def _rect_erase_mask(
         data[start : start + span] = b"\xff" * span
     return EraseMask(width, height, bytes(data))
 
-def _expand_polygon_to_glyphs(
-    document: ImageDocument,
-    polygon: tuple[tuple[float, float], ...],
-) -> tuple[tuple[float, float], ...]:
-    """把识别框扩到覆盖被切在框外的文字笔画。
-
-    OCR 常把末尾字符整体落在框外（实测框右边界 228，而实际文字到 339），
-    只擦框内会留下完整可见的旧字。做法：从框的每条边向外逐像素扫描同行/同列，
-    遇到亮像素记为可达、允许跨过字间距（gap），连续无字则停止。
-    """
-    import numpy as np
-
-    channels = 4 if document.mode == "RGBA" else 3
-    pixels = np.frombuffer(document.pixels, dtype=np.uint8).reshape(
-        document.asset.height, document.asset.width, channels
-    )[:, :, :3]
-    height, width = pixels.shape[:2]
-    xs = [point[0] for point in polygon]
-    ys = [point[1] for point in polygon]
-    x0 = max(0, int(min(xs)))
-    x1 = min(width, int(max(xs)) + 1)
-    y0 = max(0, int(min(ys)))
-    y1 = min(height, int(max(ys)) + 1)
-    if x1 <= x0 or y1 <= y0:
-        return polygon
-
-    luminance = pixels @ np.asarray((0.2126, 0.7152, 0.0722), dtype=np.float32)
-    base = float(np.percentile(luminance[y0:y1, x0:x1].ravel(), 40))
-    bright = luminance > base + 45.0
-
-    box_w, box_h = x1 - x0, y1 - y0
-    # 字间距通常是字宽的一半以内；给足余量但不超过框宽
-    gap_x = min(box_w, max(20, int(box_w * 0.55)))
-    gap_y = min(box_h, max(16, int(box_h * 0.45)))
-    # 总扩展量不超过框尺寸本身：足以覆盖被切掉的末尾字符，又不会
-    # 误把旁边的其它文字/图形圈进擦除区。
-    limit_x = box_w
-    limit_y = int(box_h * 0.9)
-
-    def extend_right() -> int:
-        misses = 0
-        result = x1
-        for x in range(x1, min(width, x1 + limit_x)):
-            if bright[y0:y1, x].any():
-                result = x + 1
-                misses = 0
-            else:
-                misses += 1
-                if misses > gap_x:
-                    break
-        return result
-
-    def extend_left() -> int:
-        misses = 0
-        result = x0
-        for x in range(x0 - 1, max(-1, x0 - 1 - limit_x), -1):
-            if bright[y0:y1, x].any():
-                result = x
-                misses = 0
-            else:
-                misses += 1
-                if misses > gap_x:
-                    break
-        return result
-
-    def extend_down(left: int, right: int) -> int:
-        misses = 0
-        result = y1
-        for y in range(y1, min(height, y1 + limit_y)):
-            if bright[y, left:right].any():
-                result = y + 1
-                misses = 0
-            else:
-                misses += 1
-                if misses > gap_y:
-                    break
-        return result
-
-    def extend_up(left: int, right: int) -> int:
-        misses = 0
-        result = y0
-        for y in range(y0 - 1, max(-1, y0 - 1 - limit_y), -1):
-            if bright[y, left:right].any():
-                result = y
-                misses = 0
-            else:
-                misses += 1
-                if misses > gap_y:
-                    break
-        return result
-
-    nx0 = extend_left()
-    nx1 = extend_right()
-    # 上下扫用扩展后的水平范围，保证末尾字符的上下也覆盖到
-    ny0 = extend_up(nx0, nx1)
-    ny1 = extend_down(nx0, nx1)
-    return (
-        (float(nx0), float(ny0)),
-        (float(nx1), float(ny0)),
-        (float(nx1), float(ny1)),
-        (float(nx0), float(ny1)),
-    )

@@ -10,7 +10,6 @@ from PySide6.QtWidgets import (
     QAbstractSpinBox,
     QCheckBox,
     QComboBox,
-    QFontComboBox,
     QFrame,
     QFormLayout,
     QGroupBox,
@@ -28,6 +27,8 @@ from PySide6.QtWidgets import (
 
 from src.ui.color_picker_dialog import pick_color
 from src.ui.toolbox.tool_box_model import OperationParams, WatermarkItem
+from src.ui.editor.widgets.font_combo import SearchableFontComboBox
+from src.ui.editor.widgets.font_combo import SearchableFontComboBox
 
 
 class OperationPanel(QFrame):
@@ -191,7 +192,8 @@ class OperationPanel(QFrame):
         self._wm_text.textChanged.connect(self._on_wm_field_changed)
         wm_edit.addRow("文字:", self._wm_text)
 
-        self._wm_font = QFontComboBox()
+        self._wm_font = SearchableFontComboBox()
+        self._wm_font.populate()
         self._wm_font.setStyleSheet(self._combo_style())
         self._wm_font.currentFontChanged.connect(self._on_wm_field_changed)
         wm_edit.addRow("字体:", self._wm_font)

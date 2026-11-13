@@ -762,6 +762,62 @@ def test_weight_aware_reflow_and_renderer_share_effective_font() -> None:
     )
 
 
+def test_explicit_font_size_is_never_silently_changed() -> None:
+    """手填字号原样使用，哪怕远大于框：只标溢出，不悄悄改小。
+
+    「固定字号」的用途是把一批图统一成 80~85px，静默改小会让客户的
+    每张图变成不同字号，反而破坏一致性。放不下应提示用户拉宽框。
+    """
+    QApplication.instance() or QApplication(["layout-keep-explicit-size-test"])
+    adapter = QtBasicTextLayoutAdapter("Arial")
+    huge = TextLayer(
+        "r",
+        "09:12",
+        TextBox(130, 1115, 196, 94),
+        TextStyle("Arial", 287, (255, 255, 255), auto_fit=False),
+    )
+
+    result = adapter.reflow(huge, huge.text)
+
+    assert result.style.font_size == 287, "用户填的字号必须原样保留"
+    assert result.overflow, "放不下要标记出来，由界面提示"
+
+
+def test_moderately_oversized_explicit_size_is_kept() -> None:
+    """正常手调（超出可容纳值 1~3 倍）不被静默改字号，只标溢出。"""
+    QApplication.instance() or QApplication(["layout-keep-oversized-size-test"])
+    adapter = QtBasicTextLayoutAdapter("Arial")
+    # 120x30 的框最多放约 15.5px，填 28px 约为 1.8 倍：属于正常手调范围
+    layer = TextLayer(
+        "r",
+        "ABCDEFGH",
+        TextBox(60, 15, 120, 30),
+        TextStyle("Arial", 28, (0, 0, 0), auto_fit=False),
+    )
+
+    result = adapter.reflow(layer, layer.text)
+
+    assert result.style.font_size == 28, "未超过 3 倍，不能被静默改小"
+    assert result.overflow
+
+
+def test_explicit_font_size_within_box_is_untouched() -> None:
+    """框装得下的手填字号原样保留，不受收拢影响。"""
+    QApplication.instance() or QApplication(["layout-keep-explicit-size-test"])
+    adapter = QtBasicTextLayoutAdapter("Arial")
+    layer = TextLayer(
+        "r",
+        "09:12",
+        TextBox(100, 50, 196, 94),
+        TextStyle("Arial", 30, (255, 255, 255), auto_fit=False),
+    )
+
+    result = adapter.reflow(layer, layer.text)
+
+    assert result.style.font_size == 30
+    assert not result.overflow
+
+
 def test_bold_wrap_and_overflow_use_rendered_font_metrics() -> None:
     QApplication.instance() or QApplication(["layout-bold-overflow-test"])
     adapter = QtBasicTextLayoutAdapter("Segoe UI")
@@ -777,6 +833,7 @@ def test_bold_wrap_and_overflow_use_rendered_font_metrics() -> None:
         "Label * 2",
     )
     assert overflowing.overflow
+    assert overflowing.style.font_size == 20, "正常手调字号原样保留，只标溢出"
 
     fitting = adapter.reflow(
         TextLayer(

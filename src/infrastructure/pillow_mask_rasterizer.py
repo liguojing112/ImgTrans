@@ -29,6 +29,7 @@ class PillowMaskRasterizer:
         document: ImageDocument,
         polygons: tuple[tuple[tuple[float, float], ...], ...],
         expansion: int,
+        allow_wide_label: bool = False,
     ) -> EraseMask:
         channels = 4 if document.mode == "RGBA" else 3
         source_pixels = np.frombuffer(document.pixels, dtype=np.uint8).reshape(
@@ -54,7 +55,9 @@ class PillowMaskRasterizer:
             refined = (
                 transparent_text
                 if transparent_text is not None
-                else _high_contrast_text_mask(pixels, geometry)
+                else _high_contrast_text_mask(
+                    pixels, geometry, allow_wide_label=allow_wide_label
+                )
             )
             refined_image = Image.fromarray(refined, mode="L")
             if expansion:
@@ -299,9 +302,12 @@ def _corrected_background(
 def _high_contrast_text_mask(
     pixels: np.ndarray,
     geometry: Image.Image,
+    allow_wide_label: bool = False,
 ) -> np.ndarray:
     polygon = np.asarray(geometry, dtype=np.uint8) > 0
-    colored_label = _colored_label_text_mask(pixels, polygon)
+    colored_label = _colored_label_text_mask(
+        pixels, polygon, allow_wide=allow_wide_label
+    )
     if colored_label is not None:
         return colored_label
     samples = pixels[polygon].astype(np.float32)
@@ -744,6 +750,7 @@ def _enclosed_by(mask: np.ndarray) -> np.ndarray:
 def _colored_label_text_mask(
     pixels: np.ndarray,
     polygon: np.ndarray,
+    allow_wide: bool = False,
 ) -> np.ndarray | None:
     polygon_area = int(np.count_nonzero(polygon))
     if not polygon_area:
@@ -751,13 +758,17 @@ def _colored_label_text_mask(
     rows, columns = np.where(polygon)
     polygon_width = int(columns.max() - columns.min() + 1)
     polygon_height = int(rows.max() - rows.min() + 1)
-    # 仅限竖排细长彩色标签。不要放开成双向（polygon_width >= polygon_height *
-    # 1.8）：横排文字行天然宽扁，会让本分支被普通文字大量命中——语料实测 1116 区域
-    # 中 189 个受影响，残留恶化>20 的 35 个 vs 改善 2 个，净 +2048。后面那三道判据
-    # （饱和色占框 >= 25% / 单一主连通域 >= 75% / 中性文字对比 >= 65）在真实电商图
-    # 上太容易满足，挡不住彩色底色条上的白字。详见 TASK-M5-001 §16。
+    # 默认仅限竖排细长彩色标签。不要无条件放开成双向：横排文字行天然宽扁，
+    # 会让本分支被普通文字大量命中——语料实测 1116 区域中 189 个受影响，
+    # 残留恶化>20 的 35 个 vs 改善 2 个，净 +2048。后面几道判据
+    # （饱和色占框 >= 25% / 单一主连通域 >= 75% / 中性文字对比 >= 65）在
+    # 真实电商图上太容易满足，挡不住彩色底色条上的白字。详见 TASK-M5-001 §16。
+    #
+    # allow_wide=True 由调用方按「该区域高对比、文字与底色可分离」显式开启，
+    # 用于横排胶囊标签（黄底白字等）。这种区域如果不走本分支，会退化成整框
+    # 膨胀，把整个标签擦成碎块。未做前置判定的调用方一律保持原限制。
     elongated = polygon_height >= polygon_width * 1.8
-    if not elongated:
+    if not elongated and not allow_wide:
         return None
     chroma = pixels.max(axis=2).astype(np.int16) - pixels.min(axis=2).astype(
         np.int16
@@ -775,27 +786,73 @@ def _colored_label_text_mask(
     component_areas = stats[1:, cv2.CC_STAT_AREA]
     largest_id = int(np.argmax(component_areas)) + 1
     largest = labels == largest_id
-    if np.count_nonzero(largest) / colored_area < 0.75:
+    # 横排标签常带对角渐变（左亮右暗），颜色阈值会把同一块底色切成多段，
+    # 最大连通域占比会降到 55%~69%；放宽后靠后面的中性文字对比兜底。
+    dominance = 0.45 if allow_wide else 0.75
+    if np.count_nonzero(largest) / colored_area < dominance:
         return None
     coordinates = np.column_stack(np.where(largest))[:, ::-1].astype(np.int32)
     support = np.zeros(polygon.shape, dtype=np.uint8)
     cv2.fillConvexPoly(support, cv2.convexHull(coordinates), 1)
     support_mask = polygon & (support > 0)
+    # 底色搜索范围：凸包可能只盖住框内六成（底色被渐变/文字切碎），
+    # 深色字落在外侧就会漏擦；但直接放开到全框又会把框外的邻接背景
+    # 当成文字。折中：凸包向外扩张一小圈，兼顾补齐与不越界。
+    if allow_wide:
+        support_mask = cv2.dilate(
+            support_mask.astype(np.uint8), np.ones((9, 9), np.uint8)
+        ).astype(bool) & polygon
     background = np.median(pixels[largest].astype(np.float32), axis=0)
     luminance = pixels @ np.asarray(
         (0.2126, 0.7152, 0.0722),
         dtype=np.float32,
     )
     neutral = chroma < 35
-    candidates = (
+    # 防「底色 / 文字」判反：浅色底上的大号彩色标题（深紫大字压在浅蓝渐变上）
+    # 里，最大饱和连通域其实是**文字**而不是底色。这时本分支会抠出背景、
+    # 漏掉整块文字，标题就叠着旧字印。判据：被当作底色的颜色很暗，
+    # 而框内亮中性像素占多数 —— 说明真相是「浅底 + 深色字」。
+    background_luminance = float(
+        background @ np.asarray((0.2126, 0.7152, 0.0722), dtype=np.float32)
+    )
+    if background_luminance < 110.0:
+        bright_neutral_ratio = float(
+            np.count_nonzero(polygon & neutral & (luminance >= 180))
+        ) / float(polygon_area)
+        if bright_neutral_ratio >= 0.40:
+            return None
+    candidates = [
         support_mask & neutral & (luminance >= 180),
         support_mask & neutral & (luminance <= 120),
-    )
+    ]
+    if allow_wide:
+        # 这里是「已确认高对比、文字与底色可分离」的区域，文字可能是
+        # 深紫大字、白字或多色混排。凸包只覆盖最大那一段笔画（实测一行
+        # 「毛绒玩具定制」只抠出前三个字），必须换成整个识别框来找：
+        # 判据用「明显暗于底色」，底色再花也是亮的，不会反把底色当文字。
+        background_luminance = float(
+            background @ np.asarray((0.2126, 0.7152, 0.0722), dtype=np.float32)
+        )
+        candidates.append(
+            polygon
+            & (luminance <= background_luminance - 70.0)
+            & (luminance <= 150.0)
+        )
+        # 深色底上的浅色字（白字压在紫底上）：同样在整框里找亮像素
+        if background_luminance < 110.0:
+            candidates.append(
+                polygon
+                & (luminance >= background_luminance + 110.0)
+                & (luminance >= 170.0)
+            )
+    # 横排标签的字排得满（中文字符笔画密），中性像素占比可达 45%；
+    # 竖排标签没这个问题，保持原上限以免误伤普通文字行。
+    max_text_ratio = 0.60 if allow_wide else 0.35
     ranked = []
     for candidate in candidates:
         count = int(np.count_nonzero(candidate))
         ratio = count / polygon_area
-        if not 0.01 <= ratio <= 0.35:
+        if not 0.01 <= ratio <= max_text_ratio:
             continue
         foreground = np.median(pixels[candidate].astype(np.float32), axis=0)
         contrast = float(np.linalg.norm(foreground - background))
@@ -803,4 +860,34 @@ def _colored_label_text_mask(
             ranked.append((contrast, candidate))
     if not ranked:
         return None
-    return max(ranked, key=lambda item: item[0])[1].astype(np.uint8) * 255
+    best = max(ranked, key=lambda item: item[0])[1]
+    if allow_wide:
+        # 多个候选的对比度可能几乎相同（如白字 320 vs 深紫字 319），
+        # 只取对比度最高的会漏掉另一种颜色的笔画，旧字残留成"描边"。
+        # 高对比时取各候选的并集，保证同一标签里深浅两种字都被擦到。
+        top_contrast = max(item[0] for item in ranked)
+        merged = best
+        for contrast, candidate in ranked:
+            if contrast >= top_contrast * 0.85:
+                merged = merged | candidate
+        best = merged
+        # 底色被渐变/文字切碎时，最大彩色连通域的凸包盖不全框内深色笔画，
+        # 漏掉的那截会留成旧字轮廓。沿「与已识别深色笔画连通」补齐：
+        # 只在框内、且颜色明显暗于底色，避免把框外的浅色背景拉进来。
+        # 阈值放到底色亮度的一半：既能收进笔画的抗锯齿边缘，
+        # 又不会把中灰的底纹算成文字。
+        background_luminance = float(
+            background @ np.asarray((0.2126, 0.7152, 0.0722), dtype=np.float32)
+        )
+        dark_like = polygon & (
+            luminance <= float(np.percentile(luminance[polygon], 2.0)) + 45.0
+        ) & (luminance <= background_luminance * 0.72)
+        connected = cv2.dilate(
+            (best & dark_like).astype(np.uint8),
+            np.ones((3, 3), np.uint8),
+        ).astype(bool) & dark_like
+        best = best | connected
+        if np.count_nonzero(best) / polygon_area > max_text_ratio:
+            # 补齐过度就退回并集结果，宁可留一点残余也不能擦进底色
+            best = merged
+    return best.astype(np.uint8) * 255

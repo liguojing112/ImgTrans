@@ -214,4 +214,8 @@ def test_help_documents_batch_ocr_and_fixed_font_size() -> None:
     assert "仅 OCR（只识别文字）" in _HELP_HTML
     assert "导出识别文本" in _HELP_HTML
     assert "固定字号" in _HELP_HTML
+    assert "固定字重" in _HELP_HTML
+    assert "应用到全部图片" in _HELP_HTML
+    assert "填的是像素（px），不是倍数" in _HELP_HTML
+    assert "相对位置" in _HELP_HTML
     assert "更新 OCR 原文" in _HELP_HTML

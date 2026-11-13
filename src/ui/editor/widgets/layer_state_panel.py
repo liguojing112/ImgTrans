@@ -8,7 +8,6 @@ from PySide6.QtWidgets import (
     QFrame,
     QCheckBox,
     QDoubleSpinBox,
-    QFontComboBox,
     QFormLayout,
     QHBoxLayout,
     QLabel,
@@ -24,6 +23,7 @@ from PySide6.QtWidgets import (
 from src.domain.composition import WatermarkLayer
 from src.domain.layout import TextLayout
 from src.ui.color_picker_dialog import pick_color
+from src.ui.editor.widgets.font_combo import SearchableFontComboBox
 
 
 class LayerStatePanel(QFrame):
@@ -69,7 +69,8 @@ class LayerStatePanel(QFrame):
         editor_form.setContentsMargins(0, 0, 0, 0)
         self.watermark_text = QLineEdit()
         self.watermark_text.setPlaceholderText("选择文字水印后可编辑")
-        self.watermark_font = QFontComboBox()
+        self.watermark_font = SearchableFontComboBox()
+        self.watermark_font.populate()
         self.watermark_font_size = QDoubleSpinBox()
         self.watermark_font_size.setRange(4, 1000)
         self.watermark_font_size.setDecimals(1)

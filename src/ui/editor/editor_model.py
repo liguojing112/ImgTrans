@@ -36,6 +36,11 @@ class EditorDocumentRef:
     rendered_document: ImageDocument | None = None
     repaired_background: ImageDocument | None = None
     is_dirty: bool = False
+    # 仅 OCR 阶段的样式暂存。必须按文档隔离：各图的 OCR 区域 id 都是
+    # region-0000 这类序号，共用一个字典会让 A 图的字号/字体串到 B 图。
+    ocr_property_overrides: dict[str, dict[str, object]] = field(
+        default_factory=dict
+    )
 
 
 class EditorModel(QObject):
@@ -79,6 +84,7 @@ class EditorModel(QObject):
         # 多文档
         self._documents: list[EditorDocumentRef] = []
         self._active_document_id: str | None = None
+        self._ocr_overrides_scratch: dict[str, dict[str, object]] = {}
 
     # —— 多文档 ——
 
@@ -160,6 +166,14 @@ class EditorModel(QObject):
             if d.doc_id == self._active_document_id:
                 return d
         return None
+
+    @property
+    def ocr_property_overrides(self) -> dict[str, dict[str, object]]:
+        """当前图片的 OCR 样式暂存；没有活动文档时用这份临时字典。"""
+        ref = self.active_document()
+        if ref is None:
+            return self._ocr_overrides_scratch
+        return ref.ocr_property_overrides
 
     # —— 文档编辑状态快照 ——
 

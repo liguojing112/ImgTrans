@@ -5,6 +5,7 @@ from pathlib import Path
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import numpy as np
+import pytest
 from PySide6.QtCore import QEvent, QPointF
 from PySide6.QtGui import QImage, QPainter
 from PySide6.QtWidgets import (
@@ -940,8 +941,12 @@ def _ocr_region():
     )
 
 
-def test_fixed_font_size_seeds_from_current_and_applies_on_ocr_update(qtbot) -> None:
-    """勾选「固定字号」后，更新 OCR 原文时按统—字号写回（批量 OCR 修词场景）。"""
+def test_fixed_font_size_is_absolute_pixels(qtbot) -> None:
+    """「固定字号」是绝对像素：填 82 就写回 82px，与框高无关。
+
+    客户的场景：一批图里同一位置的数字，大多 80px 以上、个别偏小，
+    统一成 80~85px 后视觉大小一致。
+    """
     panel = PropertyPanel()
     qtbot.addWidget(panel)
     panel.show()
@@ -949,31 +954,84 @@ def test_fixed_font_size_seeds_from_current_and_applies_on_ocr_update(qtbot) -> 
     panel.set_ocr_region(region, None, {})
 
     assert not panel.fixed_font_spin.isEnabled()
-    current = panel.font_size_spin.value()
+    assert panel.fixed_font_spin.decimals() == 0
+    assert panel.fixed_font_spin.suffix() == " px"
+    assert panel.fixed_font_spin.value() == 80
+    assert panel.fixed_font_spin.singleStep() == 5
+
     panel.fixed_font_check.setChecked(True)
     assert panel.fixed_font_spin.isEnabled()
-    assert panel.fixed_font_spin.value() == current
+    panel.fixed_font_spin.setValue(82)
 
-    panel.fixed_font_spin.setValue(30)
-    source: list = []
     properties: list = []
-    panel.source_text_changed.connect(lambda *args: source.append(args))
     panel.ocr_property_changed.connect(lambda *args: properties.append(args))
-    panel.source_text_edit.setPlainText("NEW")
     panel.apply_source_text_btn.click()
 
-    assert source == [("r1", "NEW")]
-    assert properties == [("r1", "font_size", 30.0)]
+    assert ("r1", "font_size", pytest.approx(82.0)) in properties
+    assert panel.fixed_font_size() == pytest.approx(82.0)
 
 
-def test_fixed_font_size_applies_to_text_layer(qtbot) -> None:
-    """已生成图层时同样按固定字号改，并关闭自动适配。"""
+def test_fixed_font_size_applies_to_text_layer_verbatim(qtbot) -> None:
+    """已生成图层时同样按填写的像素值写回。"""
     panel = PropertyPanel()
     qtbot.addWidget(panel)
     panel.show()
     panel.set_layer(_make_layer())
     panel.fixed_font_check.setChecked(True)
-    panel.fixed_font_spin.setValue(26)
+    panel.fixed_font_spin.setValue(85)
+
+    emitted: list = []
+    panel.layer_property_changed.connect(
+        lambda region_id, field, value: emitted.append((region_id, field, value))
+    )
+    panel.apply_source_text_btn.click()
+
+    assert ("l1", "font_size", 85.0) in emitted
+
+
+def test_fixed_font_size_seeds_from_current_layer(qtbot) -> None:
+    """勾选时以当前字号为起点；当前值偏小时用默认 80px。"""
+    panel = PropertyPanel()
+    qtbot.addWidget(panel)
+    panel.show()
+    layer = _make_layer(
+        box=TextBox(100, 50, 200, 90), style=TextStyle("Arial", 88, (0, 0, 0))
+    )
+    panel.set_layer(layer)
+
+    panel.fixed_font_check.setChecked(True)
+
+    assert panel.fixed_font_spin.value() == pytest.approx(88.0)
+    assert panel.fixed_font_size() == pytest.approx(88.0)
+
+
+def test_fixed_font_size_keeps_default_when_current_is_small(qtbot) -> None:
+    """当前字号偏小时保留默认 80px，方便直接把小字拉到统一大小。"""
+    panel = PropertyPanel()
+    qtbot.addWidget(panel)
+    panel.show()
+    panel.set_layer(
+        _make_layer(style=TextStyle("Arial", 20, (0, 0, 0)))
+    )
+
+    panel.fixed_font_check.setChecked(True)
+
+    assert panel.fixed_font_spin.value() == pytest.approx(80.0)
+
+
+def test_fixed_font_weight_emits_on_ocr_update(qtbot) -> None:
+    """「固定字重」勾选后写回统一字重。"""
+    panel = PropertyPanel()
+    qtbot.addWidget(panel)
+    panel.show()
+    panel.set_layer(_make_layer())
+
+    assert not panel.fixed_weight_combo.isEnabled()
+    panel.fixed_weight_check.setChecked(True)
+    assert panel.fixed_weight_combo.isEnabled()
+    panel.fixed_weight_combo.setCurrentIndex(
+        panel.fixed_weight_combo.findData(700)
+    )
 
     emitted: list = []
     panel.layer_property_changed.connect(
@@ -982,7 +1040,58 @@ def test_fixed_font_size_applies_to_text_layer(qtbot) -> None:
     panel.source_text_edit.setPlainText("HELLO")
     panel.apply_source_text_btn.click()
 
-    assert ("l1", "font_size", 26.0) in emitted
+    assert ("l1", "font_weight", 700) in emitted
+
+
+def test_apply_fixed_to_all_button_follows_checkbox_state(qtbot) -> None:
+    """「应用到全部图片」只在至少勾选一项时可用，避免空点。"""
+    panel = PropertyPanel()
+    qtbot.addWidget(panel)
+    panel.show()
+    panel.set_layer(_make_layer())
+
+    assert not panel.apply_fixed_to_all_btn.isEnabled()
+
+    requested: list = []
+    panel.apply_fixed_to_all_requested.connect(
+        lambda *args: requested.append(args)
+    )
+    panel.apply_fixed_to_all_btn.click()
+    assert requested == []
+
+    panel.fixed_weight_check.setChecked(True)
+    assert panel.apply_fixed_to_all_btn.isEnabled()
+
+    panel.fixed_weight_check.setChecked(False)
+    assert not panel.apply_fixed_to_all_btn.isEnabled()
+
+
+def test_apply_fixed_to_all_emits_px_family_weight(qtbot) -> None:
+    """勾选后点按钮，发出（字号像素, 字体, 字重）三项供主窗口批量应用。"""
+    panel = PropertyPanel()
+    qtbot.addWidget(panel)
+    panel.show()
+    panel.set_layer(_make_layer())
+
+    panel.fixed_font_check.setChecked(True)
+    panel.fixed_font_spin.setValue(82)
+    panel.fixed_family_check.setChecked(True)
+    panel.fixed_family_combo.addItem("Arial（无衬线字体）", "Arial")
+    panel.fixed_family_combo.setCurrentIndex(
+        panel.fixed_family_combo.findData("Arial")
+    )
+    panel.fixed_weight_check.setChecked(True)
+    panel.fixed_weight_combo.setCurrentIndex(
+        panel.fixed_weight_combo.findData(600)
+    )
+
+    requested: list = []
+    panel.apply_fixed_to_all_requested.connect(
+        lambda *args: requested.append(args)
+    )
+    panel.apply_fixed_to_all_btn.click()
+
+    assert requested == [(82.0, "Arial", 600)]
 
 
 def test_fixed_font_size_off_keeps_estimated_size(qtbot) -> None:
@@ -1516,20 +1625,24 @@ def test_property_panel_add_button_enters_place_mode(qtbot) -> None:
 
 
 def test_property_panel_font_combo_is_searchable(qtbot) -> None:
-    """属性面板字体下拉同样支持输入搜索（包含匹配）。"""
-    from PySide6.QtCore import Qt
-    from PySide6.QtWidgets import QComboBox
+    """属性面板字体下拉展开后带搜索框，输入片段即筛选。"""
+    from src.ui.editor.widgets.font_combo import SearchableFontComboBox
 
     panel = PropertyPanel()
     qtbot.addWidget(panel)
     panel.show()
 
-    assert panel.font_family.isEditable()
-    assert panel.font_family.insertPolicy() == QComboBox.InsertPolicy.NoInsert
-    completer = panel.font_family.completer()
-    assert completer is not None
-    assert completer.filterMode() == Qt.MatchFlag.MatchContains
-    assert completer.caseSensitivity() == Qt.CaseSensitivity.CaseInsensitive
+    assert isinstance(panel.font_family, SearchableFontComboBox)
+    popup = panel.font_family._popup
+    assert popup._search.placeholderText()
+    popup.set_items([("宋体", "SimSun"), ("黑体", "SimHei")])
+    popup._apply_filter("宋")
+    visible = [
+        popup._list.item(row).text()
+        for row in range(popup._list.count())
+        if not popup._list.item(row).isHidden()
+    ]
+    assert visible == ["宋体"]
 
 
 def test_property_panel_font_family_echoes_layer_value(qtbot) -> None:
@@ -1595,3 +1708,175 @@ def test_fixed_font_off_keeps_estimated_family(qtbot) -> None:
     panel.apply_source_text_btn.click()
 
     assert not any(field == "font_family" for _, field, _ in emitted)
+
+
+def test_fixed_style_checkboxes_are_enabled_in_ocr_only_mode(qtbot) -> None:
+    """仅 OCR 阶段（还没有文字图层）三个固定开关也要能勾选。
+
+    这是批量 OCR 的主要场景：勾不上就等于整组功能不可用。
+    """
+    panel = PropertyPanel()
+    qtbot.addWidget(panel)
+    panel.show()
+    panel.set_ocr_region(_ocr_region(), None, {})
+
+    assert panel.fixed_font_check.isEnabled()
+    assert panel.fixed_family_check.isEnabled()
+    assert panel.fixed_weight_check.isEnabled()
+
+    panel.fixed_font_check.setChecked(True)
+    assert panel.fixed_font_check.isChecked()
+    assert panel.fixed_font_spin.isEnabled()
+
+    panel.fixed_family_check.setChecked(True)
+    assert panel.fixed_family_combo.isEnabled()
+
+    panel.fixed_weight_check.setChecked(True)
+    assert panel.fixed_weight_combo.isEnabled()
+    assert panel.apply_fixed_to_all_btn.isEnabled()
+
+
+def test_fixed_style_checkboxes_stay_enabled_after_ocr_update(qtbot) -> None:
+    """点过一次「更新 OCR 原文」后，刷新回显不能把勾选框重新禁用。"""
+    panel = PropertyPanel()
+    qtbot.addWidget(panel)
+    panel.show()
+    panel.set_ocr_region(_ocr_region(), None, {})
+    panel.fixed_weight_check.setChecked(True)
+
+    # 模拟主窗口刷新属性面板（ocr_preview_changed 链路会重新载入区域）
+    panel.set_ocr_region(_ocr_region(), None, {"font_weight": 700})
+
+    assert panel.fixed_weight_check.isEnabled()
+    assert panel.fixed_weight_check.isChecked(), "刷新后勾选状态要保留"
+
+
+def test_oversized_fixed_size_is_allowed_and_flagged(qtbot) -> None:
+    """超出文字框的固定字号仍然可以填，只标红提示，不强行拦截。
+
+    字体度量依赖本机已装字体，算得偏严时会拦住客户本来正确的值
+    （例如 80px 配 200px 宽的框）。客户也常会同时把框拉宽。
+    """
+    panel = PropertyPanel()
+    qtbot.addWidget(panel)
+    panel.show()
+    panel.set_layer(
+        _make_layer(
+            text="09:19",
+            box=TextBox(130, 1115, 196, 94),
+            style=TextStyle("Arial", 20, (255, 255, 255)),
+        )
+    )
+    panel.fixed_font_check.setChecked(True)
+
+    panel.fixed_font_spin.setValue(300)
+
+    assert panel.fixed_font_spin.value() == pytest.approx(300.0), (
+        "不能把用户填的字号静默改掉"
+    )
+    assert "超出" in panel.fixed_font_spin.toolTip()
+    assert "#d9534f" in panel.fixed_font_spin.styleSheet()
+
+
+def test_fixed_size_within_box_clears_warning(qtbot) -> None:
+    """填回框能容纳的字号后，红色提示消失。"""
+    panel = PropertyPanel()
+    qtbot.addWidget(panel)
+    panel.show()
+    panel.set_layer(
+        _make_layer(
+            text="09:19",
+            box=TextBox(130, 1115, 196, 94),
+            style=TextStyle("Arial", 20, (255, 255, 255)),
+        )
+    )
+    panel.fixed_font_check.setChecked(True)
+    panel.fixed_font_spin.setValue(300)
+    assert "#d9534f" in panel.fixed_font_spin.styleSheet()
+
+    panel.fixed_font_spin.setValue(10)
+
+    assert "#d9534f" not in panel.fixed_font_spin.styleSheet()
+    assert panel.fixed_font_spin.toolTip() == "固定字号，单位：像素（px）"
+
+
+def test_fixed_size_plus_button_increases_by_five(qtbot) -> None:
+    """「+」按钮按 5px 递增，能连续调大。"""
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+    from PySide6.QtWidgets import QToolButton
+
+    panel = PropertyPanel()
+    qtbot.addWidget(panel)
+    panel.show()
+    panel.set_layer(_make_layer())
+    panel.fixed_font_check.setChecked(True)
+    panel.fixed_font_spin.setValue(80)
+
+    plus = next(
+        button for button in panel.findChildren(QToolButton) if button.text() == "+"
+    )
+    QTest.mouseClick(plus, Qt.MouseButton.LeftButton)
+    assert panel.fixed_font_spin.value() == pytest.approx(85.0)
+    QTest.mouseClick(plus, Qt.MouseButton.LeftButton)
+    assert panel.fixed_font_spin.value() == pytest.approx(90.0)
+
+
+def test_changing_fixed_size_previews_immediately(qtbot) -> None:
+    """调字号立刻发预览信号，不必先点「更新 OCR 原文」。"""
+    panel = PropertyPanel()
+    qtbot.addWidget(panel)
+    panel.show()
+    panel.set_layer(_make_layer())
+
+    emitted: list = []
+    panel.layer_property_changed.connect(
+        lambda region_id, field, value: emitted.append((field, value))
+    )
+    panel.fixed_font_check.setChecked(True)
+    emitted.clear()
+
+    panel.fixed_font_spin.setValue(82)
+
+    sizes = [value for field, value in emitted if field == "font_size"]
+    assert sizes, "改字号应立即预览"
+    assert sizes[-1] == pytest.approx(82.0)
+
+
+def test_fixed_scale_does_not_preview_when_unchecked(qtbot) -> None:
+    """三个开关都没勾选时，改倍数不应触发预览。"""
+    panel = PropertyPanel()
+    qtbot.addWidget(panel)
+    panel.show()
+    panel.set_layer(_make_layer())
+
+    emitted: list = []
+    panel.layer_property_changed.connect(
+        lambda region_id, field, value: emitted.append((field, value))
+    )
+    panel.fixed_font_spin.setValue(0.6)
+
+    assert not [field for field, _ in emitted if field == "font_size"]
+
+
+def test_resizing_box_rechecks_fixed_size_overflow(qtbot) -> None:
+    """把框拉宽到能放下后，超框提示随之消失。"""
+    panel = PropertyPanel()
+    qtbot.addWidget(panel)
+    panel.show()
+    panel.set_layer(
+        _make_layer(
+            text="09:19",
+            box=TextBox(130, 1115, 60, 30),
+            style=TextStyle("Arial", 20, (255, 255, 255)),
+        )
+    )
+    panel.fixed_font_check.setChecked(True)
+    panel.fixed_font_spin.setValue(80)
+    assert "#d9534f" in panel.fixed_font_spin.styleSheet()
+
+    panel.width_spin.setValue(500)
+    panel.height_spin.setValue(200)
+
+    assert "#d9534f" not in panel.fixed_font_spin.styleSheet()
+    assert panel._current_box.width == pytest.approx(500)

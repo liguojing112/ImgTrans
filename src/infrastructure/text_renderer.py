@@ -301,6 +301,10 @@ class QtBasicTextLayoutAdapter:
             if size < base_size + max(1.0, base_size * 0.12):
                 size, overflow, stretch = base_size, base_overflow, 100
         else:
+            # 显式字号一律按用户填的像素原样使用，绝不静默改小。
+            # 「固定字号」的用途就是把一批图统一成 80~85px；
+            # 自动收拢会让客户填的值变成别的数，反而破坏一致性。
+            # 放不下时只标 overflow（界面据此提示），由用户决定是否拉宽框。
             size = layer.style.font_size
             stretch = layer.style.font_stretch
             overflow = not fits(size, stretch)
@@ -2238,6 +2242,30 @@ def _measure_ink_height(
         current = current + 1 if flag else 0
         longest = max(longest, current)
     return float(longest) if longest >= 2 else None
+
+
+def max_font_size_for_layer(layer: TextLayer, text: str) -> float:
+    """该文字框在当前字体/内容下能容纳的最大字号（像素）。
+
+    用于界面限位：字号超过这个值就会被框裁掉，只画出一小块笔画。
+
+    必须和 auto_fit 用同一套判定：auto_fit 会尝试多个横向压缩档位
+    （100/87/75/67%），只按 100% 算会把上限算得比自动适配还小，
+    用户就会遇到「自动能放 58px、手动却只能填 39px」的矛盾。
+    """
+    probe = replace(layer, style=replace(layer.style, auto_fit=False))
+    upper = max(6.0, layer.box.height * 6.0)
+    best = 6.0
+    for stretch in _AUTO_FONT_STRETCHES:
+        size, _ = fit_font_size(
+            6,
+            upper,
+            lambda candidate, stretch=stretch: _text_fits(
+                probe, text, candidate, stretch
+            ),
+        )
+        best = max(best, size)
+    return max(1.0, float(best))
 
 
 def _text_fits(

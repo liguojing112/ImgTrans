@@ -268,3 +268,60 @@ def test_picture_selection_survives_scene_rebuild() -> None:
         QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Delete, Qt.KeyboardModifier.NoModifier)
     )
     assert deleted == ["picture-1"]
+
+
+def test_picture_layer_blocks_canvas_pan_so_drag_moves_layer() -> None:
+    """在剥离出的图片上按左键必须算命中图层，否则视图会平移整张画布（看起来像移动原图）。"""
+    from src.domain.composition import PictureLayer
+
+    QApplication.instance() or QApplication(["picture-hit-test"])
+    scene = EditorScene()
+    scene.set_document(_document())
+    picture = PictureLayer(
+        "picture-1", bytes([220, 30, 30] * (20 * 10)), 20, 10, 60, 40
+    )
+    scene.set_picture_layers([picture])
+
+    assert scene.interactive_item_at(QPointF(60, 40)) is not None, (
+        "图层覆盖处应返回图元，视图才不会把它当成空白平移画布"
+    )
+    assert scene.interactive_item_at(QPointF(5, 5)) is None
+
+    # 隐藏（成品预览模式）时不应再拦截平移
+    scene.set_picture_items_visible(False)
+    assert scene.interactive_item_at(QPointF(60, 40)) is None
+
+
+def test_copy_paste_keys_emit_picture_signals() -> None:
+    """选中图片图层后 Ctrl+C / Ctrl+V 发出复制粘贴请求；未选中时不发。"""
+    from PySide6.QtGui import QKeyEvent
+
+    from src.domain.composition import PictureLayer
+
+    QApplication.instance() or QApplication(["picture-copy-paste-test"])
+    scene = EditorScene()
+    scene.set_document(_document())
+    picture = PictureLayer(
+        "picture-1", bytes([220, 30, 30] * (10 * 10)), 10, 10, 50, 40
+    )
+    scene.set_picture_layers([picture])
+
+    copied: list[str] = []
+    pasted: list[str] = []
+    scene.picture_copy_requested.connect(copied.append)
+    scene.picture_paste_requested.connect(lambda: pasted.append("paste"))
+
+    def key_press(key, modifier) -> None:
+        scene.keyPressEvent(
+            QKeyEvent(QEvent.Type.KeyPress, key, modifier)
+        )
+
+    key_press(Qt.Key.Key_C, Qt.KeyboardModifier.ControlModifier)
+    key_press(Qt.Key.Key_V, Qt.KeyboardModifier.ControlModifier)
+    assert (copied, pasted) == ([], []), "未选中时不应触发复制粘贴"
+
+    scene.select_picture("picture-1")
+    key_press(Qt.Key.Key_C, Qt.KeyboardModifier.ControlModifier)
+    key_press(Qt.Key.Key_V, Qt.KeyboardModifier.ControlModifier)
+    assert copied == ["picture-1"]
+    assert pasted == ["paste"]

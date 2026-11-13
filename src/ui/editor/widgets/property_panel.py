@@ -6,7 +6,8 @@ set_layer 时使用 blockSignals 避免循环同步。
 
 from __future__ import annotations
 
-from math import cos, radians, sin
+from dataclasses import replace
+from math import cos, floor, radians, sin
 
 from PySide6.QtCore import QEvent, Qt, Signal
 from PySide6.QtWidgets import (
@@ -38,11 +39,12 @@ from src.domain.layout import (
     TextAlignment,
     TextLayer,
     TextBox,
+    TextStyle,
     VerticalAlignment,
 )
 from src.domain.language import SUPPORTED_LANGUAGE_CODES
 from src.ui.color_picker_dialog import pick_color
-from src.ui.editor.widgets.translate_controls import translation_font_choices
+from src.ui.editor.widgets.font_combo import SearchableFontComboBox
 from src.ui.languages import LANGUAGE_LABELS
 
 _DEBOUNCE_MS = 300
@@ -64,6 +66,8 @@ class PropertyPanel(QFrame):
     # OCR 尚未生成文字图层时，仍允许编辑几何和文字样式；由 EditorPage 暂存，
     # 后续翻译生成图层时应用这些设置。
     ocr_property_changed = Signal(str, str, object)
+    # 把固定字号/字体/字重应用到全部图片：(字号px, 字体族, 字重)
+    apply_fixed_to_all_requested = Signal(object, object, object)
     # 格式刷：(目标 region_id, 来源 region_id, 样式快照 dict)
     style_brush_applied = Signal(str, str, dict)
     # 格式刷框选模式：True 时画布应进入拖拽框选状态，False 时退出
@@ -97,6 +101,7 @@ class PropertyPanel(QFrame):
         self._image_w = 99999
         self._image_h = 99999
         self._current_box: TextBox | None = None
+        self._current_layer: TextLayer | None = None
         self._last_path_mode = "straight"
         self._brush_armed = False
         self._brush_source_id: str | None = None
@@ -143,20 +148,28 @@ class PropertyPanel(QFrame):
         self.source_text_edit.setMaximumHeight(56)
         self.apply_source_text_btn = QPushButton("更新 OCR 原文")
         self.apply_source_text_btn.clicked.connect(self._on_source_text_changed)
-        # 批量 OCR 后逐张改原文时，勾选它统一按同一个字号写回，避免每张图字号不一
+        # 统一字号按「绝对像素」：客户的实际需求是把一批图里同一位置的
+        # 数字（多在 80px 以上，个别偏小）统统改成 80~85px，看起来一样大。
+        # 倍数在框高不同的图之间会得到不同字号，反而做不到「看起来一样」。
         self.fixed_font_check = QCheckBox("固定字号")
         self.fixed_font_check.setToolTip(
-            "勾选后点「更新 OCR 原文」按此字号统一设置，不跟随各图识别出的字号"
+            "勾选后按这个字号（像素）统一设置，不跟随各图自动识别的字号"
         )
-        self.fixed_font_spin = _dspin(1, 500, "")
+        self.fixed_font_spin = _dspin(6, 400, " px")
         # 隐藏上下箭头，避免窄输入框里数字被箭头挤掉（与其它数值框一致）
         self.fixed_font_spin.setButtonSymbols(
             QAbstractSpinBox.ButtonSymbols.NoButtons
         )
         self.fixed_font_spin.setDecimals(0)
-        self.fixed_font_spin.setValue(40)
+        self.fixed_font_spin.setSingleStep(5)
+        self.fixed_font_spin.setValue(80)
         self.fixed_font_spin.setToolTip("固定字号，单位：像素（px）")
         self.fixed_font_spin.setEnabled(False)
+        # 打字后立即生效：默认要等回车/失焦才写回，用户会以为输入无效
+        self.fixed_font_spin.setKeyboardTracking(False)
+        self.fixed_font_spin.valueChanged.connect(
+            self._on_fixed_font_value_changed
+        )
         self.fixed_font_check.toggled.connect(self._on_fixed_font_toggled)
         source_action_row = QHBoxLayout()
         source_action_row.setContentsMargins(0, 0, 0, 0)
@@ -165,7 +178,7 @@ class PropertyPanel(QFrame):
         source_action_row.addWidget(
             _wrap_spin(
                 self.fixed_font_spin,
-                width=52,
+                width=56,
                 label="固定字号",
                 button_size=20,
             )
@@ -177,29 +190,55 @@ class PropertyPanel(QFrame):
         self.fixed_family_check.setToolTip(
             "勾选后点「更新 OCR 原文」按此字体统一设置，不跟随自动匹配/原图匹配"
         )
-        self.fixed_family_combo = QComboBox()
-        self.fixed_family_combo.setMinimumWidth(180)
-        self.fixed_family_combo.setEditable(True)
-        self.fixed_family_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self.fixed_family_combo = SearchableFontComboBox()
         self.fixed_family_combo.setToolTip("固定字体；可直接输入字体名搜索")
-        fixed_family_completer = self.fixed_family_combo.completer()
-        if fixed_family_completer is not None:
-            fixed_family_completer.setFilterMode(Qt.MatchFlag.MatchContains)
-            fixed_family_completer.setCaseSensitivity(
-                Qt.CaseSensitivity.CaseInsensitive
-            )
-        for display, family in translation_font_choices():
-            self.fixed_family_combo.addItem(display, family)
+        self.fixed_family_combo.populate()
         self.fixed_family_combo.setEnabled(False)
-        self.fixed_family_combo.lineEdit().editingFinished.connect(
-            self._restore_fixed_family_edit_text
-        )
         self.fixed_family_check.toggled.connect(self._on_fixed_family_toggled)
+        self.fixed_family_combo.currentIndexChanged.connect(
+            self._on_fixed_family_value_changed
+        )
         source_family_row = QHBoxLayout()
         source_family_row.setContentsMargins(0, 0, 0, 0)
         source_family_row.setSpacing(4)
         source_family_row.addWidget(self.fixed_family_check)
         source_family_row.addWidget(self.fixed_family_combo, 1)
+
+        # 固定字重：一批图的数字/文字通常字重一致，逐张改太慢
+        self.fixed_weight_check = QCheckBox("固定字重")
+        self.fixed_weight_check.setToolTip(
+            "勾选后写回统一字重，不跟随各图自动估计的字重"
+        )
+        self.fixed_weight_combo = QComboBox()
+        for label, value in (
+            ("正常 400", 400),
+            ("半粗 600", 600),
+            ("粗体 700", 700),
+        ):
+            self.fixed_weight_combo.addItem(label, value)
+        self.fixed_weight_combo.setEnabled(False)
+        self.fixed_weight_combo.currentIndexChanged.connect(
+            lambda _index: self._preview_fixed_style()
+        )
+        self.fixed_weight_check.toggled.connect(
+            self._on_fixed_weight_toggled
+        )
+        source_weight_row = QHBoxLayout()
+        source_weight_row.setContentsMargins(0, 0, 0, 0)
+        source_weight_row.setSpacing(4)
+        source_weight_row.addWidget(self.fixed_weight_check)
+        source_weight_row.addWidget(self.fixed_weight_combo, 1)
+
+        # 一次把这批图里同名区域全部改成上面的固定字号/字体/字重
+        self.apply_fixed_to_all_btn = QPushButton("应用到全部图片")
+        self.apply_fixed_to_all_btn.setToolTip(
+            "把当前勾选的固定字号 / 字体 / 字重应用到工作台里所有图片的该区域"
+        )
+        self.apply_fixed_to_all_btn.clicked.connect(
+            self._on_apply_fixed_to_all
+        )
+        # 面板打开时没有当前区域：按钮要等选了区域才可用
+        self._refresh_apply_all_enabled()
 
         source_text_widget = QWidget()
         source_text_layout = QVBoxLayout(source_text_widget)
@@ -208,6 +247,8 @@ class PropertyPanel(QFrame):
         source_text_layout.addWidget(self.source_text_edit)
         source_text_layout.addLayout(source_action_row)
         source_text_layout.addLayout(source_family_row)
+        source_text_layout.addLayout(source_weight_row)
+        source_text_layout.addWidget(self.apply_fixed_to_all_btn)
         source_text_layout.addWidget(self.apply_source_text_btn)
 
         self.translated_text_edit = QPlainTextEdit()
@@ -317,20 +358,8 @@ class PropertyPanel(QFrame):
             widget.valueChanged.connect(self._on_path_changed)
 
         # ===== 文字样式 =====
-        self.font_family = QComboBox()
-        # 字体太多，输入字体名（可只打中间部分）即筛选；与译文字体下拉一致
-        self.font_family.setEditable(True)
-        self.font_family.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
-        self.font_family.setToolTip("可直接输入字体名搜索")
-        font_completer = self.font_family.completer()
-        if font_completer is not None:
-            font_completer.setFilterMode(Qt.MatchFlag.MatchContains)
-            font_completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
-        for display, family in translation_font_choices():
-            self.font_family.addItem(display, family)
-        self.font_family.lineEdit().editingFinished.connect(
-            self._restore_font_edit_text
-        )
+        self.font_family = SearchableFontComboBox()
+        self.font_family.populate()
         self.font_family.currentIndexChanged.connect(
             lambda: self._on_field_changed(
                 "font_family", self.font_family.currentData()
@@ -777,32 +806,173 @@ class PropertyPanel(QFrame):
         text = self.source_text_edit.toPlainText().strip()
         if text:
             self.source_text_changed.emit(self._region_id, text)
-        # 「固定字号」勾选时跟着写回统一字号（固定值优先生效，关闭自动适配）
-        fixed_size = self.fixed_font_size()
+        self._emit_fixed_style()
+
+    def _emit_fixed_style(self) -> None:
+        """把勾选的固定字号/字体/字重写回当前区域。"""
+        if self._region_id is None:
+            return
         signal = (
             self.ocr_property_changed
             if self._ocr_editing
             else self.layer_property_changed
         )
+        # 固定字号直接就是像素值，原样写回
+        fixed_size = self.fixed_font_size()
         if fixed_size is not None:
             signal.emit(self._region_id, "font_size", fixed_size)
         fixed_family = self.fixed_font_family()
         if fixed_family is not None:
             signal.emit(self._region_id, "font_family", fixed_family)
+        fixed_weight = self.fixed_font_weight()
+        if fixed_weight is not None:
+            signal.emit(self._region_id, "font_weight", fixed_weight)
+
+    def _on_apply_fixed_to_all(self) -> None:
+        """把当前固定设置应用到全部图片的同名区域。"""
+        if not (
+            self.fixed_font_check.isChecked()
+            or self.fixed_family_check.isChecked()
+            or self.fixed_weight_check.isChecked()
+        ):
+            QMessageBox.information(
+                self,
+                "应用到全部图片",
+                "请先勾选「固定字号」「固定字体」或「固定字重」中的至少一项。",
+            )
+            return
+        self.apply_fixed_to_all_requested.emit(
+            self.fixed_font_size_px(),
+            self.fixed_font_family(),
+            self.fixed_font_weight(),
+        )
+
+    def _check_fixed_size_overflow(self) -> bool:
+        """固定字号是否超出当前框；超了返回 True 并给出提示。
+
+        只提示不拦截：字体度量依赖本机已安装字体，算得偏严时会拦住
+        客户本来正确的值（例如 80px 配 200px 宽的框）；而且客户常常
+        会同时把文字框拉宽，硬上限反而挡住正常操作。
+        """
+        box = self._current_box
+        if box is None:
+            return False
+        text = (
+            self.text_edit.toPlainText()
+            or self.source_text_edit.toPlainText()
+        ).strip()
+        size = self.fixed_font_size()
+        if not text or size is None:
+            return False
+        layer = self._current_layer
+        family = self.fixed_font_family() or (
+            self.font_family.currentData() if self.font_family.count() else None
+        )
+        if layer is None:
+            layer = TextLayer(
+                "probe", text, box, TextStyle(str(family or "Arial"), 10, (0, 0, 0))
+            )
+        else:
+            layer = replace(layer, text=text, box=box)
+        if family:
+            layer = replace(
+                layer, style=replace(layer.style, font_family=str(family))
+            )
+        # 延迟导入：属性面板被大量 UI 模块引用，顶层导入会拖慢启动
+        from src.infrastructure.text_renderer import max_font_size_for_layer
+
+        try:
+            capacity = max_font_size_for_layer(layer, text)
+        except Exception:  # noqa: BLE001 - 度量失败时不打扰用户
+            return False
+        over = size > capacity + 0.5
+        if over:
+            self.fixed_font_spin.setToolTip(
+                f"当前 {size:.0f}px 超出该文字框（约可放 {capacity:.0f}px），"
+                "建议先把「宽度 / 高度」调大，否则文字会被裁掉"
+            )
+            self.fixed_font_spin.setStyleSheet("QDoubleSpinBox { border: 1px solid #d9534f; }")
+        else:
+            self.fixed_font_spin.setToolTip("固定字号，单位：像素（px）")
+            self.fixed_font_spin.setStyleSheet("")
+        return over
+
+    def _on_fixed_font_value_changed(self, _value: float) -> None:
+        """改字号立刻刷新画布预览，不必先点「更新 OCR 原文」。"""
+        if self._suppress_signals:
+            return
+        self._check_fixed_size_overflow()
+        self._preview_fixed_style()
+
+    def _on_fixed_family_value_changed(self, _index: int) -> None:
+        """换字体后容量会变，重新检查是否超出框。"""
+        if self._suppress_signals:
+            return
+        self._check_fixed_size_overflow()
+        self._preview_fixed_style()
+
+    def _preview_fixed_style(self) -> None:
+        """把当前固定设置实时推到画布；未勾选时不动。"""
+        if self._suppress_signals or self._region_id is None:
+            return
+        if not (
+            self.fixed_font_check.isChecked()
+            or self.fixed_family_check.isChecked()
+            or self.fixed_weight_check.isChecked()
+        ):
+            return
+        self._emit_fixed_style()
 
     def _on_fixed_font_toggled(self, checked: bool) -> None:
         self.fixed_font_spin.setEnabled(checked)
-        if checked and self.font_size_spin.value() > 0:
-            # 以当前图层字号为起点，方便直接微调
-            self.fixed_font_spin.setValue(self.font_size_spin.value())
+        self._refresh_apply_all_enabled()
+        if checked and self._current_box is not None:
+            # 以当前区域的字号为起点，方便直接微调。只有当前值偏小时才抬高到
+            # 默认值：客户的场景是「个别图字号偏小，统一拉到 80 以上」。
+            current_size = self.font_size_spin.value()
+            if current_size > 0 and current_size >= self.fixed_font_spin.value():
+                self.fixed_font_spin.setValue(round(current_size))
+        if checked:
+            self._check_fixed_size_overflow()
+        self._preview_fixed_style()
 
-    def fixed_font_size(self) -> float | None:
+    def _on_fixed_weight_toggled(self, checked: bool) -> None:
+        self.fixed_weight_combo.setEnabled(checked)
+        self._refresh_apply_all_enabled()
+        if checked:
+            current = self.font_weight_combo.currentData()
+            index = self.fixed_weight_combo.findData(current)
+            if index >= 0:
+                self.fixed_weight_combo.setCurrentIndex(index)
+        self._preview_fixed_style()
+
+    def _refresh_apply_all_enabled(self) -> None:
+        enabled = (
+            self.fixed_font_check.isChecked()
+            or self.fixed_family_check.isChecked()
+            or self.fixed_weight_check.isChecked()
+        )
+        self.apply_fixed_to_all_btn.setEnabled(enabled)
+
+    def fixed_font_size_px(self) -> float | None:
+        """固定字号（绝对像素），未勾选时返回 None。"""
         if not self.fixed_font_check.isChecked():
             return None
         return float(self.fixed_font_spin.value())
 
+    def fixed_font_weight(self) -> int | None:
+        if not self.fixed_weight_check.isChecked():
+            return None
+        value = self.fixed_weight_combo.currentData()
+        return int(value) if value is not None else None
+
+    def fixed_font_size(self) -> float | None:
+        """当前区域的固定字号像素值。"""
+        return self.fixed_font_size_px()
+
     def _on_fixed_family_toggled(self, checked: bool) -> None:
         self.fixed_family_combo.setEnabled(checked)
+        self._refresh_apply_all_enabled()
         if checked:
             # 以当前图层字体为起点，方便直接沿用
             current = self.font_family.currentData()
@@ -820,22 +990,6 @@ class PropertyPanel(QFrame):
         family = self.fixed_family_combo.currentData()
         return family if isinstance(family, str) and family else None
 
-    def _restore_fixed_family_edit_text(self) -> None:
-        text = self.fixed_family_combo.currentText().strip()
-        match = (
-            self.fixed_family_combo.findText(text, Qt.MatchFlag.MatchFixedString)
-            if text
-            else -1
-        )
-        if match >= 0:
-            if match != self.fixed_family_combo.currentIndex():
-                self.fixed_family_combo.setCurrentIndex(match)
-            return
-        index = self.fixed_family_combo.currentIndex()
-        if index >= 0:
-            self.fixed_family_combo.setEditText(
-                self.fixed_family_combo.itemText(index)
-            )
 
     def _on_translated_text_changed(self) -> None:
         if self._region_id is None:
@@ -1076,6 +1230,7 @@ class PropertyPanel(QFrame):
 
             box = layer.box
             self._current_box = box
+            self._current_layer = layer
             self.x_spin.setValue(box.center_x)
             self.y_spin.setValue(box.center_y)
             self.width_spin.setValue(box.width)
@@ -1142,6 +1297,8 @@ class PropertyPanel(QFrame):
             self._update_color_buttons()
         finally:
             self._suppress_signals = False
+        # 框/内容/字体都就位后再检查固定字号是否超出新区域
+        self._check_fixed_size_overflow()
 
         # 格式刷：选中新的图层时自动应用已捕获的样式；画布点击路径允许
         # 重击同一图层再次套用（用户主动点击=明确刷取意图，与框选重复
@@ -1181,6 +1338,7 @@ class PropertyPanel(QFrame):
         self._set_fields_enabled(False)
         self.source_text_edit.setEnabled(True)
         self.apply_source_text_btn.setEnabled(True)
+        self._refresh_apply_all_enabled()
         self.translated_text_edit.setEnabled(True)
         if translation_unit is not None and translation_unit.translated_text:
             self.translated_text_edit.setPlainText(
@@ -1263,6 +1421,8 @@ class PropertyPanel(QFrame):
         self._set_ocr_editable_fields(
             True, disable_actions=translation_unit is None
         )
+        self._current_layer = None
+        self._check_fixed_size_overflow()
         self._maybe_apply_brush_to(self._region_id)
 
     def _set_ocr_editable_fields(
@@ -1285,8 +1445,29 @@ class PropertyPanel(QFrame):
             self.shadow_opacity_spin, self.shadow_color_button,
             # OCR 阶段也能用格式刷：把当前区域的样式刷给其它识别区域
             self.format_brush_btn,
+            # 固定字号/字体/字重与「应用到全部图片」正是为批量 OCR 场景准备的，
+            # 必须在仅 OCR 模式下也保持可勾选（否则整组控件只剩灰框）
+            self.fixed_font_check, self.fixed_family_check,
+            self.fixed_weight_check,
         ):
             widget.setEnabled(enabled)
+        # 子控件跟随自己的勾选框，不要被上面的整体启用覆盖
+        self.fixed_font_spin.setEnabled(
+            enabled and self.fixed_font_check.isChecked()
+        )
+        self.fixed_family_combo.setEnabled(
+            enabled and self.fixed_family_check.isChecked()
+        )
+        self.fixed_weight_combo.setEnabled(
+            enabled and self.fixed_weight_check.isChecked()
+        )
+        self.apply_fixed_to_all_btn.setEnabled(
+            enabled and (
+                self.fixed_font_check.isChecked()
+                or self.fixed_family_check.isChecked()
+                or self.fixed_weight_check.isChecked()
+            )
+        )
         if not disable_actions:
             return
         for widget in (
@@ -1372,25 +1553,16 @@ class PropertyPanel(QFrame):
             index = self.font_family.count() - 1
         self.font_family.setCurrentIndex(index)
 
-    def _restore_font_edit_text(self) -> None:
-        """可编辑字体下拉：手输无效字体名后恢复为当前选中项。"""
-        text = self.font_family.currentText().strip()
-        match = (
-            self.font_family.findText(text, Qt.MatchFlag.MatchFixedString)
-            if text
-            else -1
-        )
-        if match >= 0:
-            if match != self.font_family.currentIndex():
-                self.font_family.setCurrentIndex(match)
-            return
-        index = self.font_family.currentIndex()
-        if index >= 0:
-            self.font_family.setEditText(self.font_family.itemText(index))
 
     def _on_field_changed(self, field: str, value: object) -> None:
         if self._suppress_signals or self._region_id is None:
             return
+        # 框变了，容量跟着变：同步本地框并重新检查固定字号是否超框
+        if field in ("width", "height", "center_x", "center_y", "rotation_degrees"):
+            box = self._current_box
+            if box is not None:
+                self._current_box = replace(box, **{field: float(value)})
+                self._check_fixed_size_overflow()
         self._pending_field = field
         self._pending_value = value
         self._pending_region_id = self._region_id
@@ -1495,8 +1667,27 @@ class PropertyPanel(QFrame):
             self.manual_source_language, self.manual_target_language,
             self.manual_translate_btn, self.retranslate_btn,
             self.keep_original_btn, self.confirm_review_btn,
+            self.fixed_font_check, self.fixed_family_check,
+            self.fixed_weight_check,
         ):
             w.setEnabled(enabled)
+        # 子控件跟随自己的勾选框，不要被整体启用状态覆盖
+        self.fixed_font_spin.setEnabled(
+            enabled and self.fixed_font_check.isChecked()
+        )
+        self.fixed_family_combo.setEnabled(
+            enabled and self.fixed_family_check.isChecked()
+        )
+        self.fixed_weight_combo.setEnabled(
+            enabled and self.fixed_weight_check.isChecked()
+        )
+        self.apply_fixed_to_all_btn.setEnabled(
+            enabled and (
+                self.fixed_font_check.isChecked()
+                or self.fixed_family_check.isChecked()
+                or self.fixed_weight_check.isChecked()
+            )
+        )
 
     def _clear_fields(self) -> None:
         self._suppress_signals = True
@@ -1569,13 +1760,38 @@ def _wrap_spin(
         smaller.setFixedSize(button_size, button_size)
     smaller.setText("−")
     smaller.setToolTip(f"减小{label}")
-    smaller.clicked.connect(spin.stepDown)
+    smaller.clicked.connect(
+        lambda: _step_with_limit_feedback(spin, forward=False)
+    )
     hbox.addWidget(smaller)
     larger = QToolButton()
     if button_size:
         larger.setFixedSize(button_size, button_size)
     larger.setText("+")
     larger.setToolTip(f"增大{label}")
-    larger.clicked.connect(spin.stepUp)
+    # 到上限时 stepUp 会静默不动，看上去像按钮坏了；这里显式提示原因
+    larger.clicked.connect(
+        lambda: _step_with_limit_feedback(spin, forward=True)
+    )
     hbox.addWidget(larger)
     return container
+
+
+def _step_with_limit_feedback(spin: QAbstractSpinBox, forward: bool) -> None:
+    """±步进；已经顶到上下限时给出可见提示，而不是毫无反应。"""
+    before = spin.value()
+    spin.stepUp() if forward else spin.stepDown()
+    if spin.value() != before:
+        return
+    limit = spin.maximum() if forward else spin.minimum()
+    unit = "×" if spin.suffix() == "×" else ""
+    window = spin.window()
+    message = (
+        f"已到上限 {limit:g}{unit}：再大就超出文字框，字会被裁掉"
+        if forward
+        else f"已到下限 {limit:g}{unit}"
+    )
+    status = getattr(window, "statusBar", None)
+    if callable(status):
+        status().showMessage(message, 5000)
+    spin.setToolTip(message)

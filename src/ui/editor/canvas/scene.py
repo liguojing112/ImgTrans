@@ -8,6 +8,7 @@ from PySide6.QtGui import (
     QColor,
     QImage,
     QKeyEvent,
+    QKeySequence,
     QPainter,
     QPainterPath,
     QPen,
@@ -56,6 +57,8 @@ class EditorScene(QGraphicsScene):
     picture_selected = Signal(str)
     picture_moved = Signal(str, float, float)
     picture_delete_requested = Signal(str)
+    picture_copy_requested = Signal(str)
+    picture_paste_requested = Signal()
 
     def __init__(self, readonly: bool = False) -> None:
         super().__init__()
@@ -99,7 +102,14 @@ class EditorScene(QGraphicsScene):
         return self._manual_selection_enabled or self._mask_brush_mode is not None
 
     def interactive_item_at(self, scene_pos) -> object | None:
-        """返回该位置可交互的文字图层/水印（用于区分左键编辑与画布平移）。"""
+        """返回该位置可交互的图片图层/文字图层/水印（用于区分左键编辑与画布平移）。
+
+        图片图层必须参与命中：否则在剥离出来的元素上按下左键会被视图当成
+        空白处，拖动时平移的是整张画布，看起来像在移动原图。
+        """
+        for item in self._picture_items.values():
+            if item.isVisible() and item.contains(item.mapFromScene(scene_pos)):
+                return item
         for item in self._watermark_items.values():
             if item.contains(item.mapFromScene(scene_pos)):
                 return item
@@ -503,7 +513,25 @@ class EditorScene(QGraphicsScene):
 
     # —— QGraphicsScene 重写 ——
 
+    def _selected_picture_layer_id(self) -> str | None:
+        for layer_id, item in self._picture_items.items():
+            if item.isSelected() and item.isVisible():
+                return layer_id
+        return None
+
     def keyPressEvent(self, event: QKeyEvent) -> None:
+        # 复制/粘贴选中的图片图层（正在编辑文字时焦点在输入框，不会走到这里）
+        if event.matches(QKeySequence.StandardKey.Copy):
+            layer_id = self._selected_picture_layer_id()
+            if layer_id is not None:
+                self.picture_copy_requested.emit(layer_id)
+                event.accept()
+                return
+        if event.matches(QKeySequence.StandardKey.Paste):
+            if self._selected_picture_layer_id() is not None:
+                self.picture_paste_requested.emit()
+                event.accept()
+                return
         # Delete 键删除选中的文字图层（正在编辑文字时焦点在输入框，不会走到这里）
         if event.key() == Qt.Key.Key_Delete:
             for item in self._picture_items.values():
