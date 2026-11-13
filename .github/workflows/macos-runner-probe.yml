@@ -4,6 +4,9 @@ name: macOS runner probe
 # 用法：Actions 页面手动触发，或 gh workflow run macos-runner-probe.yml
 
 on:
+  push:
+    paths:
+      - ".github/workflows/macos-runner-probe.yml"
   workflow_dispatch:
 
 jobs:
