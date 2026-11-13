@@ -419,10 +419,11 @@ def _fill_grain_matched_background(
     samples = high_frequency[outer_band]
     median = float(np.median(samples))
     robust = 1.4826 * float(np.median(np.abs(samples - median)))
-    # std 上限：MAD 在「颗粒很细 + JPEG 平滑」的区域会低估（实测同一张图
-    # 有的块 0.5、有的块 4.2），只取 MAD 会让原本有颗粒的皮肤/渐变区变哑。
-    # 两者取中间：MAD 压住强结构造成的虚高，std 兜住 MAD 的低估。
-    grain = 0.5 * (robust + float(samples.std()))
+    # MAD 衡量环带里「大多数像素」的起伏，std 会被少量强结构（渐变边缘、
+    # 相邻笔画）抬高。取两者较小值：宁可少补一点颗粒，也不要把平滑背景
+    # 弄脏——实测橙底标语，环带 std 11.3 但剔除文字后只有 7.8，而填充区
+    # 本来就是一整片平滑渐变，照 std 补完是一层脏噪点。
+    grain = min(robust, float(samples.std()))
 
     # 底色用 TELEA 扩散，而不是「就近取最近背景色」。
     #

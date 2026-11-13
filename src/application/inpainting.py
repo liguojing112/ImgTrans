@@ -110,20 +110,14 @@ class BuildEraseMask:
                 if solid:
                     # 这些区域已判定为高对比、文字与底色可分离，
                     # 放开横排彩色标签分支（否则整个标签会被当成文字擦掉）。
-                    try:
-                        masks.append(
-                            rasterize_text(
-                                document,
-                                solid,
-                                self._expansion,
-                                allow_wide_label=True,
-                            )
+                    masks.append(
+                        _rasterize_text_with_adaptive_expansion(
+                            document,
+                            rasterize_text,
+                            solid,
+                            self._expansion,
                         )
-                    except TypeError:
-                        # 不接受该参数的栅格化实现退回原调用
-                        masks.append(
-                            rasterize_text(document, solid, self._expansion)
-                        )
+                    )
                 if textured:
                     masks.append(
                         self._rasterizer.rasterize(
@@ -529,6 +523,71 @@ class RepairSelection:
         cancel = getattr(self._inpainting, "cancel", None)
         if cancel is not None:
             cancel()
+
+
+def _rasterize_text_with_adaptive_expansion(
+    document: ImageDocument,
+    rasterize_text,
+    polygons: tuple[tuple[tuple[float, float], ...], ...],
+    expansion: int,
+) -> EraseMask:
+    """按「字形有没有抠干净」决定是否把扩边加到 +2。
+
+    带白色描边的粗体字（橙底标语、按钮文字）会被描边把笔画撑宽，
+    2px 扩边只擦到字心，字形外那一圈抗锯齿过渡留在底色上，就是一片
+    白色碎屑（实测橙底白字：覆盖 69.6%、11 处亮块；扩到 4px 后 100%、
+    0 处）。但不能无脑对所有区域加——紧凑标签上会多擦掉一圈底色
+    （实测黄标签覆盖率 45% → 47%）。
+
+    所以先按默认扩边生成，检查框内「明显亮于底色」的像素还剩多少
+    没被覆盖；漏得多说明描边没吃到，再补 2px 重做。
+    """
+    import numpy as np
+
+    def build(extra: int):
+        try:
+            return rasterize_text(
+                document,
+                polygons,
+                expansion + extra,
+                allow_wide_label=True,
+            )
+        except TypeError:
+            # 不接受该参数的栅格化实现退回原调用
+            return rasterize_text(document, polygons, expansion + extra)
+
+    mask = build(0)
+    channels = 4 if document.mode == "RGBA" else 3
+    pixels = np.frombuffer(document.pixels, dtype=np.uint8).reshape(
+        document.asset.height,
+        document.asset.width,
+        channels,
+    )[:, :, :3]
+    luminance = pixels.astype(np.float32) @ np.asarray(
+        (0.2126, 0.7152, 0.0722), dtype=np.float32
+    )
+    mask_pixels = np.frombuffer(mask.pixels, dtype=np.uint8).reshape(
+        document.asset.height,
+        document.asset.width,
+    ) > 0
+    for polygon in polygons:
+        xs = [point[0] for point in polygon]
+        ys = [point[1] for point in polygon]
+        x0 = max(0, min(document.asset.width - 1, int(min(xs))))
+        x1 = max(x0 + 1, min(document.asset.width, int(max(xs)) + 1))
+        y0 = max(0, min(document.asset.height - 1, int(min(ys))))
+        y1 = max(y0 + 1, min(document.asset.height, int(max(ys)) + 1))
+        window = luminance[y0:y1, x0:x1]
+        if window.size < 64:
+            continue
+        foreground = window > float(np.median(window)) + 60.0
+        total = int(np.count_nonzero(foreground))
+        if total < 50:
+            continue
+        covered = int(np.count_nonzero(mask_pixels[y0:y1, x0:x1] & foreground))
+        if (total - covered) / total > 0.02:
+            return build(2)
+    return mask
 
 
 def _split_by_background(
